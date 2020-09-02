@@ -91,12 +91,12 @@
 (load! "modes/+erc")
 (load! "modes/+org")
 (load! "modes/+dired")
-;; (load! "modes/+company")
+(load! "modes/+company")
 
 ;; Pre programming mode configurations
-;; (load! "modes/+lsp")
+(load! "modes/+lsp")
 (load! "modes/+compilation")
-;; (load! "modes/+fci")
+(load! "modes/+fci")
 (load! "modes/+magit")
 (load! "modes/+smart-tab")
 (load! "modes/+ediff")
@@ -104,7 +104,7 @@
 
 ;; Programming mode configuration
 (load! "modes/+debugger")
-;; (load! "modes/+python")
+(load! "modes/+python")
 (load! "modes/+typescript")
 (load! "modes/+web")
 

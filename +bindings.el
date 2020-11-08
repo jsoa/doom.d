@@ -13,7 +13,7 @@
  "M-o" #'other-window
 
  ;; Kill buffer
- "M-K" #'kill-this-buffer
+ ;; "M-K" #'kill-this-buffer
 
  ;; Ibuffer + select ibuffer
  "C-x C-b" #'ibuffer-other-window
@@ -22,13 +22,13 @@
  "M-/" #'jsoa/comment-or-uncomment-region-or-line
 
  ;; Rename buffer
- "C-c R" #'jsoa/rename-current-file-or-buffer
+ ;; "C-c R" #'jsoa/rename-current-file-or-buffer
 
  ;; Magit
- [(f9)] #'magit-status
+ ;; [(f9)] #'magit-status
 
  ;; mu4e
- [(f8)] #'mu4e
+ ;; [(f8)] #'mu4e
 
  ;; pass
  [(f7)] #'pass

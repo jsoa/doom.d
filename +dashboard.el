@@ -15,7 +15,7 @@
      :action doom/quickload-session)
     ("Check Mail"
      :icon (all-the-icons-octicon "mail" :face 'doom-dashboard-menu-title)
-     :action mu4e)
+     :action =mu4e)
     ("Passwords"
      :icon (all-the-icons-octicon "lock" :face 'font-lock-keyword-face)
      :action pass)

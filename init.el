@@ -22,38 +22,36 @@
        :completion
        company           ; the ultimate code completion backend
        ;;helm              ; the *other* search engine for love and life
-       ;; ido               ; the other *other* search engine...
-       (ivy +icons)       ; a search engine for love and life
+       ;;ido               ; the other *other* search engine...
+       (ivy +icons)      ; a search engine for love and life
 
        :ui
        ;;deft              ; notational velocity for Emacs
        doom              ; what makes DOOM look the way it does
        doom-dashboard    ; a nifty splash screen for Emacs
        doom-quit         ; DOOM quit-message prompts when you quit Emacs
-       ;; fill-column       ; a `fill-column' indicator
+       ;;(emoji + unicode)
+       ;;fill-column       ; a `fill-column' indicator
        hl-todo           ; highlight TODO/FIXME/NOTE/DEPRECATED/HACK/REVIEW
        hydra
-       ;; indent-guides     ; highlighted indent columns
+       ;;indent-guides     ; highlighted indent columns
+       ;;ligatures         ; ligatures and symbols to make your code pretty again
        ;;minimap           ; show a map of the code on the side
-       (modeline
-        ;; +light
-       )         ; snazzy, Atom-inspired modeline, plus API
+       modeline          ; snazzy, Atom-inspired modeline, plus API
        nav-flash         ; blink the current line after jumping
-       ;; neotree           ; a project drawer, like NERDTree for vim
+       ;;neotree          ; a project drawer, like NERDTree for vim
        ophints           ; highlight the region an operation acts on
        (popup            ; tame sudden yet inevitable temporary windows
         +all             ; catch all popups that start with an asterix
         +defaults)       ; default popup rules
-       ;; pretty-code
-       ;;  +iosevka)       ; replace bits of code with pretty symbols
-       ;; tabs              ; an tab bar for Emacs
+       ;;tabs              ; an tab bar for Emacs
        treemacs          ; a project drawer, like neotree but cooler
        ;;unicode           ; extended unicode support for various languages
        vc-gutter         ; vcs diff in the fringe
        vi-tilde-fringe   ; fringe tildes to mark beyond EOB
        window-select     ; visually switch windows
        workspaces        ; tab emulation, persistence & separate workspaces
-       ;; zen               ; distraction-free coding or writing
+       ;;zen               ; distraction-free coding or writing
 
        :editor
        (evil +everywhere); come to the dark side, we have cookies
@@ -79,32 +77,30 @@
 
        :term
        eshell            ; a consistent, cross-platform shell (WIP)
-       ;; shell             ; a terminal REPL for Emacs
+       ;;shell             ; a terminal REPL for Emacs
        ;;term              ; terminals in Emacs
        ;;vterm             ; another terminals in Emacs
 
        :checkers
-       syntax              ; tasing you for every semicolon you forget
-       spell               ; tasing you for misspelling mispelling
+       syntax            ; tasing you for every semicolon you forget
+       spell             ; tasing you for misspelling mispelling
        ;;grammar           ; tasing grammar mistake every you make
 
        :tools
        ansible
-       ;; debugger          ; FIXME stepping through code, to help you add bugs
+       (debugger +lsp)  ; FIXME stepping through code, to help you add bugs
        ;;direnv
        docker
        ;;editorconfig      ; let someone else argue about tabs vs spaces
        ;;ein               ; tame Jupyter notebooks with emacs
-       (eval +overlay)     ; run code, run (also, repls)
+       (eval +overlay)   ; run code, run (also, repls)
        ;;gist              ; interacting with github gists
-       (lookup             ; helps you navigate your code and documentation
-        ;; +docsets
-       )          ; ...or in Dash docsets locally
+       lookup            ; helps you navigate your code and documentation
+                         ; ...or in Dash docsets locally
        (lsp  +peek)
-       ;;macos             ; MacOS-specific commands
-       (magit +forge)      ; a git porcelain for Emacs
+       (magit +forge)    ; a git porcelain for Emacs
        ;;make              ; run make tasks from Emacs
-       (pass +auth)        ; password manager for nerds
+       (pass +auth)      ; password manager for nerds
        pdf               ; pdf enhancements
        ;;prodigy           ; FIXME managing external services & code builders
        rgb               ; creating color strings
@@ -113,9 +109,13 @@
        ;;tmux              ; an API for interacting with tmux
        ;;upload            ; map local to remote projects via ssh/ftp
 
+       :os
+       (:if IS-MAC macos)  ; improve compatibility with macOS
+       ;;tty               ; improve the terminal Emacs experience
+
        :lang
        ;;agda              ; types of types of types of types...
-       ;; assembly          ; assembly for fun or debugging
+       ;;assembly          ; assembly for fun or debugging
        ;;cc                ; C/C++/Obj-C madness
        ;;clojure           ; java with a lisp
        common-lisp       ; if you've seen one lisp, you've seen them all
@@ -162,8 +162,7 @@
        ;;php               ; perl's insecure younger brother
        ;;plantuml          ; diagrams for confusing people more
        ;;purescript        ; javascript, but functional
-       (python
-        +lsp)
+       (python +lsp)
                            ; beautiful is better than ugly
        ;;qt                ; the 'cutest' gui framework ever
        ;;racket            ; a DSL for DSLs

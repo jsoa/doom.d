@@ -59,3 +59,5 @@
 (package! smart-tab)
 (package! mu4e-alert)
 (package! fill-column-indicator)
+;; (package! lsp-docker)
+(package! docker-tramp)

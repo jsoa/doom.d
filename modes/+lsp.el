@@ -5,6 +5,9 @@
 ;;
 
 (after! lsp-mode
+  (setq-default lsp-pyls-configuration-sources ["pylint" "flake8" "pycodestyle"])
+  (setq lsp-pyls-plugins-pylint-enabled t)
+
   ;; angular lsp
   (setq lsp-clients-angular-language-server-command
         `("node"

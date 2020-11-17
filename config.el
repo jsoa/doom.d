@@ -92,6 +92,7 @@
 (load! "modes/+org")
 (load! "modes/+dired")
 (load! "modes/+company")
+(load! "modes/+projectile")
 
 ;; Pre programming mode configurations
 (load! "modes/+lsp")
@@ -107,4 +108,3 @@
 (load! "modes/+python")
 (load! "modes/+typescript")
 (load! "modes/+web")
-

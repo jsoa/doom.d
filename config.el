@@ -81,27 +81,24 @@
 (load! "+bindings")
 (load! "+dashboard")
 (load! "+general")
-;; Custom theme (WIP)
-;; (load! "+theme.el")
 
 ;; General configurations
-(load! "modes/+mail")
-(load! "modes/+evil")
-(load! "modes/+pass")
-(load! "modes/+erc")
-(load! "modes/+org")
-(load! "modes/+dired")
 (load! "modes/+company")
+(load! "modes/+dired")
+(load! "modes/+evil")
+(load! "modes/+mail")
+(load! "modes/+org")
+(load! "modes/+pass")
+(load! "modes/+pomidor")
 (load! "modes/+projectile")
 
 ;; Pre programming mode configurations
-(load! "modes/+lsp")
 (load! "modes/+compilation")
+(load! "modes/+ediff")
 (load! "modes/+fci")
+(load! "modes/+lsp")
 (load! "modes/+magit")
 (load! "modes/+smart-tab")
-(load! "modes/+ediff")
-(load! "modes/+cfn")
 
 ;; Programming mode configuration
 (load! "modes/+debugger")

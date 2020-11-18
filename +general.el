@@ -12,3 +12,4 @@
 
 ;; Modeline filename
 (setq doom-modeline-buffer-file-name-style 'truncate-all)
+(setq doom-themes-treemacs-theme "doom-colors")

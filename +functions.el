@@ -5,33 +5,6 @@
 ;;
 
 
-;; Comment or uncomment regoin or line
-;; http://stackoverflow.com/a/9697222/1209871
-(defun jsoa/comment-or-uncomment-region-or-line ()
-    "Comments or uncomments the region or the current line if there's no active region."
-    (interactive)
-    (let (beg end)
-        (if (region-active-p)
-            (setq beg (region-beginning) end (region-end))
-            (setq beg (line-beginning-position) end (line-end-position)))
-        (comment-or-uncomment-region beg end)))
-
-
-
-;; Rename file or buffer
-;; http://www.stringify.com/2006/apr/24/rename/
-(defun jsoa/rename-current-file-or-buffer ()
-  (interactive)
-  (if (not (buffer-file-name))
-      (call-interactively 'rename-buffer)
-    (let ((file (buffer-file-name)))
-      (with-temp-buffer
-        (set-buffer (dired-noselect file))
-        (dired-do-rename)
-        (kill-buffer nil))))
-  nil)
-
-
 ;; https://stackoverflow.com/questions/1292936/line-wrapping-within-emacs-compilation-buffer
 (defun jsoa/compilation-mode-hook ()
   (setq truncate-lines nil) ;; automatically becomes buffer local

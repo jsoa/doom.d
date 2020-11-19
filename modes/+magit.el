@@ -4,26 +4,27 @@
 ;; Magit
 ;;
 
+;; Insert a commit message prefix, i.e. [ticket number]
+;; If a branch name starts with "NAME-NUMBER", get it and supply
+;; a commit prefix of [NAME-NUMBER] otherwise insert [-]
+(defun jsoa/git-commit-setup ()
+  (let ((branch-name (magit-get-current-branch)))
+    (save-match-data ; is usually a good idea
+      (if (string-match "^\\(\\w+-[0-9]+\\)" branch-name)
+        (insert (concat "[" (match-string 1 branch-name) "] "))
+        (insert "[-] ")))))
+
 ;; Custom commit message prefix when commiting
 (add-hook! 'git-commit-setup-hook 'jsoa/git-commit-setup)
 
-
-;; https://emacs.stackexchange.com/a/36004
-;; Refresh magit status buffer more frequently
-(add-hook! 'after-save-hook 'magit-after-save-refresh-status t)
-
-(defun endless/visit-pull-request-url ()
-  "Visit the current branch's PR on Github."
-  (interactive)
-  (browse-url
-   (format "https://github.com/%s/pull/new/%s"
-     (replace-regexp-in-string
-      "\\`.+github\\.com:\\(.+\\)\\.git\\'" "\\1"
-      (magit-get "remote"
-                 (magit-get-current-remote)
-                 "url"))
-     (magit-get-current-branch))))
-
-(after! 'magit
-  '(define-key magit-mode-map "V"
-     #'endless/visit-pull-request-url))
+(after! magit
+  (setq magit-repository-directories
+        `(("~/code" . 2)
+          ("~/Development/projects" . 2)))
+  (setq magit-repolist-columns
+        '(("Name"    25 magit-repolist-column-ident                  ())
+          ("Version" 25 magit-repolist-column-version                ())
+          ("D"        1 magit-repolist-column-dirty                  ())
+          ("L<U"      3 magit-repolist-column-unpulled-from-upstream ((:right-align t)))
+          ("L>U"      3 magit-repolist-column-unpushed-to-upstream   ((:right-align t)))
+          ("Path"    99 magit-repolist-column-path                   ()))))

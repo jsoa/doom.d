@@ -13,3 +13,7 @@
 ;; Modeline filename
 (setq doom-modeline-buffer-file-name-style 'truncate-all)
 (setq doom-themes-treemacs-theme "doom-colors")
+
+;; Default aspell language
+;; REF: https://github.com/hlissner/doom-emacs/issues/4509
+(setq ispell-dictionary "en")

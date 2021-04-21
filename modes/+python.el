@@ -4,4 +4,5 @@
 ;; Python mode
 ;;
 (add-hook! python-mode
-  (fci-mode))
+  (fci-mode)
+  )

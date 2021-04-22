@@ -54,7 +54,7 @@
 
 ;; Disable MS python lsp
 ;; - perfer python-language-server
-;; (package! lsp-python-ms :disable t)
+(package! lsp-python-ms :disable t)
 
 (package! lsp-python-ms)
 (package! smart-tab)

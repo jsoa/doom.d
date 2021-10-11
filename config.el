@@ -99,6 +99,7 @@
 (load! "modes/+lsp")
 (load! "modes/+magit")
 (load! "modes/+smart-tab")
+(load! "modes/+groovy")
 
 ;; Programming mode configuration
 (load! "modes/+debugger")

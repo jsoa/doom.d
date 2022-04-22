@@ -61,3 +61,5 @@
 (package! mu4e-alert)
 (package! fill-column-indicator)
 (package! groovy-mode)
+(package! kubernetes)
+(package! kubernetes-evil)

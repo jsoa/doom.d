@@ -22,3 +22,8 @@
  :v "J" (concat ":m '>+1" (kbd "RET") "gv=gv")
  :v "K" (concat ":m '<-2" (kbd "RET") "gv=gv")
 )
+
+(map! :leader
+      :desc "prodigy"
+      "e" #'prodigy)
+

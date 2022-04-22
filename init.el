@@ -23,7 +23,8 @@
        company           ; the ultimate code completion backend
        ;;helm              ; the *other* search engine for love and life
        ;;ido               ; the other *other* search engine...
-       (ivy +icons)      ; a search engine for love and life
+       ;; (ivy +icons)      ; a search engine for love and life
+       (vertico +icons +syntax)
 
        :ui
        ;;deft              ; notational velocity for Emacs
@@ -88,7 +89,7 @@
 
        :tools
        ansible
-       ;;(debugger +lsp)  ; FIXME stepping through code, to help you add bugs
+       (debugger +lsp)  ; FIXME stepping through code, to help you add bugs
        ;;direnv
        docker
        ;;editorconfig      ; let someone else argue about tabs vs spaces
@@ -102,7 +103,7 @@
        ;;make              ; run make tasks from Emacs
        (pass +auth)      ; password manager for nerds
        pdf               ; pdf enhancements
-       ;;prodigy           ; FIXME managing external services & code builders
+       prodigy           ; FIXME managing external services & code builders
        rgb               ; creating color strings
        ;; taskrunner       ; taskrunner for all your projects
        ;;terraform         ; infrastructure as code
@@ -138,7 +139,7 @@
        ;;hy                ; readability of scheme w/ speed of python
        ;;idris             ;
        (json +lsp)         ; At least it ain't XML
-       ;;(java +meghanada) ; the poster child for carpal tunnel syndrome
+       (java +lsp) ; the poster child for carpal tunnel syndrome
        (javascript +lsp)        ; all(hope(abandon(ye(who(enter(here))))))
        ;;julia             ; a better, faster MATLAB
        ;;kotlin            ; a better, slicker Java(Script)
@@ -156,7 +157,7 @@
         ;;+hugo            ; use Emacs for hugo blogging
         ;;+jupyter        ; ipython/jupyter support for babel
         ;;+pandoc          ; export-with-pandoc support
-        +pomodoro        ; be fruitful with the tomato technique
+        ;;+pomodoro        ; be fruitful with the tomato technique
         +present)        ; using org-mode for presentations
        ;;perl              ; write code no one else can comprehend
        ;;php               ; perl's insecure younger brother

@@ -91,6 +91,7 @@
 (load! "modes/+pass")
 (load! "modes/+pomidor")
 (load! "modes/+projectile")
+(load! "modes/+prodigy")
 
 ;; Pre programming mode configurations
 (load! "modes/+compilation")

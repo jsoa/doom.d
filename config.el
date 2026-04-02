@@ -81,6 +81,9 @@
 (load! "+bindings")
 (load! "+general")
 
+;; Custom modules
+(load! "modules/+large-file")
+
 ;; General configurations
 (load! "modes/+company")
 (load! "modes/+vertico")
@@ -106,5 +109,6 @@
 (load! "modes/+typescript")
 (load! "modes/+web")
 
+;; Private locals
 (when (file-exists-p "~/.doom.d/private/vars.el")
   (load-file "~/.doom.d/private/vars.el"))

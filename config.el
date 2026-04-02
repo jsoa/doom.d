@@ -91,6 +91,7 @@
 (load! "modes/+evil")
 (load! "modes/+org")
 (load! "modes/+projectile")
+(load! "modes/+avy")
 
 ;; Pre programming mode configurations
 (load! "modes/+flycheck")

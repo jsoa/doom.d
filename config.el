@@ -85,14 +85,11 @@
 (load! "modules/+large-file")
 
 ;; General configurations
-(load! "modes/+company")
 (load! "modes/+vertico")
 (load! "modes/+corfu")
 (load! "modes/+dired")
 (load! "modes/+evil")
 (load! "modes/+org")
-(load! "modes/+pass")
-(load! "modes/+pomidor")
 (load! "modes/+projectile")
 
 ;; Pre programming mode configurations
@@ -101,10 +98,9 @@
 (load! "modes/+ediff")
 (load! "modes/+lsp")
 (load! "modes/+magit")
-(load! "modes/+groovy")
 
 ;; Programming mode configuration
-(load! "modes/+debugger")
+(load! "modes/+groovy")
 (load! "modes/+python")
 (load! "modes/+typescript")
 (load! "modes/+web")

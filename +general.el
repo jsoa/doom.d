@@ -17,3 +17,11 @@
 ;; Default aspell language
 ;; REF: https://github.com/hlissner/doom-emacs/issues/4509
 (setq ispell-dictionary "en")
+
+(setq doom-watch-inotify t)
+
+(setq-default fill-column 80)
+
+(add-hook 'prog-mode-hook #'display-fill-column-indicator-mode)
+
+(set-face-foreground 'fill-column-indicator "#222")

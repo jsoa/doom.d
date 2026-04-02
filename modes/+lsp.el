@@ -5,6 +5,8 @@
 ;;
 
 (after! lsp-mode
+  (setq lsp-completion-provider :none)
+
   ;; Performance
   (setq lsp-headerline-breadcrumb-enable nil)
   (setq read-process-output-max (* 1024 1024)

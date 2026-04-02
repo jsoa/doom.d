@@ -11,17 +11,24 @@
 (advice-add 'risky-local-variable-p :override #'ignore)
 
 ;; Modeline filename
-(setq doom-modeline-buffer-file-name-style 'truncate-all)
-(setq doom-themes-treemacs-theme "doom-colors")
+(after! doom-modeline
+  (setq doom-modeline-buffer-file-name-style 'truncate-all))
 
 ;; Default aspell language
 ;; REF: https://github.com/hlissner/doom-emacs/issues/4509
-(setq ispell-dictionary "en")
+(setq ispell-dictionary "en_US")
 
 (setq doom-watch-inotify t)
 
 (setq-default fill-column 80)
 
-(add-hook 'prog-mode-hook #'display-fill-column-indicator-mode)
+(defun jsoa/maybe-enable-fci ()
+  (unless (or (string-match-p "\\.min\\.js\\'" (buffer-name))
+              (> (buffer-size) (* 1 1024 1024))) ;; >1MB
+    (display-fill-column-indicator-mode)))
 
-(set-face-foreground 'fill-column-indicator "#222")
+(add-hook 'prog-mode-hook #'jsoa/maybe-enable-fci)
+
+(after! display-fill-column-indicator
+  (set-face-attribute 'fill-column-indicator nil
+                      :foreground "#222"))

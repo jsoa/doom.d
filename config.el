@@ -79,27 +79,25 @@
 ;; Custom functions and bindings
 (load! "+functions")
 (load! "+bindings")
-(load! "+dashboard")
 (load! "+general")
 
 ;; General configurations
 (load! "modes/+company")
+(load! "modes/+vertico")
+(load! "modes/+corfu")
 (load! "modes/+dired")
 (load! "modes/+evil")
-(load! "modes/+mail")
 (load! "modes/+org")
 (load! "modes/+pass")
 (load! "modes/+pomidor")
 (load! "modes/+projectile")
-(load! "modes/+prodigy")
 
 ;; Pre programming mode configurations
+(load! "modes/+flycheck")
 (load! "modes/+compilation")
 (load! "modes/+ediff")
-(load! "modes/+fci")
 (load! "modes/+lsp")
 (load! "modes/+magit")
-(load! "modes/+smart-tab")
 (load! "modes/+groovy")
 
 ;; Programming mode configuration
@@ -107,3 +105,6 @@
 (load! "modes/+python")
 (load! "modes/+typescript")
 (load! "modes/+web")
+
+(when (file-exists-p "~/.doom.d/private/vars.el")
+  (load-file "~/.doom.d/private/vars.el"))

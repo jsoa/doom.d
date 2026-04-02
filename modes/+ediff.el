@@ -10,15 +10,16 @@
 ;; a = accept a
 ;; b = accept b
 ;; B = accept both
-(defun ediff-copy-both-to-C ()
-  (interactive)
-  (ediff-copy-diff ediff-current-difference nil 'C nil
-                   (concat
-                    (ediff-get-region-contents ediff-current-difference 'A ediff-control-buffer)
-                    (ediff-get-region-contents ediff-current-difference 'B ediff-control-buffer))))
+(after! ediff
+  (defun my/ediff-copy-both-to-C ()
+    "Copy both A and B changes into C."
+    (interactive)
+    (ediff-copy-diff
+     ediff-current-difference
+     nil 'C nil
+     (concat
+      (ediff-get-region-contents ediff-current-difference 'A ediff-control-buffer)
+      (ediff-get-region-contents ediff-current-difference 'B ediff-control-buffer))))
 
-;; Binding B in ediff mode (B for both)
-(defun add-b-to-ediff-mode-map () (define-key ediff-mode-map "B" 'ediff-copy-both-to-C))
-
-;; Add the hook
-(add-hook! 'ediff-keymap-setup-hook 'add-b-to-ediff-mode-map)
+  (map! :map ediff-mode-map
+        :n "B" #'my/ediff-copy-both-to-C))

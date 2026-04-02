@@ -12,6 +12,13 @@
   (add-to-list 'projectile-globally-ignored-directories "*venv")
   (add-to-list 'projectile-globally-ignored-directories "*node_modules")
 
+  ;; Optimizations
+  (setq projectile-enable-caching t)
+  (setq projectile-indexing-method 'alien)
+  (setq projectile-file-exists-remote-cache-expire nil)
+  (setq projectile-auto-discover nil)
+  (setq projectile-require-project-root t)
+
   ;; Magit status as the default project open
   (setq +workspaces-switch-project-function #'magit-status)
 
@@ -19,5 +26,7 @@
   ;; https://emacs.stackexchange.com/a/29494
   (require 'f)
   (defun my-projectile-ignore-project (project-root)
-    (f-descendant-of? project-root (expand-file-name "~/Development")))
+    (seq-some (lambda (dir)
+                (f-descendant-of? project-root dir))
+              my-development-dirs))
   (setq projectile-ignored-project-function #'my-projectile-ignore-project))

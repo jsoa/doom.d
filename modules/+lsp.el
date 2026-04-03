@@ -5,7 +5,7 @@
 ;;
 
 (after! lsp-mode
-  (setq lsp-completion-provider :none)
+  (setq lsp-completion-provider :capf)
 
   ;; Performance
   (setq lsp-headerline-breadcrumb-enable nil)

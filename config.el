@@ -97,6 +97,7 @@
 (load! "modules/+copilot")
 
 ;; Pre programming mode configurations
+(load! "modules/+fci")
 (load! "modules/+flycheck")
 (load! "modules/+compilation")
 (load! "modules/+ediff")

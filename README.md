@@ -40,7 +40,15 @@ This config is built around a few core principles:
 git clone <your-repo-url> ~/.doom.d
 doom sync
 ```
+
 ---
+
+## Font
+
+https://www.jetbrains.com/lp/mono/
+
+---
+
 ## Additional packages
 
 - avy (https://github.com/abo-abo/avy)

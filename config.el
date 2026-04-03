@@ -77,37 +77,37 @@
 
 
 ;; Custom functions and bindings
-(load! "+functions")
-(load! "+bindings")
-(load! "+general")
+(load! "core/+functions")
+(load! "core/+bindings")
+(load! "core/+general")
 
 ;; Custom modules
 (load! "modules/+large-file")
 
 ;; General configurations
-(load! "modes/+vertico")
-(load! "modes/+corfu")
-(load! "modes/+dired")
-(load! "modes/+evil")
-(load! "modes/+org")
-(load! "modes/+projectile")
-(load! "modes/+avy")
+(load! "modules/+vertico")
+(load! "modules/+corfu")
+(load! "modules/+dired")
+(load! "modules/+evil")
+(load! "modules/+org")
+(load! "modules/+projectile")
+(load! "modules/+avy")
 
 ;; AI
-(load! "modes/+copilot")
+(load! "modules/+copilot")
 
 ;; Pre programming mode configurations
-(load! "modes/+flycheck")
-(load! "modes/+compilation")
-(load! "modes/+ediff")
-(load! "modes/+lsp")
-(load! "modes/+magit")
+(load! "modules/+flycheck")
+(load! "modules/+compilation")
+(load! "modules/+ediff")
+(load! "modules/+lsp")
+(load! "modules/+magit")
 
 ;; Programming mode configuration
-(load! "modes/+groovy")
-(load! "modes/+python")
-(load! "modes/+typescript")
-(load! "modes/+web")
+(load! "modules/+groovy")
+(load! "modules/+python")
+(load! "modules/+typescript")
+(load! "modules/+web")
 
 ;; Private locals
 (when (file-exists-p "~/.doom.d/private/vars.el")

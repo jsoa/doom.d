@@ -1,19 +1,5 @@
 ;;; ~/.doom.d/+bindings.el -*- lexical-binding: t; -*-
 
-(defun jsoa/move-region-down ()
-  (interactive)
-  (evil-visual-line)
-  (evil-next-line)
-  (transpose-lines 1)
-  (evil-previous-line))
-
-(defun jsoa/move-region-up ()
-  (interactive)
-  (evil-visual-line)
-  (evil-previous-line)
-  (transpose-lines 1)
-  (evil-next-line))
-
 (map!
 
  ;; Other window swap SPC w w does the same thing

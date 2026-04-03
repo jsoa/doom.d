@@ -93,6 +93,9 @@
 (load! "modes/+projectile")
 (load! "modes/+avy")
 
+;; AI
+(load! "modes/+copilot")
+
 ;; Pre programming mode configurations
 (load! "modes/+flycheck")
 (load! "modes/+compilation")

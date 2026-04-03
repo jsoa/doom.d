@@ -54,3 +54,5 @@
 (package! avy)
 (package! consult)
 (package! embark)
+(package! copilot
+  :recipe (:host github :repo "copilot-emacs/copilot.el"))

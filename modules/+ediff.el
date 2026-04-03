@@ -11,7 +11,7 @@
 ;; b = accept b
 ;; B = accept both
 (after! ediff
-  (defun my/ediff-copy-both-to-C ()
+  (defun jsoa/ediff-copy-both-to-C ()
     "Copy both A and B changes into C."
     (interactive)
     (ediff-copy-diff
@@ -22,4 +22,4 @@
       (ediff-get-region-contents ediff-current-difference 'B ediff-control-buffer))))
 
   (map! :map ediff-mode-map
-        :n "B" #'my/ediff-copy-both-to-C))
+        :n "B" #'jsoa/ediff-copy-both-to-C))

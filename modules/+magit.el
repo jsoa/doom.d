@@ -22,7 +22,7 @@
   (setq magit-diff-refine-hunk t
         magit-diff-paint-whitespace nil
         magit-diff-refine-ignore-whitespace t)
-  (defun my/magit-toggle-diff ()
+  (defun jsoa/magit-toggle-diff ()
     (interactive)
     (if (member 'magit-insert-diff magit-status-sections-hook)
         (progn
@@ -34,7 +34,7 @@
     (magit-refresh))
 
   (map! :map magit-status-mode-map
-        :n "TAB" #'my/magit-toggle-diff)
+        :n "TAB" #'jsoa/magit-toggle-diff)
 
   (setq magit-diff-large-file-threshold (* 512 1024))
 

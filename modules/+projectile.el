@@ -20,13 +20,4 @@
   (setq projectile-require-project-root t)
 
   ;; Magit status as the default project open
-  (setq +workspaces-switch-project-function #'magit-status)
-
-  ;; Don't add projects inside our "Development" folder
-  ;; https://emacs.stackexchange.com/a/29494
-  (require 'f)
-  (defun my-projectile-ignore-project (project-root)
-    (seq-some (lambda (dir)
-                (f-descendant-of? project-root dir))
-              my-development-dirs))
-  (setq projectile-ignored-project-function #'my-projectile-ignore-project))
+  (setq +workspaces-switch-project-function #'magit-status))

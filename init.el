@@ -82,6 +82,7 @@
        rest
        (sh +lsp)
        (typescript +tree-sitter)
+       (web +lsp +tree-sitter)
        (yaml +lsp)
 
        :email

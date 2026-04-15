@@ -92,6 +92,7 @@
 (load! "modules/+org")
 (load! "modules/+projectile")
 (load! "modules/+avy")
+(load! "modules/+spell")
 
 ;; AI
 (load! "modules/+copilot")
@@ -108,7 +109,7 @@
 (load! "modules/+groovy")
 (load! "modules/+python")
 (load! "modules/+typescript")
-(load! "modules/+web")
+(load! "modules/+html")
 
 ;; Private locals
 (when (file-exists-p "~/.doom.d/private/vars.el")

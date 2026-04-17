@@ -73,3 +73,7 @@ MIT
 ## Other Information
 
 - This config was tested on Emacs 29, that was built from source on Ubuntu 22
+
+## Tree Sitter language grammar install
+
+- M-x treesit-install-language-grammar

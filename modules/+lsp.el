@@ -5,7 +5,8 @@
 ;;
 
 (after! lsp-mode
-  (setq lsp-completion-provider :capf)
+  (setq lsp-completion-provider :capf
+        lsp-enable-snippet t)
 
   ;; Performance
   (setq lsp-headerline-breadcrumb-enable nil
@@ -32,18 +33,3 @@
   (setq lsp-ui-doc-delay 0.3
         lsp-ui-doc-position 'at-point))
 
-(defun my/angular-ensure-ts-loaded ()
-  (when (and buffer-file-name
-             (string-match "\\.html\\'" buffer-file-name))
-    (let ((ts-file (replace-regexp-in-string "\\.html\\'" ".ts" buffer-file-name)))
-      (when (file-exists-p ts-file)
-        (find-file-noselect ts-file)))))
-
-(add-hook 'typescript-ts-mode-hook #'lsp-deferred)
-
-(add-hook 'html-ts-mode-hook #'my/angular-ensure-ts-loaded)
-
-(add-hook 'html-ts-mode-hook
-          (lambda ()
-            (when (projectile-project-p)
-              (lsp-deferred))))

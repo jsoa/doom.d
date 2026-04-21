@@ -83,6 +83,7 @@
 
 ;; Custom modules
 (load! "modules/+large-file")
+(load! "modules/+dashboard")
 
 ;; General configurations
 (load! "modules/+vertico")

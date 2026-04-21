@@ -18,3 +18,7 @@
  :v "J" #'jsoa/move-region-down
  :v "K" #'jsoa/move-region-up
  )
+
+(map! :leader
+      :desc "Project TODO dashboard"
+      "p t" #'jsoa/project-dashboard)

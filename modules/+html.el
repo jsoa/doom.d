@@ -10,7 +10,7 @@
       (when (file-exists-p ts-file)
         (find-file-noselect ts-file)))))
 
-(add-hook 'html-ts-mode-hook #'my/angular-ensure-ts-loaded)
+(add-hook 'html-ts-mode-hook #'jsoa/angular-ensure-ts-loaded)
 
 (add-hook 'html-ts-mode-hook
           (lambda ()

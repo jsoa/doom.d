@@ -19,5 +19,7 @@
   (setq projectile-auto-discover nil)
   (setq projectile-require-project-root t)
 
-  ;; Magit status as the default project open
-  (setq +workspaces-switch-project-function #'magit-status))
+  (setq +workspaces-switch-project-function #'jsoa/project-command-center)
+
+
+  )

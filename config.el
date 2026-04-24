@@ -94,6 +94,7 @@
 (load! "modules/+projectile")
 (load! "modules/+avy")
 (load! "modules/+spell")
+(load! "modules/+prettier")
 
 ;; AI
 (load! "modules/+copilot")

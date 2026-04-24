@@ -73,7 +73,7 @@
        :lang
        data
        emacs-lisp
-       (html +tree-sitter)
+       (html)
        (json +lsp)
        (javascript +lsp +tree-sitter)
        markdown
@@ -82,7 +82,7 @@
        rest
        (sh +lsp)
        (typescript +tree-sitter)
-       (web +lsp +tree-sitter)
+       (web +lsp)
        (yaml +lsp)
 
        :email

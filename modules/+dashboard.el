@@ -92,6 +92,12 @@
 
       (insert "\n"))))
 
+(defun jsoa/find-readme (root)
+  "Return path to README in ROOT if it exists."
+  (seq-find
+   (lambda (f) (file-exists-p (expand-file-name f root)))
+   '("README.md" "README.org" "README.txt" "README")))
+
 ;; =========================
 ;; Project info
 ;; =========================
@@ -136,39 +142,55 @@
 (defun jsoa/dashboard-actions (root)
   (jsoa/start-section "Actions")
 
-  (setq jsoa/dashboard-actions-list
-        `((1 "Magit Status"
-           ,(lambda () (let ((default-directory root)) (magit-status root))))
-          (2 "Find File"
-             ,(lambda () (let ((default-directory root)) (call-interactively #'projectile-find-file))))
-          (3 "Search"
-             ,(lambda () (let ((default-directory root)) (call-interactively #'+default/search-project))))))
+  (let ((actions
+         (list
+          (list "Magit Status"
+                (lambda () (let ((default-directory root)) (magit-status root))))
+          (list "Find File"
+                (lambda () (let ((default-directory root)) (call-interactively #'projectile-find-file))))
+          (list "Search"
+                (lambda () (let ((default-directory root)) (call-interactively #'+default/search-project)))))))
 
-  ;; map for keybindings
-  (setq jsoa/dashboard-actions-map
-        (mapcar (lambda (a) (cons (nth 0 a) (nth 2 a)))
-                jsoa/dashboard-actions-list))
+    ;;  Add README if it exists
+    (when-let ((readme (jsoa/find-readme root)))
+      (setq actions
+            (append actions
+                    (list
+                     (list "Open README"
+                           (lambda ()
+                             (find-file (expand-file-name readme root))))))))
 
-  (let ((start (point)))
-    (insert
-     (mapconcat (lambda (a)
-                  (format "[%d] %s" (nth 0 a) (nth 1 a)))
-                jsoa/dashboard-actions-list
-                "   ")
-     "\n\n")
+    (setq jsoa/dashboard-actions-list
+          (cl-loop for (label fn) in actions
+                   for i from 1
+                   collect (list i label fn)))
 
-    ;; attach buttons
-    (dolist (a jsoa/dashboard-actions-list)
-      (let ((text (format "[%d] %s" (nth 0 a) (nth 1 a)))
-            (fn   (nth 2 a)))
-        (save-excursion
-          (goto-char start)
-          (when (search-forward text nil t)
-            (make-text-button
-             (match-beginning 0) (match-end 0)
-             'action (lambda (_) (funcall fn))
-             'follow-link t
-             'face 'link)))))))
+    ;; map for keybindings
+    (setq jsoa/dashboard-actions-map
+          (mapcar (lambda (a) (cons (nth 0 a) (nth 2 a)))
+                  jsoa/dashboard-actions-list))
+
+    ;; render
+    (let ((start (point)))
+      (insert
+       (mapconcat (lambda (a)
+                    (format "[%d] %s" (nth 0 a) (nth 1 a)))
+                  jsoa/dashboard-actions-list
+                  "   ")
+       "\n\n")
+
+      ;; attach buttons
+      (dolist (a jsoa/dashboard-actions-list)
+        (let ((text (format "[%d] %s" (nth 0 a) (nth 1 a)))
+              (fn   (nth 2 a)))
+          (save-excursion
+            (goto-char start)
+            (when (search-forward text nil t)
+              (make-text-button
+               (match-beginning 0) (match-end 0)
+               'action (lambda (_) (funcall fn))
+               'follow-link t
+               'face 'link))))))))
 
 ;; =========================
 ;; Git summary
@@ -372,12 +394,14 @@
 (map! :map jsoa-dashboard-mode-map
       :n "1" (lambda () (interactive) (jsoa/dashboard-run-action 1))
       :n "2" (lambda () (interactive) (jsoa/dashboard-run-action 2))
-      :n "3" (lambda () (interactive) (jsoa/dashboard-run-action 3)))
+      :n "3" (lambda () (interactive) (jsoa/dashboard-run-action 3))
+      :n "4" (lambda () (interactive) (jsoa/dashboard-run-action 4))
+      )
 
 (defun jsoa/project-command-center (project-root)
   (let* ((name (file-name-nondirectory
                 (directory-file-name project-root)))
-         (buf (get-buffer-create (format "*todos:%s*" name)))
+         (buf (get-buffer-create (format "*dashboard:%s*" name)))
          (gitignore (expand-file-name ".gitignore" project-root)))
 
     ;; Anchor project

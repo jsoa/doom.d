@@ -2,18 +2,234 @@
 
 
 ;; =========================
-;; Helpers
+;; Core / Utilities
+;; =========================
+(defun jsoa/sh (cmd &optional dir)
+  "Run shell CMD in DIR and return trimmed output."
+  (let ((default-directory (or dir default-directory)))
+    (string-trim (shell-command-to-string cmd))))
+
+(defun jsoa/safe-str (s)
+  (or s ""))
+
+(defun jsoa/format-number (n)
+  (let ((s (number-to-string n)))
+    (while (string-match "\\B\\([0-9]\\{3\\}\\)+\\>" s)
+      (setq s (replace-match ",\\&" t nil s)))
+    s))
+
+(defun jsoa/format-loc (n)
+  "Format LOC number into human-readable string."
+  (cond
+   ((> n 1000000) (format "%.1fM" (/ n 1000000.0)))
+   ((> n 1000)    (format "%.1fk" (/ n 1000.0)))
+   (t (number-to-string n))))
+
+(defun jsoa/short-path (file root)
+  "Return last 2 segments of FILE relative to ROOT."
+  (let* ((rel (file-relative-name file root))
+         (parts (split-string rel "/" t)))
+    (if (> (length parts) 2)
+        (mapconcat #'identity (last parts 2) "/")
+      rel)))
+
+;; =========================
+;; Git Layer
+;; =========================
+
+(defun jsoa/git-status-face (ahead behind changes)
+  "Return face based on git state."
+  (cond
+   ;; dirty repo -> red
+   ((> changes 0) 'error)
+
+   ;; diverged -> warning
+   ((or (> (or ahead 0) 0)
+        (> (or behind 0) 0))
+    'warning)
+
+   ;; clean → success
+   (t 'success)))
+
+(defun jsoa/git-recent-files-data (root &optional limit)
+  "Return recent files with commit info using ONE git call."
+  (let* ((default-directory root)
+         (limit (or limit 5))
+         (output
+          (jsoa/sh
+           "git log -n 20 --name-only --pretty=format:'%s|%cr' 2>/dev/null"))
+         (lines (split-string output "\n" t))
+         (seen (make-hash-table :test 'equal))
+         results current)
+
+    (dolist (line lines)
+      (if (string-match "|" line)
+          ;; commit line
+          (let* ((parts (split-string line "|" t)))
+            (setq current (list :msg (car parts)
+                                :age (cadr parts))))
+        ;; file line
+        (when (and current
+                   (not (string-empty-p line))
+                   (not (gethash line seen)))
+          (puthash line t seen)
+          (push (plist-put (copy-sequence current) :file line) results))))
+
+    (seq-take (nreverse results) limit)))
+
+
+;; =========================
+;; LOC / Analysis
+;; =========================
+
+(defun jsoa/project-type (root)
+  "Detect project type from ROOT."
+  (cond
+   ((file-exists-p (expand-file-name "angular.json" root)) 'angular)
+   ((file-exists-p (expand-file-name "package.json" root)) 'node)
+   ((file-exists-p (expand-file-name "pyproject.toml" root)) 'python)
+   ((file-exists-p (expand-file-name "requirements.txt" root)) 'python)
+   (t 'generic)))
+
+(defun jsoa/project-loc (root)
+  "Return LOC based on project type."
+  (let* ((default-directory root)
+         (type (jsoa/project-type root))
+         (globs
+          (pcase type
+            ('angular '("*.ts" "*.html" "*.scss"))
+            ('python  '("*.py"))
+            ('node    '("*.js" "*.ts" "*.jsx" "*.tsx"))
+            (_        '("*.el" "*.org" "*.md" "*.py" "*.js")))))
+
+    (string-to-number
+     (string-trim
+      (shell-command-to-string
+       (concat
+        "rg --no-heading --no-filename "
+        (mapconcat (lambda (g) (format "-g \"%s\"" g)) globs " ")
+        " -g \"!node_modules\" -g \"!dist\" -g \"!build\" "
+        " -g \"!*.min.*\" '^' 2>/dev/null | wc -l"))))))
+
+(defun jsoa/project-loc-by-extension (root)
+  "Fast LOC breakdown by file extension."
+  (let ((default-directory root)
+        (table (make-hash-table :test 'equal)))
+
+    (dolist (line
+             (split-string
+              (shell-command-to-string
+               "rg --no-heading --line-number --color never \
+-g '!node_modules' \
+-g '!dist' \
+-g '!build' \
+-g '!*.min.*' \
+-g '!*.map' \
+-g '!package-lock.json' \
+-g '!*.lock' \
+-g '!.angular/**' \
+-g '!.vscode/**' \
+'^' 2>/dev/null")
+              "\n" t))
+
+      ;; line format: file:line
+      (when (string-match "^\\([^:]+\\):" line)
+        (let* ((file (match-string 1 line))
+               (ext (or (file-name-extension file) "noext")))
+
+          ;; ignore junk extensions
+          (unless (member ext '("lock" "map" "log" "tmp" "cache"))
+            (puthash ext (1+ (gethash ext table 0)) table)))))
+
+    ;; convert to alist
+    (let (result)
+      (maphash (lambda (k v)
+                 (push (cons (upcase k) v) result))
+               table)
+      result)))
+
+(defun jsoa/prepare-loc-breakdown (data)
+  "Sort, take top entries, and collapse the rest into OTHER."
+  (let* ((sorted (sort (copy-sequence data)
+                       (lambda (a b) (> (cdr a) (cdr b)))))
+         (top (seq-take sorted 4))
+         (rest (nthcdr 4 sorted))
+         (other-sum (apply #'+ (mapcar #'cdr rest))))
+
+    (if (> other-sum 0)
+        (append top (list (cons "OTHER" other-sum)))
+      top)))
+
+(defun jsoa/sort-loc-breakdown (data)
+  (sort data (lambda (a b) (> (cdr a) (cdr b)))))
+
+
+(defun jsoa/format-loc-breakdown (breakdown)
+  (if (null breakdown)
+      "0"
+    (let* ((prepared (jsoa/prepare-loc-breakdown breakdown))
+           (total (apply #'+ (mapcar #'cdr prepared)))
+           (max-val (apply #'max (mapcar #'cdr prepared)))
+
+           (parts
+            (mapconcat
+             (lambda (pair)
+               (let* ((label (car pair))
+                      (val (cdr pair))
+                      (text (format "%s: %s"
+                                    label
+                                    (jsoa/format-loc val))))
+                 ;; highlight dominant language
+                 (if (= val max-val)
+                     (propertize text 'face 'success)
+                   text)))
+             prepared
+             ", ")))
+
+      (format "%s (%s)"
+              (jsoa/format-loc total)
+              parts))))
+
+(defun jsoa/ext-label (ext)
+  (pcase ext
+    ("PY" "Python")
+    ("TS" "TypeScript")
+    ("JS" "JavaScript")
+    (_ ext)))
+
+(defun jsoa/top-loc-extensions (root)
+  "Return top 4 file extensions by LOC."
+  (let* ((data (jsoa/project-loc-by-extension root))
+         (sorted (sort (copy-sequence data)
+                       (lambda (a b) (> (cdr a) (cdr b))))))
+    (seq-take sorted 4)))
+
+(defun jsoa/ext-to-glob (ext)
+  (if (string= ext "noext")
+      ""
+    (format "-g \"*.%s\"" (downcase ext))))
+
+;; =========================
+;; UI Primitives
 ;; =========================
 
 (defconst jsoa/dashboard-width 90)
 
 (defface jsoa/dashboard-header
-  '((t (:weight bold :height 1.1)))
+  '((t (:inherit font-lock-comment-face
+        :weight bold
+        :height 1.15)))
   "Dashboard section headers.")
 
+(defface jsoa/dashboard-button-active
+  '((t (:inherit warning :weight bold)))
+  "Face for active dashboard button.")
+
 (defun jsoa/start-section (title)
-  (insert (propertize title 'face 'jsoa/dashboard-header))
-  (insert "\n")
+  (let ((start (point)))
+    (insert title)
+    (add-text-properties start (point) '(face jsoa/dashboard-header))
+    (insert "\n"))
   (move-to-column 0))
 
 (defun jsoa/dashboard-left-padding ()
@@ -22,15 +238,18 @@
 (defun jsoa/dashboard-separator ()
   (insert (make-string jsoa/dashboard-width ?-) "\n"))
 
-(defun jsoa/action-button (num label action)
-  (list
-   :text (format "[%d] %s" num label)
-   :action action))
-
 (defun jsoa/dashboard-move-to-content ()
   (goto-char (point-min))
   (when-let ((pos (next-button (point) t)))
     (goto-char pos)))
+
+;; =========================
+;; Buttons / Interaction
+;; =========================
+
+(defun jsoa/search-with-glob (root glob)
+  (let ((default-directory root))
+    (consult-ripgrep root (concat glob " "))))
 
 (defun jsoa/open-file-other-window (file root &optional line)
   "Open FILE in another window and optionally jump to LINE."
@@ -92,54 +311,253 @@
 
       (insert "\n"))))
 
+(defun jsoa/dashboard-highlight-button ()
+  (when jsoa/dashboard-button-overlay
+    (delete-overlay jsoa/dashboard-button-overlay)
+    (setq jsoa/dashboard-button-overlay nil))
+
+  (when-let ((btn (button-at (point))))
+    (let ((ov (make-overlay (button-start btn) (button-end btn))))
+      (overlay-put ov 'face 'jsoa/dashboard-button-active)
+      (setq jsoa/dashboard-button-overlay ov))))
+
+(defvar-local jsoa/dashboard-button-overlay nil)
+
+;; =========================
+;; Data Providers
+;; =========================
+
 (defun jsoa/find-readme (root)
   "Return path to README in ROOT if it exists."
   (seq-find
    (lambda (f) (file-exists-p (expand-file-name f root)))
    '("README.md" "README.org" "README.txt" "README")))
 
+(defun jsoa/project-search-actions (root)
+  "Return dynamic search actions based on LOC."
+  (let ((top-exts (jsoa/top-loc-extensions root)))
+    (mapcar
+     (lambda (pair)
+       (let ((ext (car pair)))
+         (cons (jsoa/ext-label ext) (jsoa/ext-to-glob ext))))
+     top-exts)))
+
+
 ;; =========================
-;; Project info
+;; Renderers
+;; =========================
+
+(defun jsoa/render-recent-files (items root)
+  "Render recent files section from ITEMS."
+  (when items
+    (jsoa/start-section "Recently Modified")
+
+    (let* ((labels (mapcar (lambda (it)
+                             (jsoa/short-path (plist-get it :file) root))
+                           items))
+           (max-label (apply #'max (mapcar #'string-width labels)))
+           (max-age (apply #'max
+                           (mapcar (lambda (it)
+                                     (string-width (jsoa/safe-str (plist-get it :age))))
+                                   items))))
+
+      (cl-loop
+       for it in items
+       for label in labels
+       do
+       (let* ((file (plist-get it :file))
+              (raw-msg (jsoa/safe-str (plist-get it :msg)))
+              (age (jsoa/safe-str (plist-get it :age)))
+              (start (point))
+
+              ;; compute available width
+              (msg-width
+               (max 20
+                    (- jsoa/dashboard-width
+                       max-label
+                       max-age
+                       6))) ;; spacing
+
+              (msg (truncate-string-to-width raw-msg msg-width nil nil t)))
+
+         ;; file (clickable)
+         (insert label)
+         (make-text-button
+          start (point)
+          'action (lambda (_) (jsoa/open-file-other-window file root))
+          'follow-link t
+          'face 'link
+          'help-echo (file-relative-name file root))
+
+         ;; align file column
+         (insert (make-string (- max-label (string-width label)) ?\s))
+
+         ;; message
+         (let ((msg-start (point)))
+           (insert "  — " msg)
+           (insert (make-string (- msg-width (string-width msg)) ?\s))
+           (add-text-properties msg-start (point) '(face shadow)))
+
+         ;; age (aligned)
+         (insert "  "
+                 (propertize
+                  (format (format "%%%ds" max-age) age)
+                  'face 'font-lock-comment-face))
+
+         (insert "\n")))
+
+      (insert "\n"))))
+
+;; =========================
+;; Sections
 ;; =========================
 
 (defun jsoa/project-info (root)
+  "Render enhanced project info for ROOT."
   (let* ((name (file-name-nondirectory (directory-file-name root)))
+         (default-directory root)
+         (loc (jsoa/project-loc root))
+
+         ;; --- File count ---
          (files
           (if (file-directory-p (expand-file-name ".git" root))
-              (let ((default-directory root))
-                (length
-                 (split-string
-                  (shell-command-to-string
-                   "git ls-files --others --cached --exclude-standard")
-                  "\n" t)))
-            (length
-             (directory-files-recursively root ".*" nil nil t)))))
-
-    (let ((default-directory root))
-      (let ((todos (string-trim
-                    (shell-command-to-string
-                     "rg -c 'TODO:' | awk -F: '{sum+=$2} END {print sum}'")))
-            (fixmes (string-trim
-                     (shell-command-to-string
-                      "rg -c 'FIXME:' | awk -F: '{sum+=$2} END {print sum}'")))
-            (branch (ignore-errors
-                      (string-trim
+              (length (split-string
                        (shell-command-to-string
-                        "git rev-parse --abbrev-ref HEAD")))))
+                        "git ls-files --others --cached --exclude-standard")
+                       "\n" t))
+            (length (directory-files-recursively root ".*" nil nil t))))
 
-        (insert "\n")
-        (jsoa/start-section (format "Project: %s" name))
-        (insert (format "Files:   %d\n" files))
-        (insert (format "TODOs:   %s (FIXME: %s)\n" todos fixmes))
-        (insert (format "Branch:  %s\n\n" (or branch "N/A")))))))
+         ;; --- Git info ---
+         (branch (ignore-errors
+                   (string-trim
+                    (shell-command-to-string
+                     "git rev-parse --abbrev-ref HEAD"))))
 
-;; =========================
-;; Project actions
-;; =========================
+         (ahead (ignore-errors
+                  (string-to-number
+                   (string-trim
+                    (shell-command-to-string
+                     "git rev-list --count @{u}..HEAD 2>/dev/null")))))
 
-(defvar jsoa/dashboard-actions-list nil)
+         (behind (ignore-errors
+                   (string-to-number
+                    (string-trim
+                     (shell-command-to-string
+                      "git rev-list --count HEAD..@{u} 2>/dev/null")))))
 
-(defun jsoa/dashboard-actions (root)
+         (changes (length
+                   (split-string
+                    (shell-command-to-string
+                     "git status --porcelain")
+                    "\n" t)))
+
+         ;; --- Last commit ---
+         (last-commit (ignore-errors
+                        (string-trim
+                         (shell-command-to-string
+                          "git log -1 --pretty=format:'%h|%ar — %s'"))))
+
+         ;; --- Project type ---
+         (ptype (jsoa/project-type root))
+
+         ;; --- Python env ---
+         (venv (getenv "VIRTUAL_ENV"))
+         (python-version (ignore-errors
+                           (string-trim
+                            (shell-command-to-string
+                             "python --version 2>/dev/null"))))
+
+         ;; --- Project size ---
+         (size (ignore-errors
+                 (string-trim
+                  (shell-command-to-string
+                   "du -sh . 2>/dev/null | cut -f1")))))
+
+    ;; =========================
+    ;; Render
+    ;; =========================
+
+    (insert "\n")
+    (jsoa/start-section (format "Project: %s" name))
+
+    ;; Top block
+    (let ((loc-str (jsoa/format-loc-breakdown
+                    (jsoa/project-loc-by-extension root))))
+      (insert
+       (format "Type:    %s\n" (capitalize (symbol-name ptype)))
+       (format "Files:   %d        LOC: %s\n" files loc-str)
+       (format "Size:    %s\n\n" (or size "N/A"))))
+
+    ;; Git block
+    (when branch
+      (let* ((status-face (jsoa/git-status-face ahead behind changes))
+             (status-text
+              (concat
+               (if (> (or ahead 0) 0) (format "↑%d " ahead) "")
+               (if (> (or behind 0) 0) (format "↓%d " behind) "")
+               (if (> changes 0) (format "✗%d" changes) ""))))
+
+        ;; Branch label
+        (insert "Branch:  ")
+
+        ;; clickable branch
+        (let ((start (point)))
+          (insert branch)
+          (make-text-button
+           start (point)
+           'action (lambda (_)
+                     (let ((default-directory root))
+                       (magit-status root)))
+           'follow-link t
+           'face 'link))
+
+        ;; space
+        (insert " ")
+
+        ;; colored git status
+        (insert
+         (propertize status-text 'face status-face))
+
+        (insert "\n"))
+
+      ;; Last commit
+      (when last-commit
+        (when (string-match "^\\([^|]+\\)|\\(.*\\)$" last-commit)
+          (let ((hash (match-string 1 last-commit))
+                (msg  (match-string 2 last-commit)))
+
+            (insert "Last:    ")
+
+            ;; clickable commit hash
+            (let ((start (point)))
+              (insert hash)
+              (make-text-button
+               start (point)
+               'action (lambda (_)
+                         (let ((default-directory root))
+                           (magit-show-commit hash)))
+               'follow-link t
+               'face 'link))
+
+            ;; rest of message
+            (insert " " msg "\n"))))
+
+      (insert "\n"))
+
+    ;; Environment block (Python only)
+    (when (eq ptype 'python)
+      (insert
+       (format "Env:     %s %s\n"
+               (or (and venv (file-name-nondirectory venv)) "none")
+               (or python-version ""))))))
+
+
+(defun jsoa/git-recent-files-section (root start-index)
+  (let ((items (jsoa/git-recent-files-data root 5)))
+    (jsoa/render-recent-files items root)
+    start-index))
+
+(defun jsoa/dashboard-actions (root start-index)
   (jsoa/start-section "Actions")
 
   (let ((actions
@@ -147,11 +565,13 @@
           (list "Magit Status"
                 (lambda () (let ((default-directory root)) (magit-status root))))
           (list "Find File"
-                (lambda () (let ((default-directory root)) (call-interactively #'projectile-find-file))))
+                (lambda () (let ((default-directory root))
+                             (call-interactively #'projectile-find-file))))
           (list "Search"
-                (lambda () (let ((default-directory root)) (call-interactively #'+default/search-project)))))))
+                (lambda () (let ((default-directory root))
+                             (call-interactively #'+default/search-project)))))))
 
-    ;;  Add README if it exists
+    ;; Add README if it exists
     (when-let ((readme (jsoa/find-readme root)))
       (setq actions
             (append actions
@@ -160,9 +580,10 @@
                            (lambda ()
                              (find-file (expand-file-name readme root))))))))
 
+    ;; assign numbers
     (setq jsoa/dashboard-actions-list
           (cl-loop for (label fn) in actions
-                   for i from 1
+                   for i from start-index
                    collect (list i label fn)))
 
     ;; map for keybindings
@@ -190,11 +611,55 @@
                (match-beginning 0) (match-end 0)
                'action (lambda (_) (funcall fn))
                'follow-link t
-               'face 'link))))))))
+               'face 'link))))))
 
-;; =========================
-;; Git summary
-;; =========================
+    (+ start-index (length actions))))
+
+(defun jsoa/dashboard-search-section (root start-index)
+  (let ((actions (jsoa/project-search-actions root))
+        (index start-index)
+        (start (point)))
+
+    (jsoa/start-section "Search")
+
+    ;; render line
+    (insert
+     (mapconcat
+      (lambda (a)
+        (prog1
+            (format "[%d] %s" index (car a))
+          (setq index (1+ index))))
+      actions
+      "   ")
+     "\n\n")
+
+    (setq index start-index)
+
+    ;; attach buttons
+    (dolist (a actions)
+      (let* ((label (car a))
+             (glob (cdr a))
+             (num index)
+             (text (format "[%d] %s" num label))
+             (fn (lambda ()
+                   (jsoa/search-with-glob root glob))))
+
+        ;; register action
+        (push (cons num fn) jsoa/dashboard-actions-map)
+
+        ;; attach button
+        (save-excursion
+          (goto-char start)
+          (when (search-forward text nil t)
+            (make-text-button
+             (match-beginning 0) (match-end 0)
+             'action (lambda (_) (funcall fn))
+             'follow-link t
+             'face 'link))))
+
+      (setq index (1+ index)))
+
+    index))
 
 (defun jsoa/git-summary (root)
   (let ((default-directory root))
@@ -203,9 +668,6 @@
               (split-string
                (shell-command-to-string "git status --porcelain=v1")
                "\n" t))
-
-             (untracked
-              (seq-filter (lambda (l) (string-prefix-p "??" l)) status-lines))
 
              (unstaged
               (seq-filter
@@ -227,15 +689,6 @@
                (shell-command-to-string
                 "git log -5 --pretty=format:'%h %d %s'")
                "\n" t)))
-
-        ;; Untracked
-        (when untracked
-          (jsoa/start-section "Untracked files")
-          (dolist (l untracked)
-            (jsoa/insert-file-button (substring l 3) root))
-          (insert "\n")
-          (jsoa/dashboard-separator)
-          )
 
         ;; Unstaged
         (when unstaged
@@ -350,20 +803,30 @@
           (insert "\n"))))))
 
 ;; =========================
-;; Render
+;; Render Pipeline
 ;; =========================
 
 (defun jsoa/render-project-dashboard (root)
   (let ((inhibit-read-only t)
-        (default-directory root))
+        (default-directory root)
+        (idx 1))
 
+    (setq jsoa/dashboard-actions-map nil)
     (erase-buffer)
 
     (jsoa/project-info root)
 
     (jsoa/dashboard-separator)
 
-    (jsoa/dashboard-actions root)
+    (setq idx (jsoa/git-recent-files-section root idx))
+
+    (jsoa/dashboard-separator)
+
+    (setq idx (jsoa/dashboard-actions root idx))
+
+    (jsoa/dashboard-separator)
+
+    (setq idx (jsoa/dashboard-search-section root idx))
 
     (jsoa/dashboard-separator)
 
@@ -380,7 +843,7 @@
     (jsoa/dashboard-move-to-content)))
 
 ;; =========================
-;; Commands
+;; Commands / Mode
 ;; =========================
 
 (defvar jsoa/dashboard-actions-map nil)
@@ -390,13 +853,33 @@
     (funcall fn)))
 
 (define-derived-mode jsoa-dashboard-mode special-mode "Dashboard"
-  "Major mode for project dashboard.")
+  "Major mode for project dashboard."
+
+  (suppress-keymap jsoa-dashboard-mode-map t)
+
+  ;; navigation
+  (define-key jsoa-dashboard-mode-map (kbd "TAB") #'forward-button)
+  (define-key jsoa-dashboard-mode-map (kbd "<backtab>") #'backward-button)
+  (define-key jsoa-dashboard-mode-map (kbd "RET") #'push-button)
+
+  ;; highlight active button
+  (add-hook 'post-command-hook #'jsoa/dashboard-highlight-button nil t))
+
 (map! :map jsoa-dashboard-mode-map
-      :n "1" (lambda () (interactive) (jsoa/dashboard-run-action 1))
-      :n "2" (lambda () (interactive) (jsoa/dashboard-run-action 2))
-      :n "3" (lambda () (interactive) (jsoa/dashboard-run-action 3))
-      :n "4" (lambda () (interactive) (jsoa/dashboard-run-action 4))
-      )
+      :n "1" (cmd! (jsoa/dashboard-run-action 1))
+      :n "2" (cmd! (jsoa/dashboard-run-action 2))
+      :n "3" (cmd! (jsoa/dashboard-run-action 3))
+      :n "4" (cmd! (jsoa/dashboard-run-action 4))
+      :n "5" (cmd! (jsoa/dashboard-run-action 5))
+      :n "6" (cmd! (jsoa/dashboard-run-action 6))
+      :n "7" (cmd! (jsoa/dashboard-run-action 7))
+      :n "8" (cmd! (jsoa/dashboard-run-action 8))
+      :n "9" (cmd! (jsoa/dashboard-run-action 9)))
+
+(map! :map jsoa-dashboard-mode-map
+      :n "TAB" #'forward-button
+      :n "S-TAB" #'backward-button
+      :n "RET" #'push-button)
 
 (defun jsoa/project-command-center (project-root)
   (let* ((name (file-name-nondirectory

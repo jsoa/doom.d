@@ -4,6 +4,7 @@
 ;; =========================
 ;; Core / Utilities
 ;; =========================
+
 (defun jsoa/sh (cmd &optional dir)
   "Run shell CMD in DIR and return trimmed output."
   (let ((default-directory (or dir default-directory)))
@@ -91,25 +92,152 @@
    ((file-exists-p (expand-file-name "requirements.txt" root)) 'python)
    (t 'generic)))
 
-(defun jsoa/project-loc (root)
-  "Return LOC based on project type."
-  (let* ((default-directory root)
-         (type (jsoa/project-type root))
-         (globs
-          (pcase type
-            ('angular '("*.ts" "*.html" "*.scss"))
-            ('python  '("*.py"))
-            ('node    '("*.js" "*.ts" "*.jsx" "*.tsx"))
-            (_        '("*.el" "*.org" "*.md" "*.py" "*.js")))))
+(defun jsoa/render-loc-section (root)
+  "Render vertical LOC breakdown with bars."
+  (let ((data (jsoa/project-loc-by-extension root)))
+    (when data
+      (jsoa/start-section "Lines of Code")
 
-    (string-to-number
-     (string-trim
-      (shell-command-to-string
-       (concat
-        "rg --no-heading --no-filename "
-        (mapconcat (lambda (g) (format "-g \"%s\"" g)) globs " ")
-        " -g \"!node_modules\" -g \"!dist\" -g \"!build\" "
-        " -g \"!*.min.*\" '^' 2>/dev/null | wc -l"))))))
+      (let* ((prepared (jsoa/prepare-loc-breakdown data))
+             (total (apply #'+ (mapcar #'cdr prepared)))
+             (max-val (apply #'max (mapcar #'cdr prepared)))
+             (all-exts (mapcar #'car data))
+             (top-exts (remove "OTHER" (mapcar #'car prepared)))
+             (other-exts (seq-difference all-exts top-exts))
+
+             ;; widths
+             (max-label
+              (apply #'max
+                     (mapcar
+                      (lambda (p)
+                        (let* ((ext (car p))
+                               (name (if (string= ext "OTHER")
+                                         "OTHER"
+                                       (jsoa/ext-label ext)))
+                               (icon (jsoa/ext-icon ext))
+                               )
+                          (string-width (concat (or icon "") (when icon " ") name))))
+                      prepared)))
+             (max-num   (apply #'max (mapcar (lambda (p) (length (jsoa/format-loc (cdr p)))) prepared)))
+
+             (bar-width 20)
+             )
+
+
+        (cl-loop
+         for pair in prepared
+         for idx from 0
+         do
+         (let* (
+                (raw-label (car pair))
+                (name (if (string= raw-label "OTHER")
+                          "OTHER"
+                        (jsoa/ext-label raw-label)))
+                (icon (jsoa/ext-icon raw-label))
+                (label name)
+                (val   (cdr pair))
+                (pct   (* 100.0 (/ (float val) total)))
+
+                (num-str (jsoa/format-loc val))
+
+                (label-str (concat (or icon "") (when icon " ") label))
+                (label-pad
+                 (make-string
+                  (max 0 (- max-label (string-width label-str)))
+                  ?\s))
+                (num-pad   (make-string (max 0 (- max-num (length num-str))) ?\s))
+
+                (steps '(1.0 0.85 0.7 0.55 0.4 0.3))
+                (scale (nth (min idx (1- (length steps))) steps))
+
+                (fg (face-attribute 'success :foreground nil t))
+                (fg-rgb (color-name-to-rgb fg))
+
+                (blend (mapcar (lambda (c) (* scale c)) fg-rgb))
+                (color (apply #'color-rgb-to-hex blend))
+
+                (bar-len (max 1 (/ (* val bar-width) max-val)))
+                (bar
+                 (propertize
+                  (make-string bar-len ?█)
+                  'face `(:foreground ,color)))
+                )
+
+           (let ((line-start (point)))
+             ;; label (clickable, blue)
+             (when icon
+               (insert (propertize icon 'face 'shadow))
+               (insert " "))
+
+             (let ((label-start (point)))
+               (insert label)
+               (make-text-button
+                label-start (point)
+                'action
+                (lambda (_)
+                  (let ((default-directory root))
+                    (require 'consult)
+
+                    (if (string= raw-label "OTHER")
+
+                        ;; OTHER → exclude top extensions
+                        (let* ((prepared (jsoa/prepare-loc-breakdown
+                                          (jsoa/project-loc-by-extension root)))
+                               (top-exts (remove "OTHER" (mapcar #'car prepared)))
+                               (glob-args
+                                (mapconcat
+                                 (lambda (ext)
+                                   (format " -g '!*.%s'" (downcase ext)))
+                                 top-exts "")))
+
+                          (let ((consult-ripgrep-args
+                                 (concat consult-ripgrep-args
+                                         glob-args
+                                         " -g '*'"))) ;; 👈 critical
+                            (consult-ripgrep root)))
+
+                      ;; normal extension search
+                      (let ((consult-ripgrep-args
+                             (concat consult-ripgrep-args
+                                     " -g *." (downcase raw-label))))
+                        (consult-ripgrep root))))
+                  )
+                'follow-link t
+                'face 'link))
+
+             ;; padding after label
+             (insert label-pad "  ")
+
+             ;; count (colored for dominant)
+             (insert num-pad)
+             (insert
+              (propertize
+               num-str
+               'face `(:foreground ,color)))
+
+             (insert "  ")
+
+             ;; percentage (colored for dominant)
+             (insert
+              (propertize
+               (format "%5.1f%%" pct)
+               'face `(:foreground ,color)))
+
+             (insert "  ")
+
+             ;; bar (already colored)
+             (insert bar "\n")
+             (when (and (string= raw-label "OTHER") other-exts)
+               (let* ((shown (seq-take other-exts 5))
+                      (text (string-join (mapcar #'downcase shown) ", ")))
+                 (insert
+                  (propertize
+                   (concat "" text "\n")
+                   'face 'shadow))))
+             )
+           ))
+
+        (insert "\n")))))
 
 (defun jsoa/project-loc-by-extension (root)
   "Fast LOC breakdown by file extension."
@@ -160,42 +288,50 @@
         (append top (list (cons "OTHER" other-sum)))
       top)))
 
-(defun jsoa/sort-loc-breakdown (data)
-  (sort data (lambda (a b) (> (cdr a) (cdr b)))))
-
-
-(defun jsoa/format-loc-breakdown (breakdown)
-  (if (null breakdown)
-      "0"
-    (let* ((prepared (jsoa/prepare-loc-breakdown breakdown))
-           (total (apply #'+ (mapcar #'cdr prepared)))
-           (max-val (apply #'max (mapcar #'cdr prepared)))
-
-           (parts
-            (mapconcat
-             (lambda (pair)
-               (let* ((label (car pair))
-                      (val (cdr pair))
-                      (text (format "%s: %s"
-                                    label
-                                    (jsoa/format-loc val))))
-                 ;; highlight dominant language
-                 (if (= val max-val)
-                     (propertize text 'face 'success)
-                   text)))
-             prepared
-             ", ")))
-
-      (format "%s (%s)"
-              (jsoa/format-loc total)
-              parts))))
-
 (defun jsoa/ext-label (ext)
-  (pcase ext
-    ("PY" "Python")
-    ("TS" "TypeScript")
-    ("JS" "JavaScript")
-    (_ ext)))
+  (or
+   (cdr (assoc ext
+               '(("PY"   . "Python")
+                 ("TS"   . "TypeScript")
+                 ("JS"   . "JavaScript")
+                 ("HTML" . "HTML")
+                 ("CSS"  . "CSS")
+                 ("JSON" . "JSON")
+                 ("MD"   . "Markdown")
+                 ("SH"   . "Shell")
+                 ("YML"  . "YAML")
+                 ("YAML" . "YAML")
+                 ("TOML" . "TOML")
+                 ("CFG"  . "Config")
+                 ("INI"  . "INI")
+                 ("TXT"  . "Text"))))
+   ext))
+
+(defun jsoa/ext-icon (ext)
+  (when (featurep 'nerd-icons)
+    (or
+     (pcase ext
+       ("PY"   (nerd-icons-devicon "nf-dev-python" :height 0.9))
+       ("TS"   (nerd-icons-devicon "nf-dev-typescript" :height 0.9))
+       ("JS"   (nerd-icons-devicon "nf-dev-javascript" :height 0.9))
+       ("HTML" (nerd-icons-devicon "nf-dev-html5" :height 0.9))
+       ("CSS"  (nerd-icons-devicon "nf-dev-css3" :height 0.9))
+       ("JSON" (nerd-icons-devicon "nf-dev-json" :height 0.9))
+       ("MD"   (nerd-icons-devicon "nf-dev-markdown" :height 0.9))
+       ("SH"   (nerd-icons-devicon "nf-dev-terminal" :height 0.9))
+       ("OTHER" (nerd-icons-octicon "nf-oct-stack" :height 0.9))
+       )
+
+     (nerd-icons-octicon "nf-oct-file" :height 0.9))))
+
+(defun jsoa/todo-icon (type)
+  (when (featurep 'nerd-icons)
+    (pcase type
+      ("FIXME" (nerd-icons-octicon "nf-oct-alert" :height 0.9))
+      ("TODO"  (nerd-icons-octicon "nf-oct-checklist" :height 0.9))
+      ("HACK"  (nerd-icons-octicon "nf-oct-tools" :height 0.9))
+      ("NOTE"  (nerd-icons-octicon "nf-oct-note" :height 0.9))
+      (_       (nerd-icons-octicon "nf-oct-dot" :height 0.9)))))
 
 (defun jsoa/top-loc-extensions (root)
   "Return top 4 file extensions by LOC."
@@ -236,7 +372,11 @@
   (max 0 (/ (- (window-width) jsoa/dashboard-width) 2)))
 
 (defun jsoa/dashboard-separator ()
-  (insert (make-string jsoa/dashboard-width ?-) "\n"))
+  (insert
+   (propertize
+    (make-string jsoa/dashboard-width ?-)
+    'face 'shadow)
+   "\n"))
 
 (defun jsoa/dashboard-move-to-content ()
   (goto-char (point-min))
@@ -416,7 +556,6 @@
   "Render enhanced project info for ROOT."
   (let* ((name (file-name-nondirectory (directory-file-name root)))
          (default-directory root)
-         (loc (jsoa/project-loc root))
 
          ;; --- File count ---
          (files
@@ -481,12 +620,10 @@
     (jsoa/start-section (format "Project: %s" name))
 
     ;; Top block
-    (let ((loc-str (jsoa/format-loc-breakdown
-                    (jsoa/project-loc-by-extension root))))
-      (insert
-       (format "Type:    %s\n" (capitalize (symbol-name ptype)))
-       (format "Files:   %d        LOC: %s\n" files loc-str)
-       (format "Size:    %s\n\n" (or size "N/A"))))
+    (insert
+     (format "Type:    %s\n" (capitalize (symbol-name ptype)))
+     (format "Files:   %d\n" files)
+     (format "Size:    %s\n\n" (or size "N/A")))
 
     ;; Git block
     (when branch
@@ -615,52 +752,6 @@
 
     (+ start-index (length actions))))
 
-(defun jsoa/dashboard-search-section (root start-index)
-  (let ((actions (jsoa/project-search-actions root))
-        (index start-index)
-        (start (point)))
-
-    (jsoa/start-section "Search")
-
-    ;; render line
-    (insert
-     (mapconcat
-      (lambda (a)
-        (prog1
-            (format "[%d] %s" index (car a))
-          (setq index (1+ index))))
-      actions
-      "   ")
-     "\n\n")
-
-    (setq index start-index)
-
-    ;; attach buttons
-    (dolist (a actions)
-      (let* ((label (car a))
-             (glob (cdr a))
-             (num index)
-             (text (format "[%d] %s" num label))
-             (fn (lambda ()
-                   (jsoa/search-with-glob root glob))))
-
-        ;; register action
-        (push (cons num fn) jsoa/dashboard-actions-map)
-
-        ;; attach button
-        (save-excursion
-          (goto-char start)
-          (when (search-forward text nil t)
-            (make-text-button
-             (match-beginning 0) (match-end 0)
-             'action (lambda (_) (funcall fn))
-             'follow-link t
-             'face 'link))))
-
-      (setq index (1+ index)))
-
-    index))
-
 (defun jsoa/git-summary (root)
   (let ((default-directory root))
     (when (file-directory-p (expand-file-name ".git" root))
@@ -782,25 +873,117 @@
           )))))
 
 (defun jsoa/todos-section (root)
-  "Insert TODOs section for ROOT."
+  "Render grouped TODO section for ROOT."
   (let ((default-directory root))
-    (let ((output
-           (shell-command-to-string
-            "rg --no-heading --line-number --color never \
--e 'TODO:' -e 'FIXME:' -e 'HACK:' -e 'NOTE:'")))
+    (let* ((output
+            (shell-command-to-string
+             "rg --no-heading --line-number --color never \
+-e 'TODO:' -e 'FIXME:' -e 'HACK:' -e 'NOTE:'"))
+           (lines (split-string output "\n" t)))
 
-      (if (string-empty-p (string-trim output))
+      (if (null lines)
           (insert (propertize "No TODOs found 🎉\n\n" 'face 'success))
 
-        (let* ((lines (split-string output "\n" t))
-               (count (length lines)))
-
-          (jsoa/start-section (format "TODOs (%d)" count))
+        ;; =========================
+        ;; Parse + Group
+        ;; =========================
+        (let ((groups (make-hash-table :test 'equal)))
 
           (dolist (line lines)
-            (jsoa/insert-todo-button line root))
+            (when (string-match "^\\([^:]+\\):\\([0-9]+\\):\\(.*\\)$" line)
+              (let* ((file (match-string 1 line))
+                     (linenum (string-to-number (match-string 2 line)))
+                     (text (string-trim (match-string 3 line))))
 
-          (insert "\n"))))))
+                (when (string-match "\\(TODO\\|FIXME\\|HACK\\|NOTE\\):\\s-*\\(.*\\)" text)
+                  (let* ((key (match-string 1 text))
+                         (msg (match-string 2 text)))
+                    (push (list file linenum key msg)
+                          (gethash key groups))))))
+            )
+
+          ;; =========================
+          ;; Config
+          ;; =========================
+          (let ((order '("FIXME" "TODO" "HACK" "NOTE"))
+                (faces '(("FIXME" . error)
+                         ("TODO"  . font-lock-warning-face)
+                         ("HACK"  . font-lock-constant-face)
+                         ("NOTE"  . shadow))))
+
+            (jsoa/start-section
+             (format "TODOs (%d)" (length lines)))
+
+            ;; =========================
+            ;; Render Groups
+            ;; =========================
+            (dolist (type order)
+              (let ((items (reverse (gethash type groups))))
+                (when items
+
+                  ;; Header
+                  (let* ((icon (jsoa/todo-icon type))
+                         (count (length items))
+                         (face (cdr (assoc type faces))))
+                    (when icon
+                      (insert (propertize icon 'face face))
+                      (insert " "))
+                    (insert
+                     (propertize
+                      (format "%s (%d)\n" type count)
+                      'face face)))
+
+                  ;; Alignment prep
+                  (let* ((labels
+                          (mapcar (lambda (it)
+                                    (format "%s:%d"
+                                            (jsoa/short-path (nth 0 it) root)
+                                            (nth 1 it)))
+                                  items))
+                         (max-label (apply #'max (mapcar #'string-width labels)))
+                         (msg-width
+                          (max 20 (- jsoa/dashboard-width max-label 6))))
+
+                    ;; Rows
+                    (cl-loop
+                     for (file line key msg) in items
+                     for label in labels
+                     do
+                     (let ((start (point))
+                           (msg (truncate-string-to-width msg msg-width nil nil t)))
+
+                       ;; file:line button
+                       (insert label)
+                       (make-text-button
+                        start (point)
+                        'action (lambda (_)
+                                  (jsoa/open-file-other-window file root line))
+                        'follow-link t
+                        'face 'link)
+
+                       ;; padding
+                       (insert (make-string
+                                (max 0 (- max-label (string-width label)))
+                                ?\s))
+
+                       ;; message (dimmed slightly)
+                       (insert "  ")
+                       (let ((msg-start (point)))
+                         (insert
+                          (propertize
+                           (concat key ": ")
+                           'face (cdr (assoc type faces))))  ;; colored keyword
+
+                         (insert
+                          (propertize
+                           msg
+                           'face 'shadow))
+                         )
+
+                       (insert "\n")))
+                    )
+
+                  (insert "\n"))))))))))
 
 ;; =========================
 ;; Render Pipeline
@@ -821,12 +1004,11 @@
     (setq idx (jsoa/git-recent-files-section root idx))
 
     (jsoa/dashboard-separator)
-
-    (setq idx (jsoa/dashboard-actions root idx))
+    (jsoa/render-loc-section root)
 
     (jsoa/dashboard-separator)
 
-    (setq idx (jsoa/dashboard-search-section root idx))
+    (setq idx (jsoa/dashboard-actions root idx))
 
     (jsoa/dashboard-separator)
 

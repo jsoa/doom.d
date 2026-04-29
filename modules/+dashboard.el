@@ -4,6 +4,7 @@
 ;; =========================
 ;; Core / Utilities
 ;; =========================
+(defvar-local jsoa/diag-token nil)
 
 (defun jsoa/sh (cmd &optional dir)
   "Run shell CMD in DIR and return trimmed output."
@@ -351,6 +352,25 @@
 
 (defconst jsoa/dashboard-width 90)
 
+(defvar-local jsoa/diag-highlight-ov nil)
+
+(defun jsoa/diag-highlight-current ()
+  "Highlight the current button line in diagnostics buffer."
+  (when jsoa/diag-highlight-ov
+    (delete-overlay jsoa/diag-highlight-ov)
+    (setq jsoa/diag-highlight-ov nil))
+
+  (when-let ((btn (button-at (point))))
+    (let* ((start (save-excursion
+                    (goto-char (button-start btn))
+                    (line-beginning-position)))
+           (end (save-excursion
+                  (goto-char (button-end btn))
+                  (line-end-position)))
+           (ov (make-overlay start end)))
+      (overlay-put ov 'face 'jsoa/dashboard-button-active)
+      (setq jsoa/diag-highlight-ov ov))))
+
 (defface jsoa/dashboard-header
   '((t (:inherit font-lock-comment-face
         :weight bold
@@ -391,14 +411,32 @@
   (let ((default-directory root))
     (consult-ripgrep root (concat glob " "))))
 
+(defun jsoa/flash-line (&optional duration)
+  "Briefly highlight the current line."
+  (let* ((duration (or duration 0.4))
+         (start (line-beginning-position))
+         (end   (line-end-position))
+         (ov (make-overlay start end)))
+    (overlay-put ov 'face 'highlight)
+    (run-with-timer
+     duration nil
+     (lambda (o)
+       (when (overlayp o) (delete-overlay o)))
+     ov)))
+
 (defun jsoa/open-file-other-window (file root &optional line)
-  "Open FILE in another window and optionally jump to LINE."
-  (let ((win (get-mru-window nil t t)))
-    (when win (select-window win)))
-  (find-file (expand-file-name file root))
-  (when line
-    (goto-char (point-min))
-    (forward-line (1- line))))
+  "Open FILE in main window, keep diagnostics panel focused, flash line."
+  (let* ((full (expand-file-name file root))
+         (buf (find-file-noselect full))
+         (win (get-largest-window)))
+    (save-selected-window
+      (select-window win)
+      (switch-to-buffer buf)
+      (when line
+        (goto-char (point-min))
+        (forward-line (1- line)))
+      ;; 🔥 flash the line
+      (jsoa/flash-line))))
 
 (defun jsoa/insert-file-button (file root)
   (let ((start (point)))
@@ -551,6 +589,256 @@
 ;; =========================
 ;; Sections
 ;; =========================
+(defun jsoa/show-pyright-diagnostics (root diagnostics &optional severity)
+  (let ((buf (get-buffer-create "*jsoa-pyright*")))
+    (with-current-buffer buf
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (special-mode)
+        (add-hook 'post-command-hook #'jsoa/diag-highlight-current nil t)
+
+        ;; navigation like dashboard
+        (local-set-key (kbd "TAB") #'forward-button)
+        (local-set-key (kbd "<backtab>") #'backward-button)
+        (local-set-key (kbd "S-TAB") #'backward-button)
+        (local-set-key (kbd "RET") #'push-button)
+
+        ;; Title
+        (insert (format "Pyright %s\n"
+                        (cond
+                         ((equal severity "error") "Errors")
+                         ((equal severity "warning") "Warnings")
+                         (t "Diagnostics"))))
+        (insert (make-string 50 ?-))
+        (insert "\n\n")
+
+        ;; =========================
+        ;; Group diagnostics by file
+        ;; =========================
+        (let ((groups (make-hash-table :test 'equal)))
+
+          ;; collect
+          (dolist (d diagnostics)
+            (when (or (not severity)
+                      (equal (gethash "severity" d) severity))
+              (let ((file (gethash "file" d)))
+                (puthash file
+                         (cons d (gethash file groups))
+                         groups)
+                )))
+
+          ;; sort files (optional, stable order)
+          (let ((files (sort (hash-table-keys groups) #'string<)))
+
+            (dolist (file files)
+              (let* ((items (nreverse (gethash file groups)))
+                     (count (length items))
+                     (short (jsoa/short-path file root))
+                     (file-start (point)))
+
+                ;; =========================
+                ;; File header (clickable)
+                ;; =========================
+                (insert (format "%s (%d)\n" short count))
+
+                (make-text-button
+                 file-start (point)
+                 'file file
+                 'root root
+                 'action (lambda (btn)
+                           (let ((file (button-get btn 'file))
+                                 (root (button-get btn 'root)))
+                             (jsoa/open-file-other-window file root 1)))
+                 'follow-link t
+                 'face 'bold)
+
+                ;; =========================
+                ;; Rows
+                ;; =========================
+                (dolist (d items)
+                  (let* ((msg (gethash "message" d))
+                         (range (gethash "range" d))
+                         (line (and range
+                                    (1+ (gethash "line"
+                                                 (gethash "start" range)))))
+                         (face (if (equal (gethash "severity" d) "error")
+                                   'error
+                                 'warning))
+                         (this-file file)
+                         (this-line line)
+                         (start (point)))
+
+                    ;; clickable line number
+                    (let ((start (point)))
+                      (insert
+                       (format "  %s:%d"
+                               (jsoa/short-path this-file root)
+                               (or this-line 0)))
+
+                      (make-text-button
+                       start (point)
+                       'file this-file
+                       'line this-line
+                       'root root
+                       'action (lambda (btn)
+                                 (let ((file (button-get btn 'file))
+                                       (root (button-get btn 'root))
+                                       (line (button-get btn 'line)))
+                                   (jsoa/open-file-other-window file root line)))
+                       'follow-link t
+                       'face 'link))
+
+                    ;; message
+                    (insert "  ")
+                    (insert (propertize msg 'face face))
+                    (insert "\n")))
+
+                (insert "\n"))))))
+
+      (goto-char (point-min))
+      (when-let ((btn (next-button (point) t)))
+        (goto-char btn)
+        (jsoa/diag-highlight-current))
+      )
+
+    ;; display like a panel
+    (display-buffer
+     buf
+     '((display-buffer-at-bottom)
+       (window-height . 0.35)))))
+
+(defun jsoa/python-diagnostics-section (root)
+  (if (eq (jsoa/project-type root) 'python)
+      (progn
+        (jsoa/start-section "Diagnostics")
+
+        (let* ((dashboard-buf (current-buffer))
+               (token (gensym "diag-"))
+               (start (point-marker))
+               end)
+
+          (setq-local jsoa/diag-token token)
+
+          ;; placeholder
+          (insert "Scanning...\n\n")
+          (setq end (point-marker))
+
+          (let ((proc
+                 (make-process
+                  :name "jsoa-pyright"
+                  :buffer (generate-new-buffer " *jsoa-pyright*")
+                  :command '("pyright" "--outputjson")
+                  :noquery t
+                  :sentinel
+                  (lambda (p _event)
+                    (when (eq (process-status p) 'exit)
+                      (let ((output
+                             (with-current-buffer (process-buffer p)
+                               (buffer-string))))
+                        (kill-buffer (process-buffer p))
+
+                        (let ((data (condition-case nil
+                                        (json-parse-string output
+                                                           :object-type 'hash-table
+                                                           :array-type 'list)
+                                      (error nil))))
+
+                          (when (and (buffer-live-p dashboard-buf)
+                                     (with-current-buffer dashboard-buf
+                                       (eq token jsoa/diag-token)))
+
+                            (with-current-buffer dashboard-buf
+                              (let ((inhibit-read-only t)
+                                    (pad (jsoa/dashboard-left-padding)))
+                                (save-excursion
+                                  (goto-char start)
+                                  (delete-region start end)
+
+                                  (let ((content-start (point)))
+
+                                    ;; === SAME RENDER CODE ===
+                                    (if (not data)
+                                        (insert "Pyright failed\n\n")
+
+                                      (let* ((diags (gethash "generalDiagnostics" data))
+                                             (errors 0)
+                                             (warnings 0)
+                                             (items '()))
+
+                                        (dolist (d diags)
+                                          (let ((severity (gethash "severity" d)))
+                                            (cond
+                                             ((equal severity "error")
+                                              (setq errors (1+ errors)))
+                                             ((equal severity "warning")
+                                              (setq warnings (1+ warnings))))
+                                            (push d items)))
+
+                                        ;; header
+                                        (let ((err-start (point)))
+                                          (insert (format "Errors: %d" errors))
+                                          (make-text-button
+                                           err-start (point)
+                                           'action (lambda (_)
+                                                     (jsoa/show-pyright-diagnostics root diags "error"))
+                                           'follow-link t
+                                           'face '(:inherit error :underline t))
+
+                                          (insert "   ")
+
+                                          (let ((warn-start (point)))
+                                            (insert (format "Warnings: %d" warnings))
+                                            (make-text-button
+                                             warn-start (point)
+                                             'action (lambda (_)
+                                                       (jsoa/show-pyright-diagnostics root diags "warning"))
+                                             'follow-link t
+                                             'face '(:inherit warning :underline t)))
+
+                                          (insert "\n\n"))
+
+                                        ;; rows
+                                        (dolist (d (seq-take (nreverse items) 5))
+                                          (let* ((file (gethash "file" d))
+                                                 (msg  (gethash "message" d))
+                                                 (range (gethash "range" d))
+                                                 (line (and range
+                                                            (1+ (gethash "line"
+                                                                         (gethash "start" range)))))
+                                                 (label (format "%s:%d"
+                                                                (jsoa/short-path file root)
+                                                                (or line 0)))
+                                                 (start (point)))
+
+                                            ;; clickable file:line
+                                            (insert label)
+                                            (make-text-button
+                                             start (point)
+                                             'file file
+                                             'line line
+                                             'root root
+                                             'action (lambda (btn)
+                                                       (jsoa/open-file-other-window
+                                                        (button-get btn 'file)
+                                                        (button-get btn 'root)
+                                                        (button-get btn 'line)))
+                                             'follow-link t
+                                             'face 'link)
+
+                                            ;; message
+                                            (insert "  ")
+                                            (insert
+                                             (truncate-string-to-width msg 80 nil nil t))
+                                            (insert "\n"))
+                                          )
+
+                                        (insert "\n")))
+
+                                    (indent-rigidly content-start (point) pad)))))))))))))
+
+            )))
+    t)
+  nil)
 
 (defun jsoa/project-info (root)
   "Render enhanced project info for ROOT."
@@ -768,13 +1056,6 @@
                       (not (eq (aref l 1) ?\s))))
                status-lines))
 
-             (stashes
-              (seq-take
-               (split-string
-                (shell-command-to-string "git stash list")
-                "\n" t)
-               5))
-
              (commits
               (split-string
                (shell-command-to-string
@@ -805,39 +1086,6 @@
                  'follow-link t
                  'face 'link))
               ))
-          (insert "\n")
-          (jsoa/dashboard-separator)
-          )
-
-        ;; Stashes
-        (when stashes
-
-          (jsoa/start-section (format "Stashes (%d)" (length stashes)))
-
-          (dolist (s stashes)
-            (if (string-match "^\\(stash@{[0-9]+}\\)\\(.*\\)$" s)
-                (let ((ref (match-string 1 s))   ;; stash@{0}
-                      (msg (string-trim (match-string 2 s))))
-
-                  ;; clickable stash ref
-                  (let ((start (point)))
-                    (insert ref)
-                    (make-text-button
-                     start (point)
-                     'action (lambda (_)
-                               (let ((default-directory root))
-                                 (magit-stash-show ref)))
-                     'follow-link nil
-                     'face 'link))
-
-                  ;; rest of line (non-clickable)
-                  (when (not (string-empty-p msg))
-                    (insert " " msg)))
-
-              ;; fallback (just in case format is weird)
-              (insert s))
-
-            (insert "\n"))
           (insert "\n")
           (jsoa/dashboard-separator)
           )
@@ -1003,6 +1251,10 @@
 
     (setq idx (jsoa/git-recent-files-section root idx))
 
+    (when (eq (jsoa/project-type root) 'python)
+      (jsoa/dashboard-separator)
+      (jsoa/python-diagnostics-section root))
+
     (jsoa/dashboard-separator)
     (jsoa/render-loc-section root)
 
@@ -1087,15 +1339,7 @@
         (erase-buffer)
         (jsoa/render-project-dashboard project-root)))
 
-    (run-with-idle-timer
-     0 nil
-     (lambda ()
-       (when (and (buffer-live-p buf)
-                  (eq (current-buffer) buf))
-         (with-current-buffer buf
-           (let ((inhibit-read-only t))
-             (erase-buffer)
-             (jsoa/render-project-dashboard project-root))))))))
+    ))
 
 (defun jsoa/project-dashboard ()
   "Open dashboard for current project."

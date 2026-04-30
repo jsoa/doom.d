@@ -533,6 +533,168 @@
 ;; Diagnostics
 ;; =========================
 
+(defun jsoa/count-diagnostics (diagnostics)
+  "Return (errors . warnings) count."
+  (let ((errors 0)
+        (warnings 0))
+    (dolist (d diagnostics)
+      (pcase (plist-get d :severity)
+        ("error"   (setq errors (1+ errors)))
+        ("warning" (setq warnings (1+ warnings)))))
+    (cons errors warnings)))
+
+(defun jsoa/parse-pyright-output (output)
+  "Parse Pyright JSON OUTPUT into normalized diagnostics list."
+  (let* ((data (ignore-errors
+                 (json-parse-string output
+                                    :object-type 'hash-table
+                                    :array-type 'list)))
+         (diags (and data (gethash "generalDiagnostics" data))))
+    (when diags
+      (mapcar
+       (lambda (d)
+         (list
+          :file (gethash "file" d)
+          :line (let ((r (gethash "range" d)))
+                  (when r
+                    (1+ (gethash "line" (gethash "start" r)))))
+          :message (gethash "message" d)
+          :severity (gethash "severity" d)))
+       diags))))
+
+(defun jsoa/render-python-diagnostics-block (root diagnostics pad start end)
+  (let ((content-start (point)))
+    (delete-region start end)
+
+    (if (not diagnostics)
+        (insert "Pyright failed\n\n")
+
+      (let* ((counts (jsoa/count-diagnostics diagnostics))
+             (errors (car counts))
+             (warnings (cdr counts)))
+
+        ;; header buttons
+        (let ((btn-start (point)))
+          (insert (format "Errors: %d" errors))
+          (make-text-button
+           btn-start (point)
+           'action (lambda (_)
+                     (jsoa/show-diagnostics root diagnostics "error" "Pyright"))
+           'follow-link t
+           'face 'jsoa/diag-error-button))
+
+        (insert "   ")
+
+        (let ((btn-start (point)))
+          (insert (format "Warnings: %d" warnings))
+          (make-text-button
+           btn-start (point)
+           'action (lambda (_)
+                     (jsoa/show-diagnostics root diagnostics "warning" "Pyright"))
+           'follow-link t
+           'face 'jsoa/diag-warning-button))
+
+        (insert "\n\n")
+
+        ;; preview (top 5)
+        (dolist (d (seq-take diagnostics 5))
+          (let* ((file (plist-get d :file))
+                 (line (plist-get d :line))
+                 (msg  (plist-get d :message))
+                 (label (format "%s:%d"
+                                (jsoa/short-path file root)
+                                (or line 0)))
+                 (btn-start (point)))
+
+            (insert label)
+            (make-text-button
+             btn-start (point)
+             'file file
+             'line line
+             'root root
+             'action (lambda (btn)
+                       (jsoa/open-file-other-window
+                        (button-get btn 'file)
+                        (button-get btn 'root)
+                        (button-get btn 'line)))
+             'follow-link t
+             'face 'link)
+
+            (insert "  ")
+            (insert (truncate-string-to-width msg 80 nil nil t))
+            (insert "\n")))
+
+        (insert "\n")))
+
+    (indent-rigidly content-start (point) pad)))
+
+(defun jsoa/parse-tsc-output (output)
+  "Parse tsc OUTPUT into normalized diagnostics list."
+  (let (results)
+    (dolist (line (split-string output "\n" t))
+      ;; match: file(line,col): error ...
+      (when (string-match "^\\([^(\n]+\\)(\\([0-9]+\\)," line)
+        (let ((file (match-string 1 line))
+              (linenum (string-to-number (match-string 2 line))))
+          (push
+           (list
+            :file file
+            :line linenum
+            :message line
+            :severity "error")   ;; tsc = always error
+           results))))
+    (nreverse results)))
+
+(defun jsoa/render-ts-diagnostics-block (root diagnostics pad start end)
+  (let ((content-start (point)))
+    (delete-region start end)
+
+    (let ((errors (length diagnostics)))
+
+      ;; header
+      (let ((btn-start (point)))
+        (insert (format "Errors: %d" errors))
+        (make-text-button
+         btn-start (point)
+         'action (lambda (_)
+                   (jsoa/show-diagnostics root diagnostics "error" "TypeScript"))
+         'follow-link t
+         'face 'jsoa/diag-error-button))
+
+      (insert "\n\n")
+
+      ;; preview
+      (dolist (d (seq-take diagnostics 5))
+        (let* ((file (plist-get d :file))
+               (line (plist-get d :line))
+               (msg  (plist-get d :message))
+               (label (format "%s:%d"
+                              (jsoa/short-path file root)
+                              (or line 0)))
+               (btn-start (point)))
+
+          (insert label)
+          (make-text-button
+           btn-start (point)
+           'file file
+           'line line
+           'root root
+           'action (lambda (btn)
+                     (jsoa/open-file-other-window
+                      (button-get btn 'file)
+                      (button-get btn 'root)
+                      (button-get btn 'line)))
+           'follow-link t
+           'face 'link)
+
+          (insert "  ")
+          (insert (truncate-string-to-width msg 80 nil nil t))
+          (insert "\n")))
+
+      (insert "\n"))
+
+    (indent-rigidly content-start (point) pad)))
+
 (defun jsoa/show-diagnostics (root diagnostics &optional severity title)
   "Unified diagnostics panel for all sources."
   (let ((buf (get-buffer-create "*jsoa-diagnostics*")))
@@ -742,77 +904,14 @@
 
                (with-current-buffer dashboard-buf
                  (let ((inhibit-read-only t)
-                       (pad (jsoa/dashboard-left-padding)))
+                       (pad (jsoa/dashboard-left-padding)))   ;; ✅ FIX HERE
                    (save-excursion
                      (goto-char start)
-                     (delete-region start end)
 
-                     (let ((content-start (point))
-                           (errors 0)
-                           (items '()))
-
-                       ;; parse
-                       (dolist (line (split-string output "\n" t))
-                         (when (string-match "^\\([^(\n]+\\)(\\([0-9]+\\)," line)
-                           (let ((file (match-string 1 line))
-                                 (linenum (string-to-number (match-string 2 line))))
-                             (setq errors (1+ errors))
-                             (push (list file linenum line) items))))
-
-                       (let* ((all-items (reverse items))
-                              (diag-items
-                               (mapcar
-                                (lambda (it)
-                                  (list
-                                   :file (nth 0 it)
-                                   :line (nth 1 it)
-                                   :message (nth 2 it)
-                                   :severity "error"))
-                                all-items)))
-
-                         ;; header button
-                         (let ((btn-start (point)))
-                           (insert (format "Errors: %d" errors))
-                           (make-text-button
-                            btn-start (point)
-                            'action (lambda (_)
-                                      (jsoa/show-diagnostics root diag-items "error" "TypeScript"))
-                            'follow-link t
-                            'face 'jsoa/diag-error-button))
-
-                         (insert "\n\n")
-
-                         ;; preview
-                         (dolist (it (seq-take all-items 5))
-                           (let* ((file (nth 0 it))
-                                  (line (nth 1 it))
-                                  (msg  (nth 2 it))
-                                  (label (format "%s:%d"
-                                                 (jsoa/short-path file root)
-                                                 line))
-                                  (btn-start (point)))
-
-                             (insert label)
-                             (make-text-button
-                              btn-start (point)
-                              'file file
-                              'line line
-                              'root root
-                              'action (lambda (btn)
-                                        (jsoa/open-file-other-window
-                                         (button-get btn 'file)
-                                         (button-get btn 'root)
-                                         (button-get btn 'line)))
-                              'follow-link t
-                              'face 'link)
-
-                             (insert "  ")
-                             (insert (truncate-string-to-width msg 80 nil nil t))
-                             (insert "\n")))
-
-                         (insert "\n"))
-
-                       (indent-rigidly content-start (point) pad))))))))))
+                     (let ((diagnostics (jsoa/parse-tsc-output output)))
+                       (jsoa/render-ts-diagnostics-block
+                        root diagnostics pad start end)))))))))
+       )
       t)))
 
 
@@ -845,101 +944,12 @@
                  (let ((inhibit-read-only t))
                    (save-excursion
                      (goto-char start)
-                     (delete-region start end)
 
-                     (let ((content-start (point))
-                           (data (ignore-errors
-                                   (json-parse-string output
-                                                      :object-type 'hash-table
-                                                      :array-type 'list))))
+                     (let ((diagnostics (jsoa/parse-pyright-output output)))
+                       (jsoa/render-python-diagnostics-block
+                        root diagnostics pad start end)))))))))
 
-                       (if (not data)
-                           (insert "Pyright failed\n\n")
-
-                         (let* ((diags (gethash "generalDiagnostics" data))
-                                (errors 0)
-                                (warnings 0)
-                                (items '()))
-
-                           ;; count + collect
-                           (dolist (d diags)
-                             (let ((sev (gethash "severity" d)))
-                               (cond
-                                ((equal sev "error")   (setq errors (1+ errors)))
-                                ((equal sev "warning") (setq warnings (1+ warnings))))
-                               (push d items)))
-
-                           ;; normalize
-                           (let ((diag-items
-                                  (mapcar
-                                   (lambda (d)
-                                     (list
-                                      :file (gethash "file" d)
-                                      :line (let ((r (gethash "range" d)))
-                                              (when r
-                                                (1+ (gethash "line"
-                                                             (gethash "start" r)))))
-                                      :message (gethash "message" d)
-                                      :severity (gethash "severity" d)))
-                                   diags)))
-
-                             ;; header buttons
-                             (let ((btn-start (point)))
-                               (insert (format "Errors: %d" errors))
-                               (make-text-button
-                                btn-start (point)
-                                'action (lambda (_)
-                                          (jsoa/show-diagnostics root diag-items "error" "Pyright"))
-                                'follow-link t
-                                'face 'jsoa/diag-error-button))
-
-                             (insert "   ")
-
-                             (let ((btn-start (point)))
-                               (insert (format "Warnings: %d" warnings))
-                               (make-text-button
-                                btn-start (point)
-                                'action (lambda (_)
-                                          (jsoa/show-diagnostics root diag-items "warning" "Pyright"))
-                                'follow-link t
-                                'face 'jsoa/diag-warning-button)))
-
-                           (insert "\n\n")
-
-                           ;; preview
-                           (dolist (d (seq-take (reverse items) 5))
-                             (let* ((file (gethash "file" d))
-                                    (msg  (gethash "message" d))
-                                    (range (gethash "range" d))
-                                    (line (and range
-                                               (1+ (gethash "line"
-                                                            (gethash "start" range)))))
-                                    (label (format "%s:%d"
-                                                   (jsoa/short-path file root)
-                                                   (or line 0)))
-                                    (btn-start (point)))
-
-                               (insert label)
-                               (make-text-button
-                                btn-start (point)
-                                'file file
-                                'line line
-                                'root root
-                                'action (lambda (btn)
-                                          (jsoa/open-file-other-window
-                                           (button-get btn 'file)
-                                           (button-get btn 'root)
-                                           (button-get btn 'line)))
-                                'follow-link t
-                                'face 'link)
-
-                               (insert "  ")
-                               (insert (truncate-string-to-width msg 80 nil nil t))
-                               (insert "\n")))
-
-                           (insert "\n")))
-
-                       (indent-rigidly content-start (point) pad)))))))))))
+       ))
     t))
 
 (defun jsoa/project-info-section (root)

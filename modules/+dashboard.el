@@ -544,36 +544,43 @@
     (cons errors warnings)))
 
 (defun jsoa/parse-pyright-output (output)
-  "Parse Pyright JSON OUTPUT into normalized diagnostics list."
-  (let* ((data (ignore-errors
-                 (json-parse-string output
-                                    :object-type 'hash-table
-                                    :array-type 'list)))
-         (diags (and data (gethash "generalDiagnostics" data))))
-    (when diags
-      (mapcar
-       (lambda (d)
-         (list
-          :file (gethash "file" d)
-          :line (let ((r (gethash "range" d)))
-                  (when r
-                    (1+ (gethash "line" (gethash "start" r)))))
-          :message (gethash "message" d)
-          :severity (gethash "severity" d)))
-       diags))))
+  "Parse Pyright JSON OUTPUT into normalized diagnostics list.
+Returns:
+- list → valid diagnostics (possibly empty)
+- :error → parse failure"
+  (let ((data (ignore-errors
+                (json-parse-string output
+                                   :object-type 'hash-table
+                                   :array-type 'list))))
+    (if (not data)
+        :error
+      (let ((diags (gethash "generalDiagnostics" data)))
+        (mapcar
+         (lambda (d)
+           (list
+            :file (gethash "file" d)
+            :line (let ((r (gethash "range" d)))
+                    (when r
+                      (1+ (gethash "line" (gethash "start" r)))))
+            :message (gethash "message" d)
+            :severity (gethash "severity" d)))
+         diags)))))
 
 (defun jsoa/render-python-diagnostics-block (root diagnostics pad start end)
+  "Render Pyright diagnostics section in dashboard."
   (let ((content-start (point)))
     (delete-region start end)
 
-    (if (not diagnostics)
-        (insert "Pyright failed\n\n")
+    (cond
+     ((eq diagnostics :error)
+      (insert "Pyright failed\n\n"))
 
+     (t
       (let* ((counts (jsoa/count-diagnostics diagnostics))
              (errors (car counts))
              (warnings (cdr counts)))
 
-        ;; header buttons
+        ;; header
         (let ((btn-start (point)))
           (insert (format "Errors: %d" errors))
           (make-text-button
@@ -596,35 +603,38 @@
 
         (insert "\n\n")
 
-        ;; preview (top 5)
-        (dolist (d (seq-take diagnostics 5))
-          (let* ((file (plist-get d :file))
-                 (line (plist-get d :line))
-                 (msg  (plist-get d :message))
-                 (label (format "%s:%d"
-                                (jsoa/short-path file root)
-                                (or line 0)))
-                 (btn-start (point)))
+        ;; preview
+        (when diagnostics
+          (dolist (d (seq-take diagnostics 5))
+            (let* ((file (plist-get d :file))
+                   (line (plist-get d :line))
+                   (msg  (plist-get d :message))
+                   (label (format "%s:%d"
+                                  (jsoa/short-path file root)
+                                  (or line 0)))
+                   (btn-start (point)))
 
-            (insert label)
-            (make-text-button
-             btn-start (point)
-             'file file
-             'line line
-             'root root
-             'action (lambda (btn)
-                       (jsoa/open-file-other-window
-                        (button-get btn 'file)
-                        (button-get btn 'root)
-                        (button-get btn 'line)))
-             'follow-link t
-             'face 'link)
+              ;; clickable file:line
+              (insert label)
+              (make-text-button
+               btn-start (point)
+               'file file
+               'line line
+               'root root
+               'action (lambda (btn)
+                         (jsoa/open-file-other-window
+                          (button-get btn 'file)
+                          (button-get btn 'root)
+                          (button-get btn 'line)))
+               'follow-link t
+               'face 'link)
 
-            (insert "  ")
-            (insert (truncate-string-to-width msg 80 nil nil t))
-            (insert "\n")))
+              ;; message
+              (insert "  ")
+              (insert (truncate-string-to-width msg 80 nil nil t))
+              (insert "\n"))))
 
-        (insert "\n")))
+        (insert "\n"))))
 
     (indent-rigidly content-start (point) pad)))
 

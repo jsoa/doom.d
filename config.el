@@ -96,9 +96,6 @@
 (load! "modules/+spell")
 (load! "modules/+prettier")
 
-;; AI
-(load! "modules/+copilot")
-
 ;; Pre programming mode configurations
 (load! "modules/+fci")
 (load! "modules/+flycheck")
@@ -106,6 +103,7 @@
 (load! "modules/+ediff")
 (load! "modules/+lsp")
 (load! "modules/+magit")
+(load! "modules/+vterm")
 
 ;; Programming mode configuration
 (load! "modules/+groovy")

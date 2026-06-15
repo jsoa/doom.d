@@ -111,6 +111,7 @@
 (load! "modules/+groovy")
 (load! "modules/+python")
 (load! "modules/+typescript")
+(load! "modules/+javascript")
 (load! "modules/+html")
 
 ;; Private locals

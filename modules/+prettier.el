@@ -24,7 +24,6 @@
 
   (setf (alist-get 'prettier-react apheleia-formatters)
         '("npx" "prettier"
-          "--parser=babel"
           "--stdin-filepath" filepath))
   (setf (alist-get 'prettier-json apheleia-formatters)
         '("npx" "prettier"

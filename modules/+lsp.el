@@ -9,6 +9,7 @@
         lsp-enable-snippet t)
   (setq lsp-enable-symbol-highlighting t
         lsp-ui-doc-enable t
+        lsp-pyright-disable-tagged-hints t
         lsp-ui-doc-show-with-cursor t
         lsp-ui-sideline-enable t)
 

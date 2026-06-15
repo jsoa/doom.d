@@ -54,15 +54,6 @@ https://www.jetbrains.com/lp/mono/
 - avy (https://github.com/abo-abo/avy)
 - consult (https://github.com/minad/consult)
 - embark (https://github.com/oantolin/embark)
-- copilot (https://github.com/copilot-emacs/copilot.el)
-
----
-
-## AI Setup (Optional)
-
-```
-M-x copilot-login
-```
 
 ---
 

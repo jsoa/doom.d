@@ -1,6 +1,11 @@
 ;;; +vterm.el -*- lexical-binding: t; -*-
 
-(defun jsoa/project-vterm ()
+(after! vterm
+  ;; Keep terminal buffers around after the shell exits.
+  (setq vterm-kill-buffer-on-exit nil))
+
+(defun jsoa/project-codex ()
+  "Open a dedicated Codex terminal for the current project."
   (interactive)
   (let* ((project-root
           (if-let ((proj (project-current)))
@@ -10,14 +15,23 @@
           (file-name-nondirectory
            (directory-file-name project-root)))
          (buffer-name
-          (format "*vterm:%s*" project-name)))
+          (format "*codex:%s*" project-name)))
 
     (if-let ((buf (get-buffer buffer-name)))
         (pop-to-buffer buf)
       (let ((default-directory project-root))
-        (vterm buffer-name)))))
+        (vterm buffer-name)
 
-(defun jsoa/kill-project-vterm ()
+        ;; Give vterm a moment to initialize.
+        (run-at-time
+         0.25 nil
+         (lambda ()
+           (when-let ((buf (get-buffer buffer-name)))
+             (with-current-buffer buf
+               (vterm-send-string "codex --no-alt-screen")
+               (vterm-send-return)))))))))
+
+(defun jsoa/kill-project-codex ()
   (interactive)
   (let* ((project-root
           (if-let ((proj (project-current)))
@@ -27,16 +41,14 @@
           (file-name-nondirectory
            (directory-file-name project-root)))
          (buffer-name
-          (format "*vterm:%s*" project-name)))
+          (format "*codex:%s*" project-name)))
 
     (when-let ((buf (get-buffer buffer-name)))
       (kill-buffer buf)
       (message "Killed %s" buffer-name))))
 
-(after! vterm
-  (setq vterm-kill-buffer-on-exit nil))
-
 (map! :leader
-      (:prefix ("o" . "open")
-       :desc "Project VTerm"      "c" #'jsoa/project-vterm
-       :desc "Kill Project VTerm" "C" #'jsoa/kill-project-vterm))
+      (:prefix ("v" . "vterm")
+       :desc "Toggle VTerm"      "t" #'+vterm/toggle
+       :desc "Project Codex"     "c" #'jsoa/project-codex
+       :desc "Kill Codex"        "C" #'jsoa/kill-project-codex))

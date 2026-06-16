@@ -1,5 +1,9 @@
 ;;; ~/.doom.d/+bindings.el -*- lexical-binding: t; -*-
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; NOTE: Key Bindings                          ;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
 (map!
 
  ;; Other window swap SPC w w does the same thing

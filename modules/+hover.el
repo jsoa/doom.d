@@ -18,14 +18,52 @@
 (defvar jsoa-hover-visible nil)
 (defvar jsoa-hover-last-point nil)
 
+(defface jsoa-hover-mode-line-face
+  '((t (:inherit mode-line
+        :height 0.9)))
+  "Mode line for hover popups.")
+
 (define-derived-mode jsoa-hover-popup-mode special-mode "Hover"
   "Major mode for JSOA hover."
 
   (setq-local cursor-type nil)
-  (setq-local mode-line-format nil)
-  (setq-local header-line-format nil)
   (setq-local truncate-lines t)
-  (setq-local buffer-read-only t))
+  (setq-local buffer-read-only t)
+  (setq-local header-line-format nil)
+
+  (setq-local
+   mode-line-format
+   '(" "
+     (:propertize "SPC c h"
+                  face font-lock-keyword-face)
+     "  "
+     (:propertize "[j]" face bold)
+     " ↓  "
+     (:propertize "[k]" face bold)
+     " ↑  "
+     (:propertize "[y]" face bold)
+     " Copy  "
+     (:propertize "[o]" face bold)
+     " Open  "
+     (:propertize "[q]" face bold)
+     " Close")))
+
+(defun jsoa-hover-copy ()
+  "Copy the current hover contents to the kill ring."
+  (interactive)
+
+  (when-let ((buffer (get-buffer jsoa-hover-buffer-name)))
+    (with-current-buffer buffer
+      (kill-new (buffer-string))
+      (message "Hover copied"))))
+
+(defun jsoa-hover-open ()
+  "Open the current hover in a normal window."
+  (interactive)
+
+  (when-let ((buffer (get-buffer jsoa-hover-buffer-name)))
+    (jsoa-hover-hide)
+    (pop-to-buffer buffer)))
 
 (defun jsoa-hover-command-p (command)
   (memq command
@@ -63,7 +101,9 @@
 (defun jsoa-hover-build ()
   "Collect hover information for the current point."
   (list
-   :errors (flycheck-overlay-errors-at (point))
+   :errors
+   (when (fboundp 'flycheck-overlay-errors-at)
+     (flycheck-overlay-errors-at (point)))
    :signature (jsoa-hover-signature)))
 
 (defun jsoa-hover-show ()
@@ -135,7 +175,7 @@
        :right-fringe 8
        :respect-header-line t
        :respect-mode-line t
-       :min-width 40
+       :min-width 65
        :max-width 100
        :min-height 1
        :max-height (floor (* 0.20 (frame-height))))))
@@ -144,18 +184,21 @@
 
 ;; TODO: Support all valid LSP Hover.contents formats.
 (defun jsoa-hover-signature ()
-  (when-let* ((hover
-               (ignore-errors
-                 (lsp-request
-                  "textDocument/hover"
-                  (lsp--text-document-position-params))))
-              (contents (plist-get hover :contents))
-              (value (plist-get contents :value)))
-    (string-trim
-     (replace-regexp-in-string
-      "```[[:alpha:]]*\n\\|```"
-      ""
-      value))))
+  "Return the LSP hover signature at point, if supported."
+  (when (and (fboundp 'lsp-feature?)
+             (lsp-feature? "textDocument/hover"))
+    (when-let* ((hover
+                 (ignore-errors
+                   (lsp-request
+                    "textDocument/hover"
+                    (lsp--text-document-position-params))))
+                (contents (plist-get hover :contents))
+                (value (plist-get contents :value)))
+      (string-trim
+       (replace-regexp-in-string
+        "```[[:alpha:]]*\n\\|```"
+        ""
+        value)))))
 
 (defun jsoa-hover-pre-command ()
   (unless (jsoa-hover-command-p this-command)
@@ -191,4 +234,7 @@
       (:prefix ("c h" . "hover")
        :desc "Scroll Down" "j" #'jsoa-hover-scroll-down
        :desc "Scroll Up"   "k" #'jsoa-hover-scroll-up
-       :desc "Close Hover" "q" #'jsoa-hover-close))
+       :desc "Close Hover" "q" #'jsoa-hover-close
+       :desc "Copy Hover" "y" #'jsoa-hover-copy
+       :desc "Open Hover" "o" #'jsoa-hover-open
+       ))

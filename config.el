@@ -82,6 +82,8 @@
 (load! "core/+general")
 
 ;; Custom modules
+(load! "modules/+env")
+(load! "modules/+hover")
 (load! "modules/+large-file")
 (load! "modules/+dashboard")
 

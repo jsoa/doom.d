@@ -97,6 +97,7 @@
 (load! "modules/+avy")
 (load! "modules/+spell")
 (load! "modules/+prettier")
+(load! "modules/+review")
 
 ;; Pre programming mode configurations
 (load! "modules/+fci")

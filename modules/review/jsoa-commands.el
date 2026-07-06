@@ -2,18 +2,24 @@
 
 (require 'jsoa-transport)
 
+(defcustom jsoa-provider-default
+  'codex
+  "Default provider used by JSOA."
+  :type '(choice
+          (const clipboard)
+          (const codex))
+  :group 'jsoa)
+
 ;;; ---------------------------------------------------------------------------
 ;;; Review
 ;;; ---------------------------------------------------------------------------
 
 (defun jsoa-review ()
-  "Review the code at point."
-
   (interactive)
 
   (jsoa-transport-send
    'review
-   'clipboard))
+   jsoa-provider-default))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Diagnostics
@@ -26,7 +32,7 @@
 
   (jsoa-transport-send
    'diagnostics
-   'clipboard))
+   jsoa-provider-default))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Explain
@@ -39,7 +45,7 @@
 
   (jsoa-transport-send
    'explain
-   'clipboard))
+   jsoa-provider-default))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Debug

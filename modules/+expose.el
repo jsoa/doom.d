@@ -10,7 +10,7 @@
  nil)
 
 (setq expose-hover-delay 0.25
-      expose-popup-max-height 20
+      expose-popup-max-height 10
       expose-popup-max-width 120)
 
 (expose-mode 1)

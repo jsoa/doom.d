@@ -1,4 +1,4 @@
-;;; expose-popup-history.el -*- lexical-binding: t; -*-
+;;; expose-history.el -*- lexical-binding: t; -*-
 
 (defconst expose-history-buffer-name
   "*EXPOSE History*")

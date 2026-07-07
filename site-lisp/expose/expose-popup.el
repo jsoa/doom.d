@@ -38,11 +38,6 @@
 (defvar expose-popup-mode-line-status nil
   "Current status shown in the Expose popup mode line.")
 
-(defface expose-popup-mode-line-face
-  '((t (:inherit mode-line
-        :height 0.9)))
-  "Mode line for popups.")
-
 (defface expose-popup-title-face
   '((t (:inherit mode-line
         :extend t)))
@@ -282,30 +277,6 @@
 ;;; ---------------------------------------------------------------------------
 ;;; Rendering
 ;;; ---------------------------------------------------------------------------
-
-(defun expose-popup-render-actions ()
-  "Return the popup action footer."
-
-  (let (result)
-
-    (dolist (action (expose-popup-actions))
-
-      (setq result
-            (append
-             result
-             (list
-              (propertize
-               (format "[%c]" (plist-get action :key))
-               'face
-               'font-lock-keyword-face)
-
-              " "
-
-              (plist-get action :label)
-
-              "   "))))
-
-    result))
 
 (defun expose-popup-insert-separator ()
   "Insert a popup separator."

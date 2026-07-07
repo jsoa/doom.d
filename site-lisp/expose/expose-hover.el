@@ -161,10 +161,11 @@
 ;;; ---------------------------------------------------------------------------
 
 (defun expose-hover-fontify (text mode)
-  "Fontify TEXT using MODE."
+  "Fontify TEXT using MODE without running mode hooks."
 
   (with-temp-buffer
-    (funcall mode)
+    (delay-mode-hooks
+      (funcall mode))
     (font-lock-mode 1)
     (insert text)
     (font-lock-ensure)

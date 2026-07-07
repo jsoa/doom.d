@@ -83,13 +83,6 @@
 ;;; Helpers
 ;;; ---------------------------------------------------------------------------
 
-(defun expose-renderer-xml-tag (tag value)
-  "Insert TAG containing VALUE."
-
-  (insert "<" tag ">")
-  (insert value)
-  (insert "</" tag ">\n"))
-
 (defun expose-renderer-xml-tag-name (key)
   "Return the XML tag name for KEY."
 

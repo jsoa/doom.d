@@ -32,11 +32,27 @@
 ;;; ---------------------------------------------------------------------------
 
 (defun expose-request-select (context &rest keys)
-  "Return a plist containing KEYS copied from CONTEXT.
+  "Return a plist containing KEYS copied from CONTEXT."
 
-Git status and diff are included automatically when available."
+  (let (result)
 
-  (let ((selected-keys
+    (dolist (key keys)
+      (let ((value
+             (plist-get context key)))
+
+        (when value
+          (setq result
+                (plist-put result key value)))))
+
+    result))
+
+(defun expose-request-select-with-git (context &rest keys)
+  "Return a plist containing KEYS copied from CONTEXT plus git context."
+
+  (let ((context-with-git
+         (expose-context-with-git context))
+
+        (selected-keys
          (delete-dups
           (append
            keys
@@ -46,7 +62,7 @@ Git status and diff are included automatically when available."
 
     (dolist (key selected-keys)
       (let ((value
-             (plist-get context key)))
+             (plist-get context-with-git key)))
 
         (when value
           (setq result
@@ -65,9 +81,9 @@ Git status and diff are included automatically when available."
    'review
    'xml
 
-   "Review the current implementation for correctness, readability, maintainability, and potential bugs."
+   "Review the current implementation for correctness, readability, maintainability, and potential bugs. Use the git diff/status when it helps explain the current change, but prioritize the focused code context."
 
-   (expose-request-select
+   (expose-request-select-with-git
     context
     :project
     :language
@@ -162,9 +178,9 @@ Git status and diff are included automatically when available."
    'security
    'xml
 
-   "Review the current code for security issues. Focus on authentication, authorization, permissions, injection risks, unsafe deserialization, file handling, secrets, user-controlled input, redirects, token handling, CSRF, XSS, SSRF, path traversal, and data exposure. Be specific. If there is no meaningful security concern, say so clearly."
+   "Review the current code for security issues. Focus on authentication, authorization, permissions, injection risks, unsafe deserialization, file handling, secrets, user-controlled input, redirects, token handling, CSRF, XSS, SSRF, path traversal, and data exposure. Use the git diff/status to understand what changed. Be specific. If there is no meaningful security concern, say so clearly."
 
-   (expose-request-select
+   (expose-request-select-with-git
     context
     :project
     :language
@@ -183,9 +199,9 @@ Git status and diff are included automatically when available."
    'performance
    'xml
 
-   "Review the current code for performance issues. Focus on unnecessary work, repeated computation, inefficient queries, N+1 query patterns, blocking I/O, excessive allocations, avoidable re-renders, expensive loops, missing batching, missing caching, and scalability concerns. Prefer practical fixes over theoretical micro-optimizations. If performance is already reasonable, say so clearly."
+   "Review the current code for performance issues. Focus on unnecessary work, repeated computation, inefficient queries, N+1 query patterns, blocking I/O, excessive allocations, avoidable re-renders, expensive loops, missing batching, missing caching, and scalability concerns. Use the git diff/status to understand what changed. Prefer practical fixes over theoretical micro-optimizations. If performance is already reasonable, say so clearly."
 
-   (expose-request-select
+   (expose-request-select-with-git
     context
     :project
     :language
@@ -390,7 +406,7 @@ Git status and diff are included automatically when available."
 
    "Identify practical risks in the current code. Focus on assumptions that could break, hidden coupling, fragile behavior, unclear ownership, maintenance risks, runtime failures, future-change hazards, operational concerns, and user-impacting failure modes. Do not duplicate a generic review; prioritize the risks most likely to matter."
 
-   (expose-request-select
+   (expose-request-select-with-git
     context
     :project
     :language
@@ -451,7 +467,7 @@ Git status and diff are included automatically when available."
 
    "Write a clear git commit message for the current changes. Use the git diff and status as the primary source of truth. Prefer a concise conventional-commit style subject when appropriate, followed by a short body only if useful. Do not invent changes that are not present in the diff."
 
-   (expose-request-select
+   (expose-request-select-with-git
     context
     :project
     :language
@@ -468,7 +484,7 @@ Git status and diff are included automatically when available."
 
    "Write a concise changelog entry for the current changes. Use the git diff and status as the primary source of truth. Focus on user-visible behavior, developer-facing changes, fixes, and notable internal improvements. Do not invent changes that are not present in the diff."
 
-   (expose-request-select
+   (expose-request-select-with-git
     context
     :project
     :language
@@ -484,8 +500,7 @@ Git status and diff are included automatically when available."
   "Build a request of TYPE."
 
   (let ((context
-         (expose-context-with-git
-          (expose-context-build))))
+         (expose-context-build)))
 
     (pcase type
       ('review

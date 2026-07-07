@@ -12,6 +12,6 @@
 
   (kill-new document)
 
-  (message "Review copied to clipboard"))
+  (message "Expose request copied to clipboard"))
 
 (provide 'expose-clipboard)

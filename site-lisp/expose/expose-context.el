@@ -100,6 +100,27 @@
 
     (nreverse results)))
 
+(defun expose-context-find-all-types (node types)
+  "Return every descendant of NODE whose type is in TYPES."
+
+  (let (results)
+
+    (cl-labels
+        ((walk (node)
+           (when (member
+                  (treesit-node-type node)
+                  types)
+             (push node results))
+
+           (dotimes (i (treesit-node-child-count node))
+             (walk
+              (treesit-node-child node i)))))
+
+      (when node
+        (walk node)))
+
+    (nreverse results)))
+
 ;;; ---------------------------------------------------------------------------
 ;;; Scope
 ;;; ---------------------------------------------------------------------------
@@ -271,13 +292,34 @@
 ;;; Imports
 ;;; ---------------------------------------------------------------------------
 
-(defun expose-context-import-nodes ()
-  "Return all import statements."
+(defun expose-context-import-node-types ()
+  "Return Tree-sitter node types that represent imports."
 
-  (when-let ((root (expose-context-root-node)))
-    (expose-context-find-all
+  (pcase major-mode
+    ((or 'python-mode
+         'python-ts-mode)
+     '("import_statement"
+       "import_from_statement"))
+
+    ((or 'js-mode
+         'js-ts-mode
+         'typescript-ts-mode
+         'tsx-ts-mode)
+     '("import_statement"))
+
+    (_
+     '("import_statement"
+       "import_from_statement"))))
+
+(defun expose-context-import-nodes ()
+  "Return all import statement nodes."
+
+  (when-let ((root
+              (expose-context-root-node)))
+
+    (expose-context-find-all-types
      root
-     "import_statement")))
+     (expose-context-import-node-types))))
 
 (defun expose-context-imports ()
   "Return all imports."

@@ -2,9 +2,16 @@
 
 (require 'expose-context)
 
+(defcustom expose-request-output-instruction
+  "Return the response as concise Markdown. Do not return XML, HTML, JSON, or custom tags. Do not mirror the request document structure. Use headings, bullet lists, and fenced code blocks when useful."
+  "Instruction appended to every Expose request to control provider output format."
+  :type 'string
+  :group 'expose)
+
 ;;; ---------------------------------------------------------------------------
 ;;; Request
 ;;; ---------------------------------------------------------------------------
+
 
 (defun expose-request-create (type document-format instruction context)
   "Return a request object."
@@ -12,7 +19,12 @@
   (list
    :type type
    :document-format document-format
-   :instruction instruction
+   :instruction
+   (string-join
+    (list
+     instruction
+     expose-request-output-instruction)
+    "\n\n")
    :context context))
 
 ;;; ---------------------------------------------------------------------------
@@ -319,6 +331,109 @@
     :parent-scope
     :code)))
 
+(defun expose-request-concurrency (context)
+  "Build a concurrency review request."
+
+  (expose-request-create
+   'concurrency
+   'xml
+
+   "Review the current code for concurrency, ordering, and race-condition risks. Focus on shared mutable state, async callbacks, retries, idempotency, transactions, locks, database consistency, background jobs, request ordering, React effects, stale closures, and external side effects. Explain whether concurrency is actually relevant here. Prefer practical mitigations over speculative concerns."
+
+   (expose-request-select
+    context
+    :project
+    :language
+    :file
+    :diagnostics
+    :imports
+    :focus
+    :scope
+    :parent-scope
+    :code)))
+
+(defun expose-request-invariants (context)
+  "Build an invariants request."
+
+  (expose-request-create
+   'invariants
+   'xml
+
+   "Identify the important invariants in the current code. Explain what must be true before execution, during execution, and after execution. Include assumptions about data shape, state, permissions, transactions, ordering, types, and side effects. Point out any invariant that is not enforced clearly."
+
+   (expose-request-select
+    context
+    :project
+    :language
+    :file
+    :diagnostics
+    :imports
+    :focus
+    :scope
+    :parent-scope
+    :code)))
+
+(defun expose-request-risks (context)
+  "Build a risks request."
+
+  (expose-request-create
+   'risks
+   'xml
+
+   "Identify practical risks in the current code. Focus on assumptions that could break, hidden coupling, fragile behavior, unclear ownership, maintenance risks, runtime failures, future-change hazards, operational concerns, and user-impacting failure modes. Do not duplicate a generic review; prioritize the risks most likely to matter."
+
+   (expose-request-select
+    context
+    :project
+    :language
+    :file
+    :diagnostics
+    :imports
+    :focus
+    :scope
+    :parent-scope
+    :code)))
+
+(defun expose-request-why (context)
+  "Build a why request."
+
+  (expose-request-create
+   'why
+   'xml
+
+   "Explain why this code may have been written this way. Focus on likely design intent, tradeoffs, constraints, alternatives that may have been avoided, framework idioms, and project-specific context. Clearly separate confident observations from guesses."
+
+   (expose-request-select
+    context
+    :project
+    :language
+    :file
+    :imports
+    :focus
+    :scope
+    :parent-scope
+    :code)))
+
+(defun expose-request-mental-model (context)
+  "Build a mental model request."
+
+  (expose-request-create
+   'mental-model
+   'xml
+
+   "Build a concise mental model for understanding the current code. Explain the main moving parts, responsibilities, data flow, control flow, dependencies, and how to reason about changes safely. Prefer a clear conceptual map over line-by-line explanation."
+
+   (expose-request-select
+    context
+    :project
+    :language
+    :file
+    :imports
+    :focus
+    :scope
+    :parent-scope
+    :code)))
+
 ;;; ---------------------------------------------------------------------------
 ;;; Dispatcher
 ;;; ---------------------------------------------------------------------------
@@ -372,6 +487,21 @@
       ('types
        (expose-request-types context))
 
+      ('concurrency
+       (expose-request-concurrency context))
+
+      ('invariants
+       (expose-request-invariants context))
+
+      ('risks
+       (expose-request-risks context))
+
+      ('why
+       (expose-request-why context))
+
+      ('mental-model
+       (expose-request-mental-model context))
+
       (_
        (error "Unknown request type: %s" type)))))
 
@@ -400,7 +530,12 @@
         usage
         docstring
         summary
-        types)))))
+        types
+        concurrency
+        invariants
+        risks
+        why
+        mental-model)))))
 
   (let ((buffer
          (get-buffer-create

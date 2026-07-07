@@ -32,11 +32,19 @@
 ;;; ---------------------------------------------------------------------------
 
 (defun expose-request-select (context &rest keys)
-  "Return a plist containing KEYS copied from CONTEXT."
+  "Return a plist containing KEYS copied from CONTEXT.
 
-  (let (result)
+Git status and diff are included automatically when available."
 
-    (dolist (key keys)
+  (let ((selected-keys
+         (delete-dups
+          (append
+           keys
+           '(:git-status :git-diff))))
+
+        result)
+
+    (dolist (key selected-keys)
       (let ((value
              (plist-get context key)))
 
@@ -434,6 +442,40 @@
     :parent-scope
     :code)))
 
+(defun expose-request-commit-message (context)
+  "Build a commit message request."
+
+  (expose-request-create
+   'commit-message
+   'xml
+
+   "Write a clear git commit message for the current changes. Use the git diff and status as the primary source of truth. Prefer a concise conventional-commit style subject when appropriate, followed by a short body only if useful. Do not invent changes that are not present in the diff."
+
+   (expose-request-select
+    context
+    :project
+    :language
+    :file
+    :focus
+    :scope)))
+
+(defun expose-request-changelog (context)
+  "Build a changelog request."
+
+  (expose-request-create
+   'changelog
+   'xml
+
+   "Write a concise changelog entry for the current changes. Use the git diff and status as the primary source of truth. Focus on user-visible behavior, developer-facing changes, fixes, and notable internal improvements. Do not invent changes that are not present in the diff."
+
+   (expose-request-select
+    context
+    :project
+    :language
+    :file
+    :focus
+    :scope)))
+
 ;;; ---------------------------------------------------------------------------
 ;;; Dispatcher
 ;;; ---------------------------------------------------------------------------
@@ -442,7 +484,8 @@
   "Build a request of TYPE."
 
   (let ((context
-         (expose-context-build)))
+         (expose-context-with-git
+          (expose-context-build))))
 
     (pcase type
       ('review
@@ -502,6 +545,12 @@
       ('mental-model
        (expose-request-mental-model context))
 
+      ('commit-message
+       (expose-request-commit-message context))
+
+      ('changelog
+       (expose-request-changelog context))
+
       (_
        (error "Unknown request type: %s" type)))))
 
@@ -535,7 +584,9 @@
         invariants
         risks
         why
-        mental-model)))))
+        mental-model
+        commit-message
+        changelog)))))
 
   (let ((buffer
          (get-buffer-create

@@ -32,6 +32,11 @@
 (defvar expose-popup-scroll-indicator "")
 (defvar expose-popup-action-registry nil
   "Registered popup actions.")
+(defvar expose-popup-mode-line-title nil
+  "Current title shown in the Expose popup mode line.")
+
+(defvar expose-popup-mode-line-status nil
+  "Current status shown in the Expose popup mode line.")
 
 (defface expose-popup-mode-line-face
   '((t (:inherit mode-line
@@ -42,6 +47,64 @@
   '((t (:inherit mode-line
         :extend t)))
   "Face for popup titles.")
+
+
+;;; ---------------------------------------------------------------------------
+;;; Modeline
+;;; ---------------------------------------------------------------------------
+
+(defun expose-popup-key-prefix-label ()
+  "Return the Expose key prefix label."
+
+  (format
+   "SPC %s"
+   (if (boundp 'expose-key-prefix)
+       expose-key-prefix
+     "c h")))
+
+(defun expose-popup-mode-line-info ()
+  "Return compact Expose popup mode-line info."
+
+  (string-join
+   (delq
+    nil
+    (list
+     (propertize
+      "EXPOSE"
+      'face
+      'mode-line-buffer-id)
+
+     (propertize
+      (expose-popup-key-prefix-label)
+      'face
+      'font-lock-keyword-face)
+
+     expose-popup-mode-line-title
+
+     (when (expose-popup-scroll-indicator-visible-p)
+       (propertize
+        expose-popup-scroll-indicator
+        'face
+        'shadow))
+
+     expose-popup-mode-line-status))
+   "   "))
+
+(defun expose-popup-mode-line-format ()
+  "Return the Expose popup mode-line format."
+
+  '(" "
+    (:eval
+     (expose-popup-mode-line-info))
+    " "))
+
+(defun expose-popup-set-mode-line (title &optional status)
+  "Set popup mode-line TITLE and optional STATUS."
+
+  (setq expose-popup-mode-line-title title)
+  (setq expose-popup-mode-line-status status)
+
+  (force-mode-line-update t))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Actions
@@ -153,6 +216,9 @@
 
     (expose-popup-show-view
      (expose-popup-loading-view label))
+
+    (expose-popup-set-mode-line
+     (format "Loading %s" label))
 
     (if async
 
@@ -271,6 +337,9 @@
      (expose-popup-view-body view)
      "")))
 
+  (expose-popup-set-mode-line
+   (expose-popup-view-title view))
+
   (let ((buffer
          (get-buffer-create expose-popup-buffer-name)))
 
@@ -304,7 +373,9 @@
 
     (expose-history-add view)
 
-    (expose-popup-show-buffer)))
+    (expose-popup-show-buffer)
+
+    (expose-popup-update-scroll-indicator)))
 
 (defun expose-popup-show-content (content)
   "Display CONTENT in the popup buffer."
@@ -313,6 +384,9 @@
    "Popup"
    "Showing hover content (%d bytes)."
    (length content))
+
+  (expose-popup-set-mode-line
+   "Hover")
 
   (let ((buffer
          (get-buffer-create expose-popup-buffer-name)))
@@ -331,6 +405,7 @@
       (setq buffer-read-only t))
 
     (expose-popup-show-buffer)
+
     (expose-popup-update-scroll-indicator)))
 
 (defun expose-popup-hide ()
@@ -342,6 +417,9 @@
      "Hiding popup."))
 
   (setq expose-popup-visible nil)
+  (setq expose-popup-scroll-indicator "")
+
+  (expose-popup-set-mode-line nil nil)
 
   (posframe-hide expose-popup-buffer-name))
 
@@ -349,20 +427,48 @@
   "Update the popup scroll indicator."
 
   (setq expose-popup-scroll-indicator
-        (when-let ((window (get-buffer-window expose-popup-buffer-name t)))
-          (let ((above (> (window-start window) (point-min)))
-                (below (< (window-end window t) (point-max))))
-            (cond
-             ((and above below) "▲ ▼")
-             (above "▲")
-             (below "▼")
-             (t "")))))
+        (if-let ((window
+                  (get-buffer-window expose-popup-buffer-name t)))
+
+            (with-current-buffer
+                (get-buffer-create expose-popup-buffer-name)
+
+              (let ((above
+                     (> (window-start window)
+                        (point-min)))
+
+                    (below
+                     (< (window-end window t)
+                        (point-max))))
+
+                (cond
+                 ((and above below)
+                  "▲ ▼")
+
+                 (above
+                  "▲")
+
+                 (below
+                  "▼")
+
+                 (t
+                  ""))))
+
+          ""))
 
   (force-mode-line-update t))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Commands
 ;;; ---------------------------------------------------------------------------
+
+(defun expose-popup-scroll-indicator-visible-p ()
+  "Return non-nil if the popup scroll indicator should be displayed."
+
+  (and
+   expose-popup-scroll-indicator
+   (not
+    (string-empty-p expose-popup-scroll-indicator))))
 
 (defun expose-popup-copy ()
   "Copy the current popup contents to the kill ring."
@@ -418,8 +524,8 @@
 ;;; Mode
 ;;; ---------------------------------------------------------------------------
 
-(define-derived-mode expose-popup-mode special-mode "EXPOSE Popup"
-  "Major mode for EXPOSE popups."
+(define-derived-mode expose-popup-mode special-mode "Expose"
+  "Major mode for Expose popups."
 
   (setq-local cursor-type nil)
   (setq-local truncate-lines t)
@@ -427,13 +533,7 @@
 
   (setq-local
    mode-line-format
-   (append
-    '(" "
-      (:propertize "SPC c h"
-                   'face
-                   'mode-line-buffer-id)
-      "   ")
-    (expose-popup-render-actions))))
+   (expose-popup-mode-line-format)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Default Actions

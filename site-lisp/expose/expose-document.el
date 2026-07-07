@@ -1,37 +1,31 @@
-;;; review/document.el -*- lexical-binding: t; -*-
+;;; expose-document.el -*- lexical-binding: t; -*-
 
-(require 'jsoa-request)
-(require 'jsoa-renderer-xml)
+(require 'expose-request)
+(require 'expose-xml)
 
 ;;; ---------------------------------------------------------------------------
 ;;; Builder
 ;;; ---------------------------------------------------------------------------
 
-(defun jsoa-document-build (type)
+(defun expose-document-build (type)
   "Build a document for request TYPE."
 
   (let ((request
-          (jsoa-request-build type)))
+          (expose-request-build type)))
 
-    (jsoa-document-render request)))
+    (expose-document-render request)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Renderer
 ;;; ---------------------------------------------------------------------------
 
-(defun jsoa-document-render (request)
+(defun expose-document-render (request)
   "Render REQUEST into a document."
 
   (pcase (plist-get request :document-format)
 
     ('xml
-     (jsoa-renderer-xml request))
-
-    ;; ('markdown
-    ;;  (jsoa-renderer-markdown request))
-
-    ;; ('json
-    ;;  (jsoa-renderer-json request))
+     (expose-renderer-xml request))
 
     (_
      (error
@@ -42,7 +36,7 @@
 ;;; Helpers
 ;;; ---------------------------------------------------------------------------
 
-(defun jsoa-document-pretty-print ()
+(defun expose-document-pretty-print ()
   "Pretty-print the current document."
 
   (nxml-mode)
@@ -55,26 +49,26 @@
 ;;; Debug
 ;;; ---------------------------------------------------------------------------
 
-(defun jsoa-document-debug (type)
+(defun expose-document-debug (type)
   "Display the rendered document."
 
   (interactive)
 
   (let ((document
-         (jsoa-document-build type)))
+         (expose-document-build type)))
 
     (with-current-buffer
-        (get-buffer-create "*JSOA Document*")
+        (get-buffer-create "*EXPOSE Document*")
 
       (erase-buffer)
 
       (insert document)
 
-      (jsoa-document-pretty-print)
+      (expose-document-pretty-print)
 
       (goto-char (point-min))
 
       (pop-to-buffer
        (current-buffer)))))
 
-(provide 'jsoa-document)
+(provide 'expose-document)

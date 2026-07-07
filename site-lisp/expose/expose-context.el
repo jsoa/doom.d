@@ -1,4 +1,4 @@
-;;; review/context.el -*- lexical-binding: t; -*-
+;;; expose-context.el -*- lexical-binding: t; -*-
 
 (require 'cl-lib)
 (require 'projectile)
@@ -9,38 +9,38 @@
 ;;; Tree-sitter Primitives
 ;;; ---------------------------------------------------------------------------
 
-(defun jsoa-context-root-node ()
+(defun expose-context-root-node ()
   "Return the Tree-sitter root node for the current buffer."
 
   (ignore-errors
     (treesit-buffer-root-node)))
 
-(defun jsoa-context-current-node ()
+(defun expose-context-current-node ()
   "Return the Tree-sitter node at point."
 
   (ignore-errors
     (treesit-node-at (point))))
 
-(defun jsoa-context-parent (node)
+(defun expose-context-parent (node)
   "Return NODE's parent."
 
   (when node
     (treesit-node-parent node)))
 
-(defun jsoa-context-node-type (node)
+(defun expose-context-node-type (node)
   "Return NODE's type."
 
   (when node
     (treesit-node-type node)))
 
-(defun jsoa-context-node-text (node)
+(defun expose-context-node-text (node)
   "Return NODE's source text."
 
   (when node
     (substring-no-properties
      (treesit-node-text node))))
 
-(defun jsoa-context-child (node type)
+(defun expose-context-child (node type)
   "Return the first child of NODE whose type is TYPE."
 
   (when node
@@ -52,7 +52,7 @@
                  type)
             (throw 'found child)))))))
 
-(defun jsoa-context-children (node type)
+(defun expose-context-children (node type)
   "Return all children of NODE whose type is TYPE."
 
   (let (children)
@@ -67,7 +67,7 @@
 
     (nreverse children)))
 
-(defun jsoa-context-find-parent (node types)
+(defun expose-context-find-parent (node types)
   "Return the first ancestor of NODE whose type is in TYPES."
 
   (while (and node
@@ -79,7 +79,7 @@
 
   node)
 
-(defun jsoa-context-find-all (node type)
+(defun expose-context-find-all (node type)
   "Return every descendant of NODE whose type is TYPE."
 
   (let (results)
@@ -104,7 +104,7 @@
 ;;; Scope
 ;;; ---------------------------------------------------------------------------
 
-(defun jsoa-context-scope-node-types ()
+(defun expose-context-scope-node-types ()
   "Return the Tree-sitter node types that define semantic scopes."
 
   (pcase major-mode
@@ -130,93 +130,93 @@
        "class_declaration"
        "class_definition"))))
 
-(defun jsoa-context-scope-node ()
+(defun expose-context-scope-node ()
   "Return the enclosing semantic scope."
 
-  (jsoa-context-find-parent
-   (jsoa-context-current-node)
-   (jsoa-context-scope-node-types)))
+  (expose-context-find-parent
+   (expose-context-current-node)
+   (expose-context-scope-node-types)))
 
-(defun jsoa-context-scope-name ()
+(defun expose-context-scope-name ()
   "Return the current scope's name."
 
-  (when-let* ((scope (jsoa-context-scope-node))
+  (when-let* ((scope (expose-context-scope-node))
               (identifier
-               (jsoa-context-child
+               (expose-context-child
                 scope
                 "identifier")))
-    (jsoa-context-node-text identifier)))
+    (expose-context-node-text identifier)))
 
-(defun jsoa-context-scope-code ()
+(defun expose-context-scope-code ()
   "Return the source for the current semantic scope."
 
-  (when-let ((scope (jsoa-context-scope-node)))
-    (jsoa-context-node-text scope)))
+  (when-let ((scope (expose-context-scope-node)))
+    (expose-context-node-text scope)))
 
-(defun jsoa-context-scope ()
+(defun expose-context-scope ()
   "Return the current semantic scope."
 
   (list
    :name
-   (jsoa-context-scope-name)
+   (expose-context-scope-name)
 
    :code
-   (jsoa-context-scope-code)))
+   (expose-context-scope-code)))
 
-(defun jsoa-context-parent-scope-node ()
+(defun expose-context-parent-scope-node ()
   "Return the parent semantic scope."
 
-  (when-let ((scope (jsoa-context-scope-node)))
-    (jsoa-context-find-parent
-     (jsoa-context-parent scope)
-     (jsoa-context-scope-node-types))))
+  (when-let ((scope (expose-context-scope-node)))
+    (expose-context-find-parent
+     (expose-context-parent scope)
+     (expose-context-scope-node-types))))
 
-(defun jsoa-context-parent-scope-name ()
+(defun expose-context-parent-scope-name ()
   "Return the parent scope's name."
 
-  (when-let* ((scope (jsoa-context-parent-scope-node))
+  (when-let* ((scope (expose-context-parent-scope-node))
               (identifier
-               (jsoa-context-child
+               (expose-context-child
                 scope
                 "identifier")))
-    (jsoa-context-node-text identifier)))
+    (expose-context-node-text identifier)))
 
-(defun jsoa-context-parent-scope-code ()
+(defun expose-context-parent-scope-code ()
   "Return the source for the parent semantic scope."
 
-  (when-let ((scope (jsoa-context-parent-scope-node)))
-    (jsoa-context-node-text scope)))
+  (when-let ((scope (expose-context-parent-scope-node)))
+    (expose-context-node-text scope)))
 
-(defun jsoa-context-parent-scope ()
+(defun expose-context-parent-scope ()
   "Return the parent semantic scope."
 
   (list
    :name
-   (jsoa-context-parent-scope-name)
+   (expose-context-parent-scope-name)
 
    :code
-   (jsoa-context-parent-scope-code)))
+   (expose-context-parent-scope-code)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Project
 ;;; ---------------------------------------------------------------------------
 
-(defun jsoa-context-project ()
+(defun expose-context-project ()
   "Return the current project name."
 
   (when (projectile-project-p)
     (projectile-project-name)))
 
-(defun jsoa-context-project-root ()
+(defun expose-context-project-root ()
   "Return the current project root."
 
   (when (projectile-project-p)
     (projectile-project-root)))
 
-(defun jsoa-context-relative-file ()
+(defun expose-context-relative-file ()
   "Return the current file relative to the project."
 
-  (if-let ((root (jsoa-context-project-root))
+  (if-let ((root (expose-context-project-root))
            (file buffer-file-name))
       (file-relative-name file root)
     (or buffer-file-name "")))
@@ -225,7 +225,7 @@
 ;;; Language
 ;;; ---------------------------------------------------------------------------
 
-(defun jsoa-context-language ()
+(defun expose-context-language ()
   "Return the current language."
 
   (pcase major-mode
@@ -253,7 +253,7 @@
 ;;; Diagnostics
 ;;; ---------------------------------------------------------------------------
 
-(defun jsoa-context-diagnostics ()
+(defun expose-context-diagnostics ()
   "Return Flycheck diagnostics at point."
 
   (when (fboundp 'flycheck-overlay-errors-at)
@@ -271,70 +271,70 @@
 ;;; Imports
 ;;; ---------------------------------------------------------------------------
 
-(defun jsoa-context-import-nodes ()
+(defun expose-context-import-nodes ()
   "Return all import statements."
 
-  (when-let ((root (jsoa-context-root-node)))
-    (jsoa-context-find-all
+  (when-let ((root (expose-context-root-node)))
+    (expose-context-find-all
      root
      "import_statement")))
 
-(defun jsoa-context-imports ()
+(defun expose-context-imports ()
   "Return all imports."
 
   (mapcar
-   #'jsoa-context-node-text
-   (jsoa-context-import-nodes)))
+   #'expose-context-node-text
+   (expose-context-import-nodes)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Focus
 ;;; ---------------------------------------------------------------------------
 
-(defun jsoa-context-symbol ()
+(defun expose-context-symbol ()
   "Return the symbol at point."
 
   (thing-at-point 'symbol t))
 
-(defun jsoa-context-find-parent-text (types)
+(defun expose-context-find-parent-text (types)
   "Return the source text for the first parent node in TYPES."
 
   (when-let ((node
-              (jsoa-context-find-parent
-               (jsoa-context-current-node)
+              (expose-context-find-parent
+               (expose-context-current-node)
                types)))
-    (jsoa-context-node-text node)))
+    (expose-context-node-text node)))
 
-(defun jsoa-context-focus-identifier ()
+(defun expose-context-focus-identifier ()
   "Return the identifier at point."
 
   (thing-at-point 'symbol t))
 
-(defun jsoa-context-focus-expression ()
+(defun expose-context-focus-expression ()
   "Return the enclosing expression."
 
   (pcase major-mode
     ((or 'js-ts-mode
          'typescript-ts-mode
          'tsx-ts-mode)
-     (jsoa-context-find-parent-text
+     (expose-context-find-parent-text
       '("call_expression"
         "member_expression"
         "new_expression")))
 
     ((or 'python-mode
          'python-ts-mode)
-     (jsoa-context-find-parent-text
+     (expose-context-find-parent-text
       '("call"
         "attribute")))))
 
-(defun jsoa-context-focus-construct ()
+(defun expose-context-focus-construct ()
   "Return the enclosing semantic construct."
 
   (pcase major-mode
     ((or 'js-ts-mode
          'typescript-ts-mode
          'tsx-ts-mode)
-     (jsoa-context-find-parent-text
+     (expose-context-find-parent-text
       '("call_expression"
         "jsx_element"
         "return_statement"
@@ -343,7 +343,7 @@
 
     ((or 'python-mode
          'python-ts-mode)
-     (jsoa-context-find-parent-text
+     (expose-context-find-parent-text
       '("call"
         "assignment"
         "return_statement"
@@ -351,58 +351,58 @@
         "for_statement"
         "expression_statement")))))
 
-(defun jsoa-context-focus ()
+(defun expose-context-focus ()
   "Return the semantic focus at point."
 
   (list
    :identifier
-   (jsoa-context-focus-identifier)
+   (expose-context-focus-identifier)
 
    :expression
-   (jsoa-context-focus-expression)
+   (expose-context-focus-expression)
 
    :construct
-   (jsoa-context-focus-construct)))
+   (expose-context-focus-construct)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Context Builder
 ;;; ---------------------------------------------------------------------------
 
-(defun jsoa-context-build ()
+(defun expose-context-build ()
   "Return the semantic context surrounding point."
 
   (list
    :project
-   (jsoa-context-project)
+   (expose-context-project)
 
    :language
-   (jsoa-context-language)
+   (expose-context-language)
 
    :file
-   (jsoa-context-relative-file)
+   (expose-context-relative-file)
 
    :symbol
-   (jsoa-context-symbol)
+   (expose-context-symbol)
 
    :scope
-   (jsoa-context-scope)
+   (expose-context-scope)
 
    :parent-scope
-   (jsoa-context-parent-scope)
+   (expose-context-parent-scope)
 
    :diagnostics
-   (jsoa-context-diagnostics)
+   (expose-context-diagnostics)
 
    :imports
-   (jsoa-context-imports)
+   (expose-context-imports)
 
    :focus
-   (jsoa-context-focus)
+   (expose-context-focus)
 
    :code
-   (jsoa-context-scope-code)))
+   (expose-context-scope-code)))
 
-(defun jsoa-context-get (context key)
+(defun expose-context-get (context key)
   "Return KEY from CONTEXT."
 
   (plist-get context key))
@@ -411,25 +411,25 @@
 ;;; Debug
 ;;; ---------------------------------------------------------------------------
 
-(defun jsoa-context-debug ()
+(defun expose-context-debug ()
   "Pretty print the current context."
 
   (interactive)
 
   (pp
-   (jsoa-context-build)
-   (get-buffer-create "*JSOA Context*"))
+   (expose-context-build)
+   (get-buffer-create "*EXPOSE Context*"))
 
-  (pop-to-buffer "*JSOA Context*"))
+  (pop-to-buffer "*EXPOSE Context*"))
 
-(defun jsoa-context-debug-node ()
+(defun expose-context-debug-node ()
   "Display the Tree-sitter node hierarchy at point."
 
   (interactive)
 
-  (let ((node (jsoa-context-current-node)))
+  (let ((node (expose-context-current-node)))
 
-    (with-current-buffer (get-buffer-create "*JSOA Context*")
+    (with-current-buffer (get-buffer-create "*EXPOSE Context*")
 
       (erase-buffer)
 
@@ -443,7 +443,7 @@
 
       (pop-to-buffer (current-buffer)))))
 
-(defun jsoa-context-debug-scope ()
+(defun expose-context-debug-scope ()
   "Display the current and parent scopes."
 
   (interactive)
@@ -452,48 +452,48 @@
    "Scope=%s Parent=%s"
 
    (plist-get
-    (jsoa-context-scope)
+    (expose-context-scope)
     :name)
 
    (or
     (plist-get
-     (jsoa-context-parent-scope)
+     (expose-context-parent-scope)
      :name)
     "<none>")))
 
-(defun jsoa-context-debug-imports ()
+(defun expose-context-debug-imports ()
   "Display all imports in the current buffer."
 
   (interactive)
 
-  (with-current-buffer (get-buffer-create "*JSOA Imports*")
+  (with-current-buffer (get-buffer-create "*EXPOSE Imports*")
 
     (erase-buffer)
 
-    (dolist (import (jsoa-context-imports))
+    (dolist (import (expose-context-imports))
       (insert "========================================\n")
       (insert import)
       (insert "\n\n"))
 
     (pop-to-buffer (current-buffer))))
 
-(defun jsoa-context-debug-symbol ()
+(defun expose-context-debug-symbol ()
   "Display the symbol at point."
 
   (interactive)
 
   (message "%s"
-           (jsoa-context-symbol)))
+           (expose-context-symbol)))
 
-(defun jsoa-context-debug-focus ()
+(defun expose-context-debug-focus ()
   "Pretty print the current semantic focus."
 
   (interactive)
 
   (pp
-   (jsoa-context-focus)
-   (get-buffer-create "*JSOA Focus*"))
+   (expose-context-focus)
+   (get-buffer-create "*EXPOSE Focus*"))
 
-  (pop-to-buffer "*JSOA Focus*"))
+  (pop-to-buffer "*EXPOSE Focus*"))
 
-(provide 'jsoa-context)
+(provide 'expose-context)

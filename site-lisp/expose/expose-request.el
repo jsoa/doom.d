@@ -1,12 +1,12 @@
-;;; review/request.el -*- lexical-binding: t; -*-
+;;; expose-request.el -*- lexical-binding: t; -*-
 
-(require 'jsoa-context)
+(require 'expose-context)
 
 ;;; ---------------------------------------------------------------------------
 ;;; Request
 ;;; ---------------------------------------------------------------------------
 
-(defun jsoa-request-create (type document-format instruction context)
+(defun expose-request-create (type document-format instruction context)
   "Return a request object."
 
   (list
@@ -20,7 +20,7 @@
 ;;; ---------------------------------------------------------------------------
 
 
-(defun jsoa-request-select (context &rest keys)
+(defun expose-request-select (context &rest keys)
   "Return a plist containing KEYS copied from CONTEXT."
 
   (let (result)
@@ -39,16 +39,16 @@
 ;;; Builders
 ;;; ---------------------------------------------------------------------------
 
-(defun jsoa-request-review (context)
+(defun expose-request-review (context)
   "Build a code review request."
 
-  (jsoa-request-create
+  (expose-request-create
    'review
    'xml
 
    "Review the current implementation for correctness, readability, maintainability, and potential bugs."
 
-   (jsoa-request-select
+   (expose-request-select
     context
     :project
     :language
@@ -58,16 +58,16 @@
     :imports
     :focus)))
 
-(defun jsoa-request-diagnostics (context)
+(defun expose-request-diagnostics (context)
   "Build a diagnostics request."
 
-  (jsoa-request-create
+  (expose-request-create
    'diagnostics
    'xml
 
    "Explain the diagnostics for the current code, why they occur, and recommend the best fix."
 
-   (jsoa-request-select
+   (expose-request-select
     context
     :project
     :language
@@ -76,16 +76,16 @@
     :focus
     :code)))
 
-(defun jsoa-request-explain (context)
+(defun expose-request-explain (context)
   "Build an explanation request."
 
-  (jsoa-request-create
+  (expose-request-create
    'explain
    'xml
 
    "Explain the selected symbol or construct in the context of this code."
 
-   (jsoa-request-select
+   (expose-request-select
     context
     :project
     :language
@@ -99,20 +99,20 @@
 ;;; Dispatcher
 ;;; ---------------------------------------------------------------------------
 
-(defun jsoa-request-build (type)
+(defun expose-request-build (type)
   "Build a request of TYPE."
 
-  (let ((context (jsoa-context-build)))
+  (let ((context (expose-context-build)))
 
     (pcase type
       ('review
-       (jsoa-request-review context))
+       (expose-request-review context))
 
       ('diagnostics
-       (jsoa-request-diagnostics context))
+       (expose-request-diagnostics context))
 
       ('explain
-       (jsoa-request-explain context))
+       (expose-request-explain context))
 
       (_
        (error "Unknown request type: %s" type)))))
@@ -121,31 +121,31 @@
 ;;; Debug
 ;;; ---------------------------------------------------------------------------
 
-(defun jsoa-request-debug-review ()
+(defun expose-request-debug-review ()
   (interactive)
 
   (pp
-   (jsoa-request-build 'review)
-   (get-buffer-create "*JSOA Review*"))
+   (expose-request-build 'review)
+   (get-buffer-create "*EXPOSE Review*"))
 
-  (pop-to-buffer "*JSOA Review*"))
+  (pop-to-buffer "*EXPOSE Review*"))
 
-(defun jsoa-request-debug-diagnostics ()
+(defun expose-request-debug-diagnostics ()
   (interactive)
 
   (pp
-   (jsoa-request-build 'diagnostics)
-   (get-buffer-create "*JSOA Diagnostics*"))
+   (expose-request-build 'diagnostics)
+   (get-buffer-create "*EXPOSE Diagnostics*"))
 
-  (pop-to-buffer "*JSOA Diagnostics*"))
+  (pop-to-buffer "*EXPOSE Diagnostics*"))
 
-(defun jsoa-request-debug-explain ()
+(defun expose-request-debug-explain ()
   (interactive)
 
   (pp
-   (jsoa-request-build 'explain)
-   (get-buffer-create "*JSOA Explain*"))
+   (expose-request-build 'explain)
+   (get-buffer-create "*EXPOSE Explain*"))
 
-  (pop-to-buffer "*JSOA Explain*"))
+  (pop-to-buffer "*EXPOSE Explain*"))
 
-(provide 'jsoa-request)
+(provide 'expose-request)

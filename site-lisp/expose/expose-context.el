@@ -365,6 +365,113 @@
    (expose-context-focus-construct)))
 
 ;;; ---------------------------------------------------------------------------
+;;; Git
+;;; ---------------------------------------------------------------------------
+
+(defcustom expose-context-git-diff-max-length 20000
+  "Maximum number of characters of git diff context to include."
+
+  :type 'integer
+  :group 'expose)
+
+(defun expose-context-git-root ()
+  "Return the current git root, or nil."
+
+  (or
+   (when (fboundp 'vc-root-dir)
+     (ignore-errors
+       (vc-root-dir)))
+
+   (when default-directory
+     (locate-dominating-file
+      default-directory
+      ".git"))))
+
+(defun expose-context-call-git (root &rest args)
+  "Run git with ARGS in ROOT and return its output."
+
+  (when root
+
+    (with-temp-buffer
+
+      (let ((default-directory root)
+            (status
+             (apply
+              #'call-process
+              "git"
+              nil
+              t
+              nil
+              args)))
+
+        (when (= status 0)
+          (string-trim
+           (buffer-string)))))))
+
+(defun expose-context-truncate (text max-length)
+  "Return TEXT truncated to MAX-LENGTH characters."
+
+  (when text
+
+    (if (> (length text) max-length)
+
+        (concat
+         (substring text 0 max-length)
+         "\n\n[EXPOSE: truncated]")
+
+      text)))
+
+(defun expose-context-git-status ()
+  "Return git status for the current project."
+
+  (when-let ((root
+              (expose-context-git-root)))
+
+    (expose-context-call-git
+     root
+     "status"
+     "--short")))
+
+(defun expose-context-git-diff ()
+  "Return git diff for current changes in the project."
+
+  (when-let ((root
+              (expose-context-git-root)))
+
+    (expose-context-truncate
+     (expose-context-call-git
+      root
+      "diff"
+      "HEAD"
+      "--no-ext-diff")
+     expose-context-git-diff-max-length)))
+
+(defun expose-context-with-git (context)
+  "Return CONTEXT with git status and diff added."
+
+  (let ((status
+         (expose-context-git-status))
+
+        (diff
+         (expose-context-git-diff)))
+
+    (when status
+      (setq context
+            (plist-put
+             context
+             :git-status
+             status)))
+
+    (when diff
+      (setq context
+            (plist-put
+             context
+             :git-diff
+             diff)))
+
+    context))
+
+;;; ---------------------------------------------------------------------------
 ;;; Context Builder
 ;;; ---------------------------------------------------------------------------
 

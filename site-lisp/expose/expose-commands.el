@@ -157,6 +157,20 @@
 
   (expose-popup-run-action ?M))
 
+(defun expose-run-commit-message ()
+  "Run the registered Expose commit message action."
+
+  (interactive)
+
+  (expose-popup-run-action ?g))
+
+(defun expose-run-changelog ()
+  "Run the registered Expose changelog action."
+
+  (interactive)
+
+  (expose-popup-run-action ?n))
+
 ;;; ---------------------------------------------------------------------------
 ;;; Views
 ;;; ---------------------------------------------------------------------------
@@ -486,6 +500,36 @@
    "Mental Model"
    callback))
 
+(defun expose-commit-message ()
+  "Write a commit message for the current changes asynchronously."
+
+  (interactive)
+
+  (expose-run-commit-message))
+
+(defun expose-commit-message-async (callback)
+  "Write a commit message and call CALLBACK with a popup view."
+
+  (expose-send-view-action-async
+   'commit-message
+   "Commit Message"
+   callback))
+
+(defun expose-changelog ()
+  "Write a changelog entry for the current changes asynchronously."
+
+  (interactive)
+
+  (expose-run-changelog))
+
+(defun expose-changelog-async (callback)
+  "Write a changelog entry and call CALLBACK with a popup view."
+
+  (expose-send-view-action-async
+   'changelog
+   "Changelog"
+   callback))
+
 ;;; ---------------------------------------------------------------------------
 ;;; Actions
 ;;; ---------------------------------------------------------------------------
@@ -624,6 +668,20 @@
    "Mental Model"
    'view
    #'expose-mental-model-async
+   :async t)
+
+  (expose-popup-register-action
+   ?g
+   "Commit Message"
+   'view
+   #'expose-commit-message-async
+   :async t)
+
+  (expose-popup-register-action
+   ?n
+   "Changelog"
+   'view
+   #'expose-changelog-async
    :async t))
 
 ;;; ---------------------------------------------------------------------------

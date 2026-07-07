@@ -48,6 +48,15 @@
         :extend t)))
   "Face for popup titles.")
 
+(defun expose-popup-view-history-p (view)
+  "Return non-nil if VIEW should be added to history."
+
+  (not
+   (and
+    (memq :history view)
+    (eq
+     (plist-get view :history)
+     nil))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Modeline
@@ -265,9 +274,10 @@
 (defun expose-popup-loading-view (title)
   "Return a loading view."
 
-  (expose-popup-view-create
-   title
-   "Loading..."))
+  (list
+   :title title
+   :body "Loading..."
+   :history nil))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Rendering
@@ -371,7 +381,8 @@
 
     (posframe-refresh expose-popup-buffer-name)
 
-    (expose-history-add view)
+    (when (expose-popup-view-history-p view)
+      (expose-history-add view))
 
     (expose-popup-show-buffer)
 

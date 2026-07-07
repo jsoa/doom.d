@@ -122,6 +122,41 @@
 
   (expose-popup-run-action ?T))
 
+(defun expose-run-concurrency ()
+  "Run the registered Expose concurrency action."
+
+  (interactive)
+
+  (expose-popup-run-action ?C))
+
+(defun expose-run-invariants ()
+  "Run the registered Expose invariants action."
+
+  (interactive)
+
+  (expose-popup-run-action ?i))
+
+(defun expose-run-risks ()
+  "Run the registered Expose risks action."
+
+  (interactive)
+
+  (expose-popup-run-action ?!))
+
+(defun expose-run-why ()
+  "Run the registered Expose why action."
+
+  (interactive)
+
+  (expose-popup-run-action ?Y))
+
+(defun expose-run-mental-model ()
+  "Run the registered Expose mental model action."
+
+  (interactive)
+
+  (expose-popup-run-action ?M))
+
 ;;; ---------------------------------------------------------------------------
 ;;; Views
 ;;; ---------------------------------------------------------------------------
@@ -376,6 +411,81 @@
    "Types"
    callback))
 
+(defun expose-concurrency ()
+  "Review concurrency and race-condition risks asynchronously."
+
+  (interactive)
+
+  (expose-run-concurrency))
+
+(defun expose-concurrency-async (callback)
+  "Review concurrency and race-condition risks and call CALLBACK with a popup view."
+
+  (expose-send-view-action-async
+   'concurrency
+   "Concurrency"
+   callback))
+
+(defun expose-invariants ()
+  "Identify important invariants asynchronously."
+
+  (interactive)
+
+  (expose-run-invariants))
+
+(defun expose-invariants-async (callback)
+  "Identify important invariants and call CALLBACK with a popup view."
+
+  (expose-send-view-action-async
+   'invariants
+   "Invariants"
+   callback))
+
+(defun expose-risks ()
+  "Identify practical risks asynchronously."
+
+  (interactive)
+
+  (expose-run-risks))
+
+(defun expose-risks-async (callback)
+  "Identify practical risks and call CALLBACK with a popup view."
+
+  (expose-send-view-action-async
+   'risks
+   "Risks"
+   callback))
+
+(defun expose-why ()
+  "Explain why the current code may be written this way asynchronously."
+
+  (interactive)
+
+  (expose-run-why))
+
+(defun expose-why-async (callback)
+  "Explain why the current code may be written this way and call CALLBACK with a popup view."
+
+  (expose-send-view-action-async
+   'why
+   "Why"
+   callback))
+
+(defun expose-mental-model ()
+  "Build a mental model for the current code asynchronously."
+
+  (interactive)
+
+  (expose-run-mental-model))
+
+(defun expose-mental-model-async (callback)
+  "Build a mental model for the current code and call CALLBACK with a popup view."
+
+  (expose-send-view-action-async
+   'mental-model
+   "Mental Model"
+   callback))
+
 ;;; ---------------------------------------------------------------------------
 ;;; Actions
 ;;; ---------------------------------------------------------------------------
@@ -479,6 +589,41 @@
    "Types"
    'view
    #'expose-types-async
+   :async t)
+
+  (expose-popup-register-action
+   ?C
+   "Concurrency"
+   'view
+   #'expose-concurrency-async
+   :async t)
+
+  (expose-popup-register-action
+   ?i
+   "Invariants"
+   'view
+   #'expose-invariants-async
+   :async t)
+
+  (expose-popup-register-action
+   ?!
+   "Risks"
+   'view
+   #'expose-risks-async
+   :async t)
+
+  (expose-popup-register-action
+   ?Y
+   "Why"
+   'view
+   #'expose-why-async
+   :async t)
+
+  (expose-popup-register-action
+   ?M
+   "Mental Model"
+   'view
+   #'expose-mental-model-async
    :async t))
 
 ;;; ---------------------------------------------------------------------------

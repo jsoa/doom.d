@@ -83,7 +83,7 @@
 
 ;; Custom modules
 (load! "modules/+env")
-(load! "modules/+hover")
+(load! "modules/+expose")
 (load! "modules/+large-file")
 (load! "modules/+dashboard")
 
@@ -97,7 +97,6 @@
 (load! "modules/+avy")
 (load! "modules/+spell")
 (load! "modules/+prettier")
-(load! "modules/+review")
 
 ;; Pre programming mode configurations
 (load! "modules/+fci")

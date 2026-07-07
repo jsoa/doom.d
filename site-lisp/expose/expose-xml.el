@@ -1,4 +1,4 @@
-;;; review/renderer/xml.el -*- lexical-binding: t; -*-
+;;; expose-xml.el -*- lexical-binding: t; -*-
 
 (require 'xml)
 
@@ -6,11 +6,11 @@
 ;;; Public API
 ;;; ---------------------------------------------------------------------------
 
-(defun jsoa-renderer-xml (request)
+(defun expose-renderer-xml (request)
   "Render REQUEST as XML."
 
   (with-temp-buffer
-    (jsoa-renderer-xml-node
+    (expose-renderer-xml-node
      "request"
      request)
 
@@ -20,16 +20,16 @@
 ;;; Nodes
 ;;; ---------------------------------------------------------------------------
 
-(defun jsoa-renderer-xml-node (name value)
+(defun expose-renderer-xml-node (name value)
   "Render XML node NAME containing VALUE."
 
   (insert "<" name ">")
 
-  (jsoa-renderer-xml-value value)
+  (expose-renderer-xml-value value)
 
   (insert "</" name ">\n"))
 
-(defun jsoa-renderer-xml-plist (plist)
+(defun expose-renderer-xml-plist (plist)
   "Render PLIST."
 
   (while plist
@@ -37,21 +37,21 @@
           (value (pop plist)))
 
       (unless
-          (jsoa-renderer-xml-empty-p value)
+          (expose-renderer-xml-empty-p value)
 
-        (jsoa-renderer-xml-node
-         (jsoa-renderer-xml-tag-name key)
+        (expose-renderer-xml-node
+         (expose-renderer-xml-tag-name key)
          value)))))
 
-(defun jsoa-renderer-xml-list (list)
+(defun expose-renderer-xml-list (list)
   "Render LIST."
 
   (dolist (item list)
-    (jsoa-renderer-xml-node
+    (expose-renderer-xml-node
      "item"
      item)))
 
-(defun jsoa-renderer-xml-value (value)
+(defun expose-renderer-xml-value (value)
   "Render VALUE."
 
   (cond
@@ -61,19 +61,19 @@
 
    ((stringp value)
     (insert
-     (jsoa-renderer-xml-escape value)))
+     (expose-renderer-xml-escape value)))
 
    ((symbolp value)
     (insert
-     (jsoa-renderer-xml-escape
+     (expose-renderer-xml-escape
       (symbol-name value))))
 
    ((and (listp value)
          (keywordp (car value)))
-    (jsoa-renderer-xml-plist value))
+    (expose-renderer-xml-plist value))
 
    ((listp value)
-    (jsoa-renderer-xml-list value))
+    (expose-renderer-xml-list value))
 
    (t
     (insert
@@ -83,21 +83,21 @@
 ;;; Helpers
 ;;; ---------------------------------------------------------------------------
 
-(defun jsoa-renderer-xml-tag (tag value)
+(defun expose-renderer-xml-tag (tag value)
   "Insert TAG containing VALUE."
 
   (insert "<" tag ">")
   (insert value)
   (insert "</" tag ">\n"))
 
-(defun jsoa-renderer-xml-tag-name (key)
+(defun expose-renderer-xml-tag-name (key)
   "Return the XML tag name for KEY."
 
   (string-remove-prefix
    ":"
    (symbol-name key)))
 
-(defun jsoa-renderer-xml-escape (string)
+(defun expose-renderer-xml-escape (string)
   "Return TEXT with XML entities escaped."
 
   (let ((string (or string "")))
@@ -119,7 +119,7 @@
 
     string))
 
-(defun jsoa-renderer-xml-empty-p (value)
+(defun expose-renderer-xml-empty-p (value)
   "Return non-nil if VALUE should be omitted."
 
   (cond
@@ -133,12 +133,12 @@
 
    ((and (listp value)
          (keywordp (car value)))
-    (jsoa-renderer-xml-plist-empty-p value))
+    (expose-renderer-xml-plist-empty-p value))
 
    (t
     nil)))
 
-(defun jsoa-renderer-xml-plist-empty-p (plist)
+(defun expose-renderer-xml-plist-empty-p (plist)
   "Return non-nil if every value in PLIST is empty."
 
   (let ((empty t))
@@ -147,7 +147,7 @@
       (pop plist)
 
       (unless
-          (jsoa-renderer-xml-empty-p
+          (expose-renderer-xml-empty-p
            (pop plist))
         (setq empty nil)
         (setq plist nil)))
@@ -155,4 +155,4 @@
     empty))
 
 
-(provide 'jsoa-renderer-xml)
+(provide 'expose-xml)

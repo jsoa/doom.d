@@ -1,9 +1,5 @@
 ;;; ~/.doom.d/modes/+lsp.el -*- lexical-binding: t; -*-
 
-;;
-;; LSP
-;;
-
 (after! lsp-mode
   (setq lsp-completion-provider :capf
         lsp-enable-snippet t

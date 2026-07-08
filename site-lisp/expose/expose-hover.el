@@ -52,6 +52,27 @@
   :type '(repeat regexp)
   :group 'expose-hover)
 
+(defcustom expose-hover-strip-markdown-images t
+  "Whether Expose should remove Markdown images from hover text."
+
+  :type 'boolean
+  :group 'expose-hover)
+
+(defcustom expose-hover-strip-data-uris t
+  "Whether Expose should remove data URIs from hover text."
+
+  :type 'boolean
+  :group 'expose-hover)
+
+(defcustom expose-hover-max-line-length 500
+  "Maximum length of a single hover line before it is truncated.
+
+This prevents LSP hover text from displaying huge inline payloads such as
+base64 images."
+
+  :type 'integer
+  :group 'expose-hover)
+
 (defvar expose-hover-timer nil)
 (defvar expose-hover-last-point nil)
 (defvar expose-hover-data nil)
@@ -106,6 +127,99 @@
     (with-current-buffer buffer
       (= (point) point)))))
 
+(defun expose-hover-decode-html-entities (text)
+  "Decode common HTML entities in hover TEXT."
+
+  (let ((cleaned text))
+
+    (setq cleaned
+          (replace-regexp-in-string
+           "&nbsp;"
+           " "
+           cleaned
+           t
+           t))
+
+    (setq cleaned
+          (replace-regexp-in-string
+           "&lt;"
+           "<"
+           cleaned
+           t
+           t))
+
+    (setq cleaned
+          (replace-regexp-in-string
+           "&gt;"
+           ">"
+           cleaned
+           t
+           t))
+
+    (setq cleaned
+          (replace-regexp-in-string
+           "&amp;"
+           "&"
+           cleaned
+           t
+           t))
+
+    (setq cleaned
+          (replace-regexp-in-string
+           "&quot;"
+           "\""
+           cleaned
+           t
+           t))
+
+    (setq cleaned
+          (replace-regexp-in-string
+           "&#39;"
+           "'"
+           cleaned
+           t
+           t))
+
+    cleaned))
+
+(defun expose-hover-clean-jsdoc-markdown (text)
+  "Clean common JSDoc Markdown artifacts from hover TEXT."
+
+  (let ((cleaned text))
+
+    ;; `*@param*` -> `@param`
+    ;; `*@returns*` -> `@returns`
+    ;; `*@throws*` -> `@throws`
+    ;; `*@publicApi*` -> `@publicApi`
+    (setq cleaned
+          (replace-regexp-in-string
+           "\\*\\(@[[:alnum:]_-]+\\)\\*"
+           "\\1"
+           cleaned))
+
+    cleaned))
+
+(defun expose-hover-clean-whitespace (text)
+  "Normalize noisy whitespace in hover TEXT."
+
+  (let ((cleaned text))
+
+    ;; Collapse long runs of normal spaces produced by &nbsp; blocks.
+    (setq cleaned
+          (replace-regexp-in-string
+           "   +"
+           " "
+           cleaned))
+
+    ;; Remove trailing spaces.
+    (setq cleaned
+          (replace-regexp-in-string
+           "[ \t]+$"
+           ""
+           cleaned))
+
+    cleaned))
+
 ;;; ---------------------------------------------------------------------------
 ;;; Data
 ;;; ---------------------------------------------------------------------------
@@ -147,15 +261,87 @@
        (plist-get (car contents) :value))
       (plist-get (car contents) :value)))))
 
+(defun expose-hover-strip-code-fences (text)
+  "Remove Markdown code fences from TEXT."
+
+  (replace-regexp-in-string
+   "```[[:alpha:]]*\n\\|```"
+   ""
+   text))
+
+(defun expose-hover-strip-markdown-images (text)
+  "Remove Markdown image links from TEXT."
+
+  (if expose-hover-strip-markdown-images
+
+      (replace-regexp-in-string
+       "!\\[[^]\n]*\\](data:image/[^)\n]*)\\|!\\[[^]\n]*\\](https?://[^)\n]*)"
+       ""
+       text)
+
+    text))
+
+(defun expose-hover-strip-data-uris (text)
+  "Remove raw data URIs from TEXT."
+
+  (if expose-hover-strip-data-uris
+
+      (replace-regexp-in-string
+       "data:image/[^[:space:])]+"
+       "[image data omitted]"
+       text)
+
+    text))
+
+(defun expose-hover-truncate-long-line (line)
+  "Return LINE truncated when it is too long."
+
+  (if (> (length line)
+         expose-hover-max-line-length)
+
+      (concat
+       (substring line 0 expose-hover-max-line-length)
+       " … [line truncated]")
+
+    line))
+
+(defun expose-hover-truncate-long-lines (text)
+  "Truncate overly long lines in TEXT."
+
+  (string-join
+   (mapcar
+    #'expose-hover-truncate-long-line
+    (split-string text "\n"))
+   "\n"))
+
+(defun expose-hover-collapse-blank-lines (text)
+  "Collapse repeated blank lines in TEXT."
+
+  (replace-regexp-in-string
+   "\n\n\n+"
+   "\n\n"
+   text))
+
 (defun expose-hover-clean-signature (value)
-  "Clean hover VALUE for display."
+  "Clean hover VALUE for display.
 
-  (string-trim
-   (replace-regexp-in-string
-    "```[[:alpha:]]*\n\\|```"
-    ""
-    value)))
+This removes noisy Markdown artifacts commonly returned by language
+servers, including embedded Markdown images, large data URIs, HTML
+entities, and JSDoc formatting noise."
 
+  (let ((cleaned
+         (string-trim
+          (expose-hover-collapse-blank-lines
+           (expose-hover-clean-whitespace
+            (expose-hover-clean-jsdoc-markdown
+             (expose-hover-decode-html-entities
+              (expose-hover-truncate-long-lines
+               (expose-hover-strip-data-uris
+                (expose-hover-strip-markdown-images
+                 (expose-hover-strip-code-fences value)))))))))))
+
+    (unless (string-empty-p cleaned)
+      cleaned)))
 ;;; ---------------------------------------------------------------------------
 ;;; Rendering
 ;;; ---------------------------------------------------------------------------
@@ -309,12 +495,13 @@
 
   (unless (expose-hover-stale-response-p)
 
-    (if-let ((value
-              (expose-hover-hover-value hover)))
+    (if-let* ((value
+               (expose-hover-hover-value hover))
 
-        (let ((signature
+              (signature
                (expose-hover-clean-signature value)))
 
+        (progn
           (expose-log
            "Hover"
            "LSP hover produced signature (%d bytes)."
@@ -326,7 +513,7 @@
 
       (expose-log
        "Hover"
-       "LSP hover response had no displayable value."))))
+       "LSP hover response had no displayable value after cleanup."))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Eldoc
@@ -469,17 +656,22 @@
            (point)
            point)
 
-        (let ((signature
-               (string-trim documentation)))
+        (if-let ((signature
+                  (expose-hover-clean-signature documentation)))
+
+            (progn
+              (expose-log
+               "Hover"
+               "Eldoc produced signature (%d bytes)."
+               (length signature))
+
+              (expose-hover-update-signature signature)
+
+              (expose-hover-render-current))
 
           (expose-log
            "Hover"
-           "Eldoc produced signature (%d bytes)."
-           (length signature))
-
-          (expose-hover-update-signature signature)
-
-          (expose-hover-render-current))))))
+           "Eldoc response had no displayable value after cleanup."))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Documentation Source

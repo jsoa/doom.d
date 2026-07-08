@@ -129,29 +129,29 @@ These keys are active only while `expose-popup-visible` is non-nil. When the pop
 
 Expose actions are intentionally small, focused lenses over the current code context.
 
-| Action | Focus |
-| --- | --- |
-| Review | Correctness, readability, maintainability, bugs |
-| Diagnostics | Current Flycheck/LSP diagnostics |
-| Explain | Selected symbol or construct |
-| Fix | Smallest safe fix |
-| Refactor | Behavior-preserving cleanup |
-| Security | Auth, permissions, injection, secrets, data exposure |
-| Performance | N+1s, blocking I/O, unnecessary work, rendering, caching |
-| Tests | Practical test cases and examples |
-| Edge Cases | Boundary inputs, empty states, malformed data, external failures |
-| Flow | Step-by-step execution flow |
-| Usage | How to use the selected symbol/construct |
-| Docstring | Concise useful docstring/comment |
-| Summary | Brief purpose and dependencies |
-| Types | Declared/inferred types and mismatch risks |
-| Concurrency | Race conditions, ordering, retries, locks, transactions |
-| Invariants | What must remain true before/during/after execution |
-| Risks | Practical operational and maintenance risks |
-| Why | Likely design intent and tradeoffs |
-| Mental Model | Conceptual map for reasoning about the code |
-| Commit Message | Conventional-style commit message from Git diff/status |
-| Changelog | User/developer-facing changelog entry from Git diff/status |
+| Action          | Focus |
+| --------------- | ---------------------------------------------------------------- |
+| Review          | Correctness, readability, maintainability, bugs                  |
+| Diagnostics     | Current Flycheck/LSP diagnostics                                 |
+| Explain         | Selected symbol or construct                                     |
+| Fix             | Smallest safe fix                                                |
+| Refactor        | Behavior-preserving cleanup                                      |
+| Security        | Auth, permissions, injection, secrets, data exposure             |
+| Performance     | N+1s, blocking I/O, unnecessary work, rendering, caching         |
+| Tests           | Practical test cases and examples                                |
+| Edge Cases      | Boundary inputs, empty states, malformed data, external failures |
+| Flow            | Step-by-step execution flow                                      |
+| Usage           | How to use the selected symbol/construct                         |
+| Docstring       | Concise useful docstring/comment                                 |
+| Summary         | Brief purpose and dependencies                                   |
+| Types           | Declared/inferred types and mismatch risks                       |
+| Concurrency     | Race conditions, ordering, retries, locks, transactions          |
+| Invariants      | What must remain true before/during/after execution              |
+| Risks           | Practical operational and maintenance risks                      |
+| Why             | Likely design intent and tradeoffs                               |
+| Mental Model    | Conceptual map for reasoning about the code                      |
+| Commit Message  | Conventional-style commit message from Git diff/status           |
+| Changelog       | User/developer-facing changelog entry from Git diff/status       |
 
 ## Context Collected
 

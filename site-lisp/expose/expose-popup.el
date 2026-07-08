@@ -162,13 +162,16 @@
    (expose-popup-actions)))
 
 (defun expose-popup-command-p (command)
-  "Return non-nil if COMMAND is a registered popup action."
+  "Return non-nil if COMMAND is an Expose popup command."
 
-  (seq-some
-   (lambda (action)
-     (eq command
-         (plist-get action :command)))
-   (expose-popup-actions)))
+  (or
+   (get command 'expose-popup-command)
+
+   (seq-some
+    (lambda (action)
+      (eq command
+          (plist-get action :command)))
+    (expose-popup-actions))))
 
 (defun expose-popup-run-action (key)
   "Run the popup action for KEY."
@@ -501,6 +504,56 @@
       (ignore-errors
         (scroll-down-command)
         (expose-popup-update-scroll-indicator)))))
+
+;;; ---------------------------------------------------------------------------
+;;; Hover Scroll Keys
+;;; ---------------------------------------------------------------------------
+
+(defvar expose-popup-scroll-keymap
+  (let ((map
+         (make-sparse-keymap)))
+
+    ;; Same behavior as SPC c h j.
+    (define-key
+     map
+     (kbd "C-j")
+     #'expose-popup-scroll-down)
+
+    ;; Same behavior as SPC c h k.
+    (define-key
+     map
+     (kbd "C-k")
+     #'expose-popup-scroll-up)
+
+    map)
+  "Keymap active while the Expose popup is visible.")
+
+(defvar expose-popup-scroll-keymap-alist nil
+  "Emulation keymap alist for Expose popup scroll keys.")
+
+(setq expose-popup-scroll-keymap-alist
+      `((expose-popup-visible . ,expose-popup-scroll-keymap)))
+
+(defun expose-popup-install-scroll-keys ()
+  "Install temporary Expose popup scroll keys."
+
+  (unless (memq
+           'expose-popup-scroll-keymap-alist
+           emulation-mode-map-alists)
+
+    (add-to-list
+     'emulation-mode-map-alists
+     'expose-popup-scroll-keymap-alist)))
+
+(put 'expose-popup-scroll-down
+     'expose-popup-command
+     t)
+
+(put 'expose-popup-scroll-up
+     'expose-popup-command
+     t)
+
+(expose-popup-install-scroll-keys)
 
 ;;; ---------------------------------------------------------------------------
 ;;; Mode

@@ -10,7 +10,8 @@
   "Default provider used by Expose."
   :type '(choice
           (const clipboard)
-          (const codex))
+          (const codex)
+          (const copilot))
   :group 'expose)
 
 ;;; ---------------------------------------------------------------------------

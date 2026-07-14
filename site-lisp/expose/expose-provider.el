@@ -3,6 +3,7 @@
 (require 'expose-log)
 (require 'expose-clipboard)
 (require 'expose-codex)
+(require 'expose-copilot)
 
 ;;; ---------------------------------------------------------------------------
 ;;; Dispatcher
@@ -23,6 +24,9 @@
     ('codex
      (expose-provider-codex-send document))
 
+    ('copilot
+     (expose-provider-copilot-send document))
+
     (_
      (error "Unknown provider: %s" provider))))
 
@@ -35,8 +39,18 @@
    provider)
 
   (pcase provider
+    ('clipboard
+     (expose-provider-clipboard-send-async
+      document
+      callback))
+
     ('codex
      (expose-provider-codex-send-async
+      document
+      callback))
+
+    ('copilot
+     (expose-provider-copilot-send-async
       document
       callback))
 

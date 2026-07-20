@@ -37,7 +37,7 @@
        (evil +everywhere)
        file-templates
        fold
-       (format +onsave)
+       format
        multiple-cursors
        rotate-text
        snippets
@@ -61,11 +61,13 @@
        :tools
        ansible
        docker
+       direnv
        (eval +overlay)
        lookup
        (lsp +peek)
        magit
        rgb
+       terraform
        tree-sitter
 
        :os

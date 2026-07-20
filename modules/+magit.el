@@ -8,10 +8,20 @@
 ;; If a branch name starts with "NAME-NUMBER", get it and supply
 ;; a commit prefix of [NAME-NUMBER] otherwise insert [-]
 (defun jsoa/git-commit-setup ()
-  (let ((branch-name (magit-get-current-branch)))
-    (save-match-data ; is usually a good idea
-      (if (string-match "^\\(\\w+-[0-9]+\\)" branch-name)
-          (insert (concat "[" (match-string 1 branch-name) "] "))
+  "Insert commit prefix [ABC-123]-style from current branch name, else [-]."
+  (let ((branch-name (or (magit-get-current-branch) "")))
+    (save-match-data
+      ;; Capture KEY-NUM where KEY is uppercase letters and NUM is digits.
+      ;; Must appear at start or after a slash.
+      ;; Works for:
+      ;; - ABC-123_my_test_branch
+      ;; - ABC-123-my-test-branch
+      ;; - feature/ABC-123-my_test_branch
+      ;; - js/ABC-123
+      ;; - js/ABC-123_mytestbranch
+      ;; - some/thing/else/ABC-123
+      (if (string-match "\\(?:^\\|/\\)\\([A-Z]+-[0-9]+\\)\\(?:\\b\\|[_-]\\|/\\|$\\)" branch-name)
+          (insert (format "[%s] " (match-string 1 branch-name)))
         (insert "[-] ")))))
 
 ;; Custom commit message prefix when commiting

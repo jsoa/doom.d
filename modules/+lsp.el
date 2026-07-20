@@ -15,7 +15,7 @@
         lsp-disabled-clients '(html-ls)
 
         ;; Python
-        lsp-pyright-python-executable-cmd "python3"
+        lsp-pyright-python-executable-cmd "python"
         lsp-pyright-disable-tagged-hints t
 
         ;; Angular

@@ -753,9 +753,10 @@ entities, and JSDoc formatting noise."
 
 (defun expose-hover-pre-command ()
   "Hide hover before unrelated commands."
-
-  (unless (expose-popup-command-p this-command)
-    (expose-popup-hide)))
+  (let ((cmd this-command))
+    (unless (and (symbolp cmd)
+                 (expose-popup-command-p cmd))
+      (expose-popup-hide))))
 
 (defun expose-hover-post-command ()
   "Schedule hover after commands."

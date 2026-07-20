@@ -163,15 +163,13 @@
 
 (defun expose-popup-command-p (command)
   "Return non-nil if COMMAND is an Expose popup command."
-
-  (or
-   (get command 'expose-popup-command)
-
-   (seq-some
-    (lambda (action)
-      (eq command
-          (plist-get action :command)))
-    (expose-popup-actions))))
+  (and (symbolp command)
+       (or
+        (get command 'expose-popup-command)
+        (seq-some
+         (lambda (action)
+           (eq command (plist-get action :command)))
+         (expose-popup-actions)))))
 
 (defun expose-popup-run-action (key)
   "Run the popup action for KEY."

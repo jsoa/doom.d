@@ -1,6 +1,7 @@
 ;;; expose.el -*- lexical-binding: t; -*-
 
 (require 'expose-log)
+(require 'expose-review)
 
 (defgroup expose nil
   "Expose code context and actions."
@@ -71,7 +72,7 @@
                :desc "Diagnostics"      "d" #'expose-run-diagnostics
                :desc "Explain"          "e" #'expose-run-explain
                :desc "Fix"              "f" #'expose-run-fix
-               :desc "Refactor"         "R" #'expose-run-refactor
+               :desc "Refactor"         "F" #'expose-run-refactor
                :desc "Security"         "s" #'expose-run-security
                :desc "Performance"      "p" #'expose-run-performance
                :desc "Tests"            "t" #'expose-run-tests
@@ -93,7 +94,9 @@
                :desc "Open"             "o" #'expose-popup-open
                :desc "Log"              "l" #'expose-log-open
                :desc "Clear Log"        "L" #'expose-log-clear
-               :desc "Debug Buffer"     "?" #'expose-hover-debug-current-buffer))))))
+               :desc "Debug Buffer"     "?" #'expose-hover-debug-current-buffer
+               :desc "Review Session"   "R" #'expose-review-open-or-start
+               ))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Mode

@@ -131,6 +131,5 @@
 (load! "modules/+javascript")
 (load! "modules/+html")
 
-;; Private locals
-(when (file-exists-p "~/.doom.d/private/vars.el")
-  (load-file "~/.doom.d/private/vars.el"))
+;; Private
+(load! "modules/+private")

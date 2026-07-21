@@ -58,7 +58,7 @@
 
   (interactive)
 
-  (expose-popup-run-action ?R))
+  (expose-popup-run-action ?F))
 
 (defun expose-run-security ()
   "Run the registered Expose security action."

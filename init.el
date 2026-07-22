@@ -60,6 +60,7 @@
 
        :tools
        ansible
+       (debugger +lsp)
        docker
        direnv
        (eval +overlay)

@@ -2,7 +2,7 @@
 
 (defconst js/private-doom-directory
   (expand-file-name
-   "doom-private/"
+   ".doom-private/"
    (file-name-directory
     (directory-file-name doom-user-dir)))
   "Directory containing the optional private Doom configuration.")

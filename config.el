@@ -127,6 +127,7 @@
 ;; Programming mode configuration
 (load! "modules/+groovy")
 (load! "modules/+python")
+(load! "modules/+python-debug")
 (load! "modules/+typescript")
 (load! "modules/+javascript")
 (load! "modules/+html")

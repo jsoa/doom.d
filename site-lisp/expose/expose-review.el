@@ -11,11 +11,29 @@
 (defvar expose-provider-default)
 
 (defun expose-review-provider ()
-  "Return the current Expose review provider."
+  "Return provider used for Expose reviews."
 
   (if (boundp 'expose-provider-default)
       expose-provider-default
     'clipboard))
+
+(defun expose-review-session-active-state-p (state)
+  "Return non-nil if STATE represents an active review run."
+
+  (memq state
+        '(running preparing sending)))
+
+(defun expose-review-session-still-active-p (original-session latest-session)
+  "Return non-nil if ORIGINAL-SESSION still matches LATEST-SESSION."
+
+  (and latest-session
+
+       (equal
+        (plist-get latest-session :id)
+        (plist-get original-session :id))
+
+       (expose-review-session-active-state-p
+        (plist-get latest-session :state))))
 
 (defun expose-review-current-project-session ()
   "Return active review session for the current project, or nil."
@@ -89,22 +107,78 @@
 (defun expose-review-start-async (session)
   "Start async AI review for SESSION."
 
-  (let* ((project-root
-          (plist-get session :project-root))
+  (setq session
+        (plist-put session :state 'preparing))
 
-         (provider
+  (setq session
+        (plist-put session :updated-at
+                   (expose-review-context-now)))
+
+  (expose-review-store-save-session session)
+  (expose-review-buffer-refresh-open session)
+
+  (expose-log
+   "Review"
+   "Preparing review context for %s."
+   (plist-get session :id))
+
+  (if (fboundp 'make-thread)
+
+      (make-thread
+       (lambda ()
+         (expose-review-prepare-context-thread session))
+       "expose-review-context")
+
+    ;; Fallback for older Emacs: still runs soon, but on main thread.
+    (run-at-time
+     0
+     nil
+     #'expose-review-prepare-context-thread
+     session)))
+
+(defun expose-review-prepare-context-thread (session)
+  "Prepare review context for SESSION, then continue on the main event loop."
+
+  (condition-case error
+
+      (let* ((project-root
+              (plist-get session :project-root))
+
+             (context
+              (expose-review-context-build-ai project-root))
+
+             (document
+              (expose-review-request-build-document context)))
+
+        ;; Hop back through the timer queue before touching UI/session state.
+        (run-at-time
+         0
+         nil
+         #'expose-review-send-prepared-context
+         session
+         context
+         document))
+
+    (error
+     (run-at-time
+      0
+      nil
+      #'expose-review-handle-error
+      session
+      (error-message-string error)))))
+
+(defun expose-review-send-prepared-context (session context document)
+  "Send prepared review CONTEXT and DOCUMENT for SESSION."
+
+  (let* ((provider
           (plist-get session :provider))
 
-         (context
-          (expose-review-context-build-ai project-root))
-
          (review-input-stats
-          (plist-get context :review-input-stats))
+          (plist-get context :review-input-stats)))
 
-         (document
-          (expose-review-request-build-document context)))
+    (setq session
+          (plist-put session :state 'sending))
 
-    ;; Persist review-input stats before the AI response returns.
     (setq session
           (plist-put session :review-input-stats review-input-stats))
 
@@ -127,7 +201,6 @@
      (length document))
 
     (condition-case error
-
         (expose-provider-send-async
          provider
          document
@@ -140,17 +213,6 @@
        (expose-review-handle-error
         session
         (error-message-string error))))))
-
-(defun expose-review-session-still-active-p (original latest)
-  "Return non-nil if ORIGINAL still matches LATEST active session."
-
-  (and latest
-       (equal
-        (plist-get original :id)
-        (plist-get latest :id))
-       (eq
-        (plist-get latest :state)
-        'running)))
 
 (defun expose-review-handle-response (original-session response)
   "Handle provider RESPONSE for ORIGINAL-SESSION."

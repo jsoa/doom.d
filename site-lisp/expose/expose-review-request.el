@@ -6,6 +6,73 @@
 (require 'subr-x)
 (require 'expose-log)
 
+(defun expose-review-request-format-untracked-files (entries)
+  "Return untracked file ENTRIES formatted for review request."
+
+  (string-join
+   (mapcar
+    (lambda (entry)
+      (format
+       "## %s%s\n\n%s"
+       (plist-get entry :file)
+       (if (plist-get entry :truncated)
+           " [truncated]"
+         "")
+       (plist-get entry :content)))
+    entries)
+   "\n\n"))
+
+(defun expose-review-request-format-diagnostic (item)
+  "Return diagnostic ITEM formatted for the review request."
+
+  (format
+   "%s:%s [%s/%s] %s%s"
+   (plist-get item :file)
+   (plist-get item :line)
+   (plist-get item :tool)
+   (plist-get item :severity)
+   (plist-get item :message)
+   (let ((code
+          (plist-get item :code)))
+
+     (if (and code
+              (not
+               (string-empty-p code)))
+         (format " (%s)" code)
+       ""))))
+
+(defun expose-review-request-format-diagnostics (diagnostics)
+  "Return DIAGNOSTICS formatted for the review request."
+
+  (let ((items
+         (plist-get diagnostics :items)))
+
+    (if items
+
+        (string-join
+         (mapcar
+          #'expose-review-request-format-diagnostic
+          items)
+         "\n")
+
+      "No diagnostics reported for changed Python files.")))
+
+(defun expose-review-request-format-changed-files (entries)
+  "Return tracked changed file ENTRIES formatted for review request."
+
+  (string-join
+   (mapcar
+    (lambda (entry)
+      (format
+       "## %s%s\n\n%s"
+       (plist-get entry :file)
+       (if (plist-get entry :truncated)
+           " [truncated]"
+         "")
+       (plist-get entry :content)))
+    entries)
+   "\n\n"))
+
 (defun expose-review-request-cdata (text)
   "Return TEXT safe for a CDATA section."
 
@@ -48,37 +115,60 @@
 (defun expose-review-request-instruction ()
   "Return the AI instruction for branch-level code review."
 
-  "You are performing a senior-engineer code review of the provided branch diff and local changes.
+  "You are performing a strict senior-engineer code review of the provided branch diff, staged changes, unstaged changes, full contents of small changed files, untracked file contents, and diagnostics from changed Python files.
 
 Review only the supplied context. Do not invent files, functions, APIs, requirements, or behavior that are not present.
 
-Focus on:
+Your job is to find actionable issues in this change set. Be thorough. Prefer useful findings over volume, but do not stop after the first few issues if more meaningful issues exist.
+
+Review high, medium, low, and info-level findings.
+
+Review checklist:
 - correctness bugs
-- security issues
+- broken imports, missing dependencies, or wrong package assumptions
+- security issues and secret-handling problems
 - data integrity risks
-- idempotency/retry issues
-- transaction/concurrency problems
-- performance regressions
-- missing tests
+- idempotency, retry, and duplicate-side-effect risks
+- transaction, ordering, race-condition, and concurrency problems
+- performance regressions, unnecessary queries, or expensive loops
+- Dockerfile, docker-compose, and container runtime problems
+- local development environment problems such as direnv, pyenv, venv, Pyright, pytest, and editor config
+- deployment/configuration risks
+- missing or weak tests
+- misleading test configuration
 - maintainability problems
-- confusing or stale comments/docstrings
-- small cleanup items when they meaningfully improve the change
+- confusing names or hidden coupling
+- stale, misleading, or missing comments/docstrings
+- debug/demo code accidentally left in app code
+- import-time side effects
+- cleanup items when they meaningfully improve the change
+- Pyright/Ruff diagnostics from changed files
+
+For each potential issue, ask:
+- Is this caused by the supplied change?
+- Could this break local development, tests, deployment, runtime behavior, or future maintenance?
+- Is there enough evidence in the provided context?
+- Can the developer take a concrete action?
 
 Return only valid JSON. Do not return Markdown. Do not wrap the JSON in a code fence.
 
 Use this exact top-level shape:
 
 {
+  \"summary\": {
+    \"reviewed\": [\"short note about reviewed areas\"],
+    \"not_reviewed\": [\"short note about important context not provided, if any\"]
+  },
   \"items\": [
     {
       \"id\": \"R1\",
       \"severity\": \"high|medium|low|info\",
-      \"category\": \"correctness|security|performance|tests|docs|maintainability|style\",
+      \"category\": \"correctness|security|performance|tests|docs|maintainability|style|dev-environment|docker|configuration\",
       \"file\": \"relative/path/from/project/root.py\",
       \"line_start\": 10,
       \"line_end\": 20,
       \"title\": \"Short actionable title\",
-      \"comment\": \"Clear review comment explaining the issue and why it matters.\",
+      \"comment\": \"Clear review comment explaining the issue, why it matters, and what to change.\",
       \"anchor_text\": \"Small original code snippet from the affected area when possible.\",
       \"suggestion\": {
         \"kind\": \"none|patch\",
@@ -88,13 +178,22 @@ Use this exact top-level shape:
   ]
 }
 
+Severity guidance:
+- high: likely breakage, security risk, data loss, serious runtime risk, or deploy-blocking problem
+- medium: likely bug, bad config, missing dependency, weak test coverage, or important maintainability issue
+- low: concrete cleanup, docs, naming, minor config, or weaker but useful concern
+- info: optional observation or nice-to-have improvement
+
 Rules:
 - Use stable IDs R1, R2, R3, etc.
-- Prefer fewer high-quality findings over noisy comments.
+- Prefer 5 to 15 meaningful findings when issues exist.
+- It is okay to return fewer findings if the change set is small or clean.
+- Do not create filler findings.
 - Line numbers should point to the new/current file when possible.
 - Use file paths relative to the project root.
 - suggestion.kind should be \"none\" for now unless you are very confident in a small patch.
-- If there are no useful findings, return {\"items\": []}.")
+- If there are no useful findings, return {\"summary\":{\"reviewed\":[],\"not_reviewed\":[]},\"items\":[]}."
+  )
 
 (defun expose-review-request-build-document (context)
   "Build an AI review request document from CONTEXT."
@@ -137,6 +236,11 @@ Rules:
      (plist-get context :changed-files)))
 
    (expose-review-request-section
+    "changed-file-contents"
+    (expose-review-request-format-changed-files
+     (plist-get context :changed-file-contents)))
+
+   (expose-review-request-section
     "commit-log"
     (or
      (plist-get context :commit-log)
@@ -159,6 +263,16 @@ Rules:
     (or
      (plist-get context :unstaged-diff)
      ""))
+
+   (expose-review-request-section
+    "untracked-file-contents"
+    (expose-review-request-format-untracked-files
+     (plist-get context :untracked-file-contents)))
+
+   (expose-review-request-section
+    "diagnostics"
+    (expose-review-request-format-diagnostics
+     (plist-get context :diagnostics)))
 
    (expose-review-request-section
     "project-metadata"

@@ -98,14 +98,33 @@
          (context
           (expose-review-context-build-ai project-root))
 
+         (review-input-stats
+          (plist-get context :review-input-stats))
+
          (document
           (expose-review-request-build-document context)))
 
+    ;; Persist review-input stats before the AI response returns.
+    (setq session
+          (plist-put session :review-input-stats review-input-stats))
+
+    (setq session
+          (plist-put session :diagnostics
+                     (plist-get context :diagnostics)))
+
+    (setq session
+          (plist-put session :updated-at
+                     (expose-review-context-now)))
+
+    (expose-review-store-save-session session)
+    (expose-review-buffer-refresh-open session)
+
     (expose-log
      "Review"
-     "Sending review request for %s using %s."
+     "Sending review request for %s using %s. Request size: %d bytes."
      (plist-get session :id)
-     provider)
+     provider
+     (length document))
 
     (condition-case error
 

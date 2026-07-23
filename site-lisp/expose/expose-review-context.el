@@ -17,6 +17,11 @@ When nil, Expose tries `origin/main', `main', `origin/master', then `master'."
           string)
   :group 'expose-review)
 
+(defcustom expose-review-context-include-frontend-diagnostics t
+  "Whether Expose Review should include TypeScript/ESLint diagnostics."
+  :type 'boolean
+  :group 'expose-review)
+
 (defcustom expose-review-base-branch-candidates
   '("origin/main"
     "main"
@@ -101,6 +106,295 @@ When nil, Expose tries `origin/main', `main', `origin/master', then `master'."
   "Maximum diagnostic command output length parsed by Expose Review."
   :type 'integer
   :group 'expose-review)
+
+(defun expose-review-context-frontend-file-p (relative-path)
+  "Return non-nil if RELATIVE-PATH is a frontend file."
+
+  (and
+   relative-path
+   (string-match-p
+    "\\.\\(?:ts\\|tsx\\|js\\|jsx\\|mjs\\|cjs\\|html\\)\\'"
+    relative-path)))
+
+(defun expose-review-context-typescript-file-p (relative-path)
+  "Return non-nil if RELATIVE-PATH is checked by TypeScript."
+
+  (and
+   relative-path
+   (string-match-p
+    "\\.\\(?:ts\\|tsx\\|js\\|jsx\\|mjs\\|cjs\\)\\'"
+    relative-path)))
+
+(defun expose-review-context-existing-frontend-files (project-root files)
+  "Return existing frontend FILES relative to PROJECT-ROOT."
+
+  (seq-filter
+   (lambda (relative-path)
+     (let ((path
+            (expand-file-name relative-path project-root)))
+
+       (and
+        (expose-review-context-frontend-file-p relative-path)
+        (file-readable-p path)
+        (file-regular-p path))))
+   files))
+
+(defun expose-review-context-node-tool-command (project-root tool)
+  "Return executable path for frontend TOOL in PROJECT-ROOT."
+
+  (let ((local-tool
+         (expand-file-name
+          (concat "node_modules/.bin/" tool)
+          project-root)))
+
+    (cond
+     ((file-executable-p local-tool)
+      local-tool)
+
+     ((executable-find tool)
+      (executable-find tool))
+
+     (t
+      nil))))
+
+(defun expose-review-context-call-node-tool (project-root tool args)
+  "Run frontend TOOL with ARGS in PROJECT-ROOT."
+
+  (if-let ((command
+            (expose-review-context-node-tool-command
+             project-root
+             tool)))
+
+      (expose-review-context-call-command
+       project-root
+       command
+       args)
+
+    (list
+     :status nil
+     :stdout ""
+     :stderr
+     (format
+      "%s executable not found in node_modules/.bin or PATH"
+      tool))))
+
+(defun expose-review-context-typescript-project-args (project-root)
+  "Return arguments for running TypeScript in PROJECT-ROOT."
+
+  (cond
+   ((file-readable-p
+     (expand-file-name "tsconfig.json" project-root))
+    '("-p" "tsconfig.json" "--noEmit" "--pretty" "false"))
+
+   (t
+    '("--noEmit" "--pretty" "false"))))
+
+(defun expose-review-context-parse-typescript (project-root output changed-files)
+  "Parse TypeScript OUTPUT for PROJECT-ROOT filtered to CHANGED-FILES."
+
+  (let ((changed-files
+         (mapcar
+          #'file-relative-name
+          changed-files))
+
+        results)
+
+    (dolist (line
+             (split-string
+              (or output "")
+              "\n"
+              t))
+
+      ;; Example:
+      ;; src/app/foo.ts(10,5): error TS2322: Type 'x' is not assignable...
+      (when (string-match
+             "^\\(.+\\)(\\([0-9]+\\),\\([0-9]+\\)): \\(error\\|warning\\) \\(TS[0-9]+\\): \\(.*\\)$"
+             line)
+
+        (let* ((file
+                (expose-review-context-relative-path
+                 project-root
+                 (match-string 1 line)))
+
+               (line-number
+                (string-to-number
+                 (match-string 2 line)))
+
+               (severity
+                (match-string 4 line))
+
+               (code
+                (match-string 5 line))
+
+               (message
+                (match-string 6 line)))
+
+          (when (member file changed-files)
+            (push
+             (list
+              :tool 'typescript
+              :file file
+              :line line-number
+              :severity severity
+              :code code
+              :message message)
+             results)))))
+
+    (nreverse results)))
+
+(defun expose-review-context-eslint-severity (severity)
+  "Return display severity for ESLint SEVERITY."
+
+  (pcase severity
+    (2 "error")
+    (1 "warning")
+    (_ "info")))
+
+(defun expose-review-context-parse-eslint (project-root output)
+  "Parse ESLint JSON OUTPUT for PROJECT-ROOT."
+
+  (let ((json
+         (expose-review-context-json-parse-safe output))
+
+        results)
+
+    (when (listp json)
+
+      (dolist (file-result json)
+
+        (let ((file
+               (expose-review-context-relative-path
+                project-root
+                (or
+                 (plist-get file-result :filePath)
+                 ""))))
+
+          (dolist (message
+                   (plist-get file-result :messages))
+
+            (push
+             (list
+              :tool 'eslint
+              :file file
+              :line
+              (expose-review-context-json-number
+               (plist-get message :line)
+               1)
+              :severity
+              (expose-review-context-eslint-severity
+               (plist-get message :severity))
+              :code
+              (or
+               (plist-get message :ruleId)
+               "")
+              :message
+              (or
+               (plist-get message :message)
+               ""))
+             results)))))
+
+    (nreverse results)))
+
+(defun expose-review-context-command-error (result items)
+  "Return command error for RESULT when ITEMS are empty and status failed."
+
+  (let ((status
+         (plist-get result :status)))
+
+    (when (and
+           status
+           (not
+            (equal status 0))
+           (not items))
+
+      (string-trim
+       (string-join
+        (seq-filter
+         (lambda (text)
+           (and text
+                (not
+                 (string-empty-p text))))
+         (list
+          (plist-get result :stderr)
+          (plist-get result :stdout)))
+        "\n")))))
+
+(defun expose-review-context-run-typescript (project-root frontend-files)
+  "Run TypeScript diagnostics for FRONTEND-FILES in PROJECT-ROOT."
+
+  (let ((typescript-files
+         (seq-filter
+          #'expose-review-context-typescript-file-p
+          frontend-files)))
+
+    (if (and
+         expose-review-context-include-frontend-diagnostics
+         typescript-files)
+
+        (let* ((result
+                (expose-review-context-call-node-tool
+                 project-root
+                 "tsc"
+                 (expose-review-context-typescript-project-args
+                  project-root)))
+
+               (items
+                (expose-review-context-parse-typescript
+                 project-root
+                 (plist-get result :stdout)
+                 typescript-files)))
+
+          (list
+           :tool 'typescript
+           :status
+           (plist-get result :status)
+           :items items
+           :error
+           (expose-review-context-command-error
+            result
+            items)))
+
+      (list
+       :tool 'typescript
+       :status nil
+       :items nil
+       :error nil))))
+
+(defun expose-review-context-run-eslint (project-root frontend-files)
+  "Run ESLint diagnostics for FRONTEND-FILES in PROJECT-ROOT."
+
+  (if (and
+       expose-review-context-include-frontend-diagnostics
+       frontend-files)
+
+      (let* ((result
+              (expose-review-context-call-node-tool
+               project-root
+               "eslint"
+               (append
+                '("--format" "json" "--no-error-on-unmatched-pattern")
+                frontend-files)))
+
+             (items
+              (expose-review-context-parse-eslint
+               project-root
+               (plist-get result :stdout))))
+
+        (list
+         :tool 'eslint
+         :status
+         (plist-get result :status)
+         :items items
+         :error
+         (expose-review-context-command-error
+          result
+          items)))
+
+    (list
+     :tool 'eslint
+     :status nil
+     :items nil
+     :error nil)))
 
 (defun expose-review-context-python-file-p (relative-path)
   "Return non-nil if RELATIVE-PATH is a Python file."
@@ -401,46 +695,69 @@ Return a plist containing :status, :stdout, and :stderr."
      :items nil
      :error "ruff executable not found")))
 
+(defun expose-review-context-tool-items (result)
+  "Return diagnostic items from RESULT."
+
+  (or
+   (plist-get result :items)
+   nil))
+
 (defun expose-review-context-diagnostic-results (project-root changed-files)
   "Return diagnostic results for CHANGED-FILES in PROJECT-ROOT."
 
   (when expose-review-context-include-diagnostics
 
-    (let ((python-files
-           (expose-review-context-existing-python-files
-            project-root
-            changed-files)))
+    (let* ((python-files
+            (expose-review-context-existing-python-files
+             project-root
+             changed-files))
 
-      (if python-files
+           (frontend-files
+            (expose-review-context-existing-frontend-files
+             project-root
+             changed-files))
 
-          (let* ((pyright
-                  (expose-review-context-run-pyright
-                   project-root
-                   python-files))
+           (pyright
+            (when python-files
+              (expose-review-context-run-pyright
+               project-root
+               python-files)))
 
-                 (ruff
-                  (expose-review-context-run-ruff
-                   project-root
-                   python-files))
+           (ruff
+            (when python-files
+              (expose-review-context-run-ruff
+               project-root
+               python-files)))
 
-                 (items
-                  (seq-take
-                   (append
-                    (plist-get pyright :items)
-                    (plist-get ruff :items))
-                   expose-review-context-max-diagnostics)))
+           (typescript
+            (when frontend-files
+              (expose-review-context-run-typescript
+               project-root
+               frontend-files)))
 
-            (list
-             :python-files python-files
-             :pyright pyright
-             :ruff ruff
-             :items items))
+           (eslint
+            (when frontend-files
+              (expose-review-context-run-eslint
+               project-root
+               frontend-files)))
 
-        (list
-         :python-files nil
-         :pyright nil
-         :ruff nil
-         :items nil)))))
+           (items
+            (seq-take
+             (append
+              (expose-review-context-tool-items pyright)
+              (expose-review-context-tool-items ruff)
+              (expose-review-context-tool-items typescript)
+              (expose-review-context-tool-items eslint))
+             expose-review-context-max-diagnostics)))
+
+      (list
+       :python-files python-files
+       :frontend-files frontend-files
+       :pyright pyright
+       :ruff ruff
+       :typescript typescript
+       :eslint eslint
+       :items items))))
 
 (defun expose-review-context-hidden-path-p (relative-path)
   "Return non-nil if RELATIVE-PATH contains a hidden path segment."
@@ -946,6 +1263,44 @@ Return nil when git exits unsuccessfully."
        (plist-get
         (plist-get context :diagnostics)
         :ruff)
+       :items))
+     :python-diagnostic-files
+     (length
+      (plist-get
+       (plist-get context :diagnostics)
+       :python-files))
+
+     :frontend-diagnostic-files
+     (length
+      (plist-get
+       (plist-get context :diagnostics)
+       :frontend-files))
+
+     :diagnostic-files
+     (+
+      (length
+       (plist-get
+        (plist-get context :diagnostics)
+        :python-files))
+      (length
+       (plist-get
+        (plist-get context :diagnostics)
+        :frontend-files)))
+
+     :typescript-diagnostics
+     (length
+      (plist-get
+       (plist-get
+        (plist-get context :diagnostics)
+        :typescript)
+       :items))
+
+     :eslint-diagnostics
+     (length
+      (plist-get
+       (plist-get
+        (plist-get context :diagnostics)
+        :eslint)
        :items))
 
      :diagnostics-total

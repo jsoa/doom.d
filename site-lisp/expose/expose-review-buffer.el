@@ -3,6 +3,7 @@
 (require 'subr-x)
 (require 'expose-log)
 (require 'expose-review-store)
+(require 'diff-mode nil t)
 
 (declare-function expose-review-complete-current "expose-review")
 (declare-function expose-review-rerun-current "expose-review")
@@ -77,11 +78,20 @@
          (python-files
           (plist-get diagnostics :python-files))
 
+         (frontend-files
+          (plist-get diagnostics :frontend-files))
+
          (pyright
           (plist-get diagnostics :pyright))
 
          (ruff
           (plist-get diagnostics :ruff))
+
+         (typescript
+          (plist-get diagnostics :typescript))
+
+         (eslint
+          (plist-get diagnostics :eslint))
 
          (items
           (plist-get diagnostics :items)))
@@ -102,9 +112,24 @@
               (insert
                (format "- %s\n" file))))
 
+          (insert
+           (format
+            "\nFrontend files checked: %s\n"
+            (if frontend-files
+                (length frontend-files)
+              0)))
+
+          (when frontend-files
+            (insert "\nChanged frontend files:\n")
+            (dolist (file frontend-files)
+              (insert
+               (format "- %s\n" file))))
+
           (insert "\n")
           (expose-review-buffer-insert-diagnostic-tool-status "Pyright" pyright)
           (expose-review-buffer-insert-diagnostic-tool-status "Ruff" ruff)
+          (expose-review-buffer-insert-diagnostic-tool-status "TypeScript" typescript)
+          (expose-review-buffer-insert-diagnostic-tool-status "ESLint" eslint)
 
           (insert "\nDiagnostics:\n")
 
@@ -228,30 +253,59 @@
             (or
              (plist-get stats :metadata-files)
              0)))
+
           (insert
            (format
-            "Diagnostic files:    %s\n"
+            "Python diagnostic files:   %s\n"
+            (or
+             (plist-get stats :python-diagnostic-files)
+             0)))
+
+          (insert
+           (format
+            "Frontend diagnostic files: %s\n"
+            (or
+             (plist-get stats :frontend-diagnostic-files)
+             0)))
+
+          (insert
+           (format
+            "Diagnostic files:          %s\n"
             (or
              (plist-get stats :diagnostic-files)
              0)))
 
           (insert
            (format
-            "Pyright diagnostics: %s\n"
+            "Pyright diagnostics:       %s\n"
             (or
              (plist-get stats :pyright-diagnostics)
              0)))
 
           (insert
            (format
-            "Ruff diagnostics:    %s\n"
+            "Ruff diagnostics:          %s\n"
             (or
              (plist-get stats :ruff-diagnostics)
              0)))
 
           (insert
            (format
-            "Diagnostics total:   %s\n"
+            "TypeScript diagnostics:    %s\n"
+            (or
+             (plist-get stats :typescript-diagnostics)
+             0)))
+
+          (insert
+           (format
+            "ESLint diagnostics:        %s\n"
+            (or
+             (plist-get stats :eslint-diagnostics)
+             0)))
+
+          (insert
+           (format
+            "Diagnostics total:         %s\n"
             (or
              (plist-get stats :diagnostics-total)
              0)))
@@ -605,23 +659,17 @@
        (list
         'face face)))
 
-    (insert
-     (propertize
-      (expose-review-buffer-item-location item)
-      'face
-      'font-lock-keyword-face))
+    ;; Blue/link-looking path.
+    (expose-review-buffer-insert-item-location item)
 
-    (insert "\n\n")
+    ;; Title, bounded to same width as separator.
+    (expose-review-buffer-insert-filled-text
+     (or
+      (plist-get item :title)
+      "Untitled review item")
+     'bold)
 
-    (insert
-     (propertize
-      (or
-       (plist-get item :title)
-       "Untitled review item")
-      'face
-      'bold))
-
-    (insert "\n\n")
+    (insert "\n")
 
     (expose-review-buffer-insert-label-line
      "Comment"
@@ -663,6 +711,19 @@
 
       (format "%s" line-start))))
 
+(defun expose-review-buffer-insert-item-location (item)
+  "Insert clickable-looking location for ITEM."
+
+  (insert
+   (propertize
+    (expose-review-buffer-item-location item)
+    'face
+    'link
+    'help-echo
+    "RET opens this finding"))
+
+  (insert "\n\n"))
+
 (defun expose-review-buffer-item-location (item)
   "Return display location for ITEM."
 
@@ -677,12 +738,7 @@
   (insert
    (propertize
     (make-string
-     (max
-      60
-      (min
-       100
-       (- (window-width)
-          4)))
+     (expose-review-buffer-content-width)
      ?─)
     'face
     'shadow))
@@ -701,30 +757,46 @@
      (propertize
       (format "%s:\n" label)
       'face
-      'expose-review-heading-face))
+      (expose-review-buffer-subsection-face)))
 
-    (insert
-     (format "%s\n\n" value))))
+    (expose-review-buffer-insert-filled-text value)
+    (insert "\n")))
 
 (defun expose-review-buffer-suggestion-kind (item)
   "Return suggestion kind for ITEM."
 
-  (plist-get
-   (plist-get item :suggestion)
-   :kind))
+  (or
+   (plist-get
+    (plist-get item :suggestion)
+    :kind)
+   'none))
+
+(defun expose-review-buffer-suggestion-text (item)
+  "Return suggestion text for ITEM."
+
+  (or
+   (plist-get
+    (plist-get item :suggestion)
+    :text)
+   ""))
 
 (defun expose-review-buffer-suggestion-patch (item)
   "Return suggestion patch for ITEM."
 
-  (plist-get
-   (plist-get item :suggestion)
-   :patch))
+  (or
+   (plist-get
+    (plist-get item :suggestion)
+    :patch)
+   ""))
 
 (defun expose-review-buffer-insert-suggestion (item)
   "Insert suggestion details for ITEM."
 
   (let ((kind
          (expose-review-buffer-suggestion-kind item))
+
+        (text
+         (expose-review-buffer-suggestion-text item))
 
         (patch
          (expose-review-buffer-suggestion-patch item)))
@@ -733,28 +805,32 @@
      (propertize
       "Suggestion:\n"
       'face
-      'expose-review-heading-face))
+      (expose-review-buffer-subsection-face)))
 
     (cond
-     ((and patch
-           (not
-            (string-empty-p patch))
-           (not
-            (eq kind 'none)))
+     ((and
+       (eq kind 'text)
+       (not
+        (string-empty-p text)))
 
-      (insert
-       (format
-        "Kind: %s\n\n"
-        kind))
+      (expose-review-buffer-insert-filled-text text)
+      (insert "\n"))
 
-      (insert "```diff\n")
-      (insert patch)
-      (unless (string-suffix-p "\n" patch)
+     ((and
+       (eq kind 'patch)
+       (not
+        (string-empty-p patch)))
+
+      (when (not
+             (string-empty-p text))
+        (expose-review-buffer-insert-filled-text text)
         (insert "\n"))
-      (insert "```\n\n"))
+
+      (expose-review-buffer-insert-diff-patch patch)
+      )
 
      (t
-      (insert "No applyable suggestion provided for this item.\n\n")))))
+      (insert "No suggestion provided for this item.\n\n")))))
 
 (defun expose-review-buffer-insert-items (session)
   "Insert review items from SESSION."
@@ -801,6 +877,97 @@
              (expose-review-buffer-item-separator))
 
          (insert "No review findings.\n"))))))
+
+(defun expose-review-buffer-content-width ()
+  "Return preferred content width for review item text."
+
+  (max
+   60
+   (min
+    100
+    (- (window-width)
+       4))))
+
+(defun expose-review-buffer-subsection-face ()
+  "Return face used for review subsection labels."
+
+  (if (facep 'expose-review-low-face)
+      'expose-review-low-face
+    'font-lock-doc-face))
+
+(defun expose-review-buffer-fill-string (text)
+  "Return TEXT filled to `expose-review-buffer-content-width'."
+
+  (let ((width
+         (expose-review-buffer-content-width)))
+
+    (with-temp-buffer
+      (let ((fill-column width)
+            (adaptive-fill-mode t))
+
+        (insert
+         (string-trim-right
+          (or text "")))
+
+        (goto-char (point-min))
+        (fill-region
+         (point-min)
+         (point-max))
+
+        (buffer-string)))))
+
+(defun expose-review-buffer-insert-filled-text (text &optional face)
+  "Insert TEXT filled to review width, optionally using FACE."
+
+  (let ((filled
+         (expose-review-buffer-fill-string text)))
+
+    (if face
+        (insert
+         (propertize filled 'face face))
+      (insert filled))
+
+    (unless (string-suffix-p "\n" filled)
+      (insert "\n"))))
+
+(defun expose-review-buffer-fontify-diff (text)
+  "Return TEXT fontified as a unified diff."
+
+  (if (not (fboundp 'diff-mode))
+      text
+
+    (with-temp-buffer
+      (delay-mode-hooks
+        (diff-mode))
+
+      (font-lock-mode 1)
+
+      (insert
+       (string-trim-right
+        (or text "")))
+
+      (font-lock-ensure
+       (point-min)
+       (point-max))
+
+      (buffer-string))))
+
+(defun expose-review-buffer-insert-diff-patch (patch)
+  "Insert PATCH with diff highlighting."
+
+  (insert
+   (propertize
+    "Patch:\n"
+    'face
+    (expose-review-buffer-subsection-face)))
+
+  (insert
+   (expose-review-buffer-fontify-diff patch))
+
+  (unless (bolp)
+    (insert "\n"))
+
+  (insert "\n"))
 
 (defun expose-review-buffer-render (session)
   "Render SESSION in the current buffer."

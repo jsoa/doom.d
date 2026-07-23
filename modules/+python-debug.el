@@ -31,7 +31,7 @@ For pyenv or direnv projects, this will normally remain `python'."
 When non-nil, DJANGO_SETTINGS_MODULE is added to the debugged process
 environment."
   :type '(choice (const :tag "Use project default" nil)
-                 string)
+          string)
   :group 'js/python-debug)
 
 (defcustom js/python-debug-environment nil
@@ -280,11 +280,11 @@ Attach to an existing debugpy server when
   "Disconnect CONN without terminating its debuggee."
   (when (and conn (jsonrpc-running-p conn))
     (dape--with-request
-        (dape-request conn
-                      :disconnect
-                      '(:restart :json-false
-                        :terminateDebuggee :json-false))
-      (dape--shutdown conn))))
+     (dape-request conn
+                   :disconnect
+                   '(:restart :json-false
+                     :terminateDebuggee :json-false))
+     (dape--shutdown conn))))
 
 (defun js/python-debug-stop ()
   "Stop the current Dape session.

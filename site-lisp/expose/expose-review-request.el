@@ -115,7 +115,7 @@
 (defun expose-review-request-instruction ()
   "Return the AI instruction for branch-level code review."
 
-  "You are performing a strict senior-engineer code review of the provided branch diff, staged changes, unstaged changes, full contents of small changed files, untracked file contents, and diagnostics from changed Python files.
+  "You are performing a strict senior-engineer code review of the provided branch diff, staged changes, unstaged changes, full contents of small changed files, untracked file contents, Pyright/Ruff diagnostics from changed Python files, and TypeScript/ESLint diagnostics from changed frontend files.
 
 Review only the supplied context. Do not invent files, functions, APIs, requirements, or behavior that are not present.
 
@@ -142,7 +142,7 @@ Review checklist:
 - debug/demo code accidentally left in app code
 - import-time side effects
 - cleanup items when they meaningfully improve the change
-- Pyright/Ruff diagnostics from changed files
+- Pyright/Ruff/TypeScript/ESLint diagnostics from changed files
 
 For each potential issue, ask:
 - Is this caused by the supplied change?
@@ -171,7 +171,8 @@ Use this exact top-level shape:
       \"comment\": \"Clear review comment explaining the issue, why it matters, and what to change.\",
       \"anchor_text\": \"Small original code snippet from the affected area when possible.\",
       \"suggestion\": {
-        \"kind\": \"none|patch\",
+        \"kind\": \"none|text|patch\",
+        \"text\": \"Concrete sugguested fix or implementation direction.\"
         \"patch\": \"\"
       }
     }
@@ -191,8 +192,31 @@ Rules:
 - Do not create filler findings.
 - Line numbers should point to the new/current file when possible.
 - Use file paths relative to the project root.
-- suggestion.kind should be \"none\" for now unless you are very confident in a small patch.
-- If there are no useful findings, return {\"summary\":{\"reviewed\":[],\"not_reviewed\":[]},\"items\":[]}."
+- If there are no useful findings, return {\"summary\":{\"reviewed\":[],\"not_reviewed\":[]},\"items\":[]}.
+Suggestion rules:
+- Use suggestion.kind \"patch\" whenever the fix is a small, obvious, local edit that can be expressed safely as a minimal unified diff.
+- Good patch candidates include typo fixes, copy changes, small config value changes, one-line condition fixes, import fixes, renamed identifiers when the local context is clear, and small test additions.
+- Use suggestion.kind \"text\" when the fix requires judgment, broader refactoring, missing context, multiple possible designs, or a patch would be risky.
+- Use suggestion.text for a short human-readable fix summary.
+- Use suggestion.patch only for unified diff text.
+- Use suggestion.kind \"none\" only when there is genuinely no useful suggestion beyond the comment.
+- Do not invent large patches.
+- Do not suggest applying patches automatically.
+
+Patch format:
+- Use a minimal unified diff.
+- Include only the affected file.
+- Include enough context to identify the edit.
+- Prefer patches under 15 changed lines.
+
+Example patch suggestion:
+
+{
+  \"kind\": \"patch\",
+  \"text\": \"Correct the visible footer typo.\",
+  \"patch\": \"--- a/src/app/components/global/footer.tsx\n+++ b/src/app/components/global/footer.tsx\n@@\n-Intagram\n+Instagram\"
+}
+"
   )
 
 (defun expose-review-request-build-document (context)
@@ -366,23 +390,49 @@ Rules:
    (t
     fallback)))
 
-(defun expose-review-request-normalize-suggestion (raw)
-  "Normalize RAW suggestion object."
+(defun expose-review-request-normalize-suggestion (suggestion)
+  "Normalize review SUGGESTION."
 
-  (when raw
-    (let ((kind
-           (expose-review-request-symbol
-            (expose-review-request-json-get raw :kind)
-            'none))
+  (let* ((kind-value
+          (or
+           (expose-review-request-json-get suggestion :kind)
+           "none"))
 
-          (patch
-           (or
-            (expose-review-request-json-get raw :patch)
-            "")))
+         (kind
+          (expose-review-request-symbol kind-value 'none))
 
-      (list
-       :kind kind
-       :patch patch))))
+         (text
+          (or
+           (expose-review-request-json-get suggestion :text)
+           ""))
+
+         (patch
+          (or
+           (expose-review-request-json-get suggestion :patch)
+           "")))
+
+    ;; Be forgiving. If the model provides a patch/text but forgets to set
+    ;; the matching kind, preserve the useful suggestion instead of hiding it.
+    (cond
+     ((and patch
+           (not
+            (string-empty-p patch)))
+      (setq kind 'patch))
+
+     ((and text
+           (not
+            (string-empty-p text)))
+      (setq kind 'text))
+
+     ((not
+       (memq kind
+             '(none text patch)))
+      (setq kind 'none)))
+
+    (list
+     :kind kind
+     :text text
+     :patch patch)))
 
 (defun expose-review-request-normalize-item (raw index)
   "Normalize RAW review item at INDEX."

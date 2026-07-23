@@ -567,7 +567,7 @@
    :async t)
 
   (expose-popup-register-action
-   ?R
+   ?F
    "Refactor"
    'view
    #'expose-refactor-async

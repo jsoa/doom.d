@@ -122,14 +122,27 @@
     path))
 
 (defun expose-review-store-read-session-file (path)
-  "Read review session data from PATH."
+  "Read review session data from PATH.
+
+Return nil when PATH cannot be read or parsed."
 
   (when (file-readable-p path)
-    (with-temp-buffer
-      (insert-file-contents path)
-      (goto-char (point-min))
-      (read
-       (current-buffer)))))
+
+    (condition-case error
+
+        (with-temp-buffer
+          (insert-file-contents path)
+          (goto-char (point-min))
+          (read (current-buffer)))
+
+      (error
+       (expose-log
+        "ReviewStore"
+        "Failed to read review session %s: %s"
+        path
+        (error-message-string error))
+
+       nil))))
 
 (defun expose-review-store-read-active (project-root branch)
   "Read active review for PROJECT-ROOT and BRANCH."

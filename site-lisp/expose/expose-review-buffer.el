@@ -31,7 +31,7 @@
   "Review session displayed in the current dashboard buffer.")
 
 (defvar-local expose-review-buffer-collapsed-sections
-  '(review-input git-status review-scope diagnostics)
+    '(review-input git-status review-scope diagnostics)
   "Collapsed section IDs in the current Expose review dashboard.")
 
 (defun expose-review-buffer-normalize-collapsed-sections ()
@@ -762,6 +762,12 @@
   (expose-review-buffer-insert-heading "Review Items")
 
   (pcase (plist-get session :state)
+    ('preparing
+     (insert "Preparing review context...\n"))
+
+    ('sending
+     (insert "Sending review request to provider...\n"))
+
     ('running
      (insert "AI review is running...\n"))
 

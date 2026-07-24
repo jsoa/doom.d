@@ -73,6 +73,48 @@
     entries)
    "\n\n"))
 
+(defun expose-review-request-patch-new-range (patch)
+  "Return new-file line range from unified PATCH.
+
+The result is a cons cell like (START . END), or nil when PATCH does
+not contain a unified-diff hunk header."
+
+  (when (and patch
+             (stringp patch))
+
+    (catch 'range
+      (dolist (line
+               (split-string patch "\n" t))
+
+        ;; Examples:
+        ;; @@ -112,3 +121,3 @@
+        ;; @@ -112 +121 @@
+        ;; @@ -112,0 +121,2 @@
+        (when (string-match
+               "^@@ .* \\+\\([0-9]+\\)\\(?:,\\([0-9]+\\)\\)? @@"
+               line)
+
+          (let* ((start
+                  (string-to-number
+                   (match-string 1 line)))
+
+                 (raw-length
+                  (match-string 2 line))
+
+                 (length
+                  (if raw-length
+                      (string-to-number raw-length)
+                    1))
+
+                 (end
+                  (if (> length 0)
+                      (+ start
+                         (1- length))
+                    start)))
+
+            (throw 'range
+                   (cons start end))))))))
+
 (defun expose-review-request-cdata (text)
   "Return TEXT safe for a CDATA section."
 
@@ -306,52 +348,131 @@ Example patch suggestion:
    "</context>\n"
    "</expose-code-review-request>\n"))
 
-(defun expose-review-request-strip-fence (text)
-  "Extract JSON from TEXT, removing common Markdown fences."
+(defun expose-review-request-strip-json-fence (response)
+  "Return RESPONSE with Markdown JSON fences removed."
 
-  (let ((cleaned
+  (let ((text
          (string-trim
-          (substring-no-properties
-           (or text "")))))
+          (or response ""))))
+
+    (when (string-match "\\`[[:space:]]*```\\(?:json\\)?[[:space:]\n\r]*" text)
+      (setq text
+            (replace-match "" t t text)))
+
+    (when (string-match "```[[:space:]]*\\'" text)
+      (setq text
+            (replace-match "" t t text)))
+
+    (string-trim text)))
+
+(defun expose-review-request-json-start-index (text)
+  "Return index of first top-level JSON delimiter in TEXT."
+
+  (let ((object-index
+         (string-match "{" text))
+
+        (array-index
+         (string-match "\\[" text)))
 
     (cond
-     ((string-match
-       "```json[[:space:]\n]*\\(\\(?:.\\|\n\\)*?\\)[[:space:]\n]*```"
-       cleaned)
-      (string-trim
-       (match-string 1 cleaned)))
+     ((and object-index array-index)
+      (min object-index array-index))
 
-     ((string-match
-       "```[[:space:]\n]*\\(\\(?:.\\|\n\\)*?\\)[[:space:]\n]*```"
-       cleaned)
-      (string-trim
-       (match-string 1 cleaned)))
+     (object-index
+      object-index)
+
+     (array-index
+      array-index)
 
      (t
-      cleaned))))
+      nil))))
 
-(defun expose-review-request-extract-json (text)
-  "Extract a JSON object string from TEXT."
+(defun expose-review-request-json-matching-close (open-char)
+  "Return matching close delimiter for OPEN-CHAR."
 
-  (let* ((cleaned
-          (expose-review-request-strip-fence text))
+  (pcase open-char
+    (?{ ?})
+    (?[ ?])
+    (_ nil)))
+
+(defun expose-review-request-extract-balanced-json (text start)
+  "Extract balanced JSON from TEXT starting at START."
+
+  (let* ((open-char
+          (aref text start))
+
+         (close-char
+          (expose-review-request-json-matching-close open-char))
+
+         (depth 0)
+
+         (index start)
+
+         (length
+          (length text))
+
+         (in-string nil)
+
+         (escaped nil)
+
+         end)
+
+    (unless close-char
+      (error "No JSON object or array found"))
+
+    (while (and (< index length)
+                (not end))
+
+      (let ((char
+             (aref text index)))
+
+        (cond
+         (escaped
+          (setq escaped nil))
+
+         ((and in-string
+               (= char ?\\))
+          (setq escaped t))
+
+         ((= char ?\")
+          (setq in-string
+                (not in-string)))
+
+         ((not in-string)
+          (cond
+           ((= char open-char)
+            (setq depth
+                  (1+ depth)))
+
+           ((= char close-char)
+            (setq depth
+                  (1- depth))
+
+            (when (= depth 0)
+              (setq end
+                    (1+ index))))))))
+
+      (setq index
+            (1+ index)))
+
+    (unless end
+      (error "Could not find balanced JSON ending delimiter"))
+
+    (substring text start end)))
+
+(defun expose-review-request-extract-json (response)
+  "Extract the first balanced JSON object or array from RESPONSE."
+
+  (let* ((text
+          (expose-review-request-strip-json-fence response))
 
          (start
-          (string-match "{" cleaned))
+          (expose-review-request-json-start-index text)))
 
-         (end
-          (cl-position
-           ?}
-           cleaned
-           :from-end t)))
+    (unless start
+      (error "No JSON object or array found in review response"))
 
-    (unless (and start end)
-      (error "Review response did not contain a JSON object"))
-
-    (substring
-     cleaned
-     start
-     (1+ end))))
+    (expose-review-request-extract-balanced-json text start)))
 
 (defun expose-review-request-json-get (plist &rest keys)
   "Return first non-nil value in PLIST for KEYS."
@@ -409,7 +530,10 @@ Example patch suggestion:
          (patch
           (or
            (expose-review-request-json-get suggestion :patch)
-           "")))
+           ""))
+
+         (patch-range
+          (expose-review-request-patch-new-range patch)))
 
     ;; Be forgiving. If the model provides a patch/text but forgets to set
     ;; the matching kind, preserve the useful suggestion instead of hiding it.
@@ -432,7 +556,11 @@ Example patch suggestion:
     (list
      :kind kind
      :text text
-     :patch patch)))
+     :patch patch
+     :patch-line-start
+     (car-safe patch-range)
+     :patch-line-end
+     (cdr-safe patch-range))))
 
 (defun expose-review-request-normalize-item (raw index)
   "Normalize RAW review item at INDEX."
@@ -496,30 +624,52 @@ Example patch suggestion:
        (expose-review-request-normalize-suggestion
         (expose-review-request-json-get raw :suggestion))))))
 
+(defun expose-review-request-normalize-items (items)
+  "Normalize raw review ITEMS."
+
+  (cl-loop
+   for raw in items
+   for index from 1
+   for item = (expose-review-request-normalize-item raw index)
+   when item
+   collect item))
+
 (defun expose-review-request-parse-items (response)
   "Parse review items from provider RESPONSE."
 
-  (let* ((json-string
+  (let* ((json
           (expose-review-request-extract-json response))
 
-         (json-object
+         (parsed
           (json-parse-string
-           json-string
+           json
            :object-type 'plist
-           :array-type 'list
-           :null-object nil
-           :false-object nil))
+           :array-type 'list))
 
-         (raw-items
-          (or
-           (plist-get json-object :items)
-           nil)))
+         (items
+          (cond
+           ;; Preferred shape:
+           ;; {"summary": "...", "items": [...]}
+           ((and
+             (listp parsed)
+             (plist-member parsed :items))
+            (plist-get parsed :items))
 
-    (cl-loop
-     for raw in raw-items
-     for index from 1
-     for item = (expose-review-request-normalize-item raw index)
-     when item
-     collect item)))
+           ;; Tolerate a single direct review item:
+           ;; {"id": "R1", "file": "...", ...}
+           ((and
+             (listp parsed)
+             (plist-member parsed :file))
+            (list parsed))
+
+           ;; Tolerate direct top-level array:
+           ;; [{"id": "R1", ...}, {"id": "R2", ...}]
+           ((listp parsed)
+            parsed)
+
+           (t
+            nil))))
+
+    (expose-review-request-normalize-items items)))
 
 (provide 'expose-review-request)

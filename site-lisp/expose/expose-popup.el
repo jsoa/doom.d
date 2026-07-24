@@ -15,6 +15,11 @@
   "Generic EXPOSE popup UI."
   :group 'tools)
 
+(defcustom expose-popup-scroll-lines 1
+  "Number of lines Expose popup scroll commands move."
+  :type 'integer
+  :group 'expose-popup)
+
 (defcustom expose-popup-max-width 120
   "Maximum width of the popup."
   :type 'integer
@@ -481,27 +486,48 @@
 
       (pop-to-buffer target))))
 
+(defun expose-popup-window ()
+  "Return the visible Expose popup window, or nil."
+
+  (get-buffer-window expose-popup-buffer-name t))
+
+(defun expose-popup-scroll-window (direction)
+  "Scroll the Expose popup window in DIRECTION.
+
+DIRECTION should be `down' to move farther down the popup content,
+or `up' to move back toward the top."
+
+  (when-let ((window
+              (expose-popup-window)))
+
+    (with-selected-window window
+      (condition-case nil
+          (pcase direction
+            ('down
+             ;; Emacs' `scroll-up' moves the viewport down through content.
+             (scroll-up expose-popup-scroll-lines))
+
+            ('up
+             ;; Emacs' `scroll-down' moves the viewport up through content.
+             (scroll-down expose-popup-scroll-lines)))
+        (beginning-of-buffer nil)
+        (end-of-buffer nil)))
+
+    (expose-popup-update-scroll-indicator)))
+
 (defun expose-popup-scroll-down ()
-  "Scroll the popup down."
+  "Scroll the Expose popup down by `expose-popup-scroll-lines'."
 
   (interactive)
 
-  (when-let ((window (get-buffer-window expose-popup-buffer-name t)))
-    (with-selected-window window
-      (ignore-errors
-        (scroll-up-command)
-        (expose-popup-update-scroll-indicator)))))
+  (expose-popup-scroll-window 'down))
 
 (defun expose-popup-scroll-up ()
-  "Scroll the popup up."
+  "Scroll the Expose popup up by `expose-popup-scroll-lines'."
 
   (interactive)
 
-  (when-let ((window (get-buffer-window expose-popup-buffer-name t)))
-    (with-selected-window window
-      (ignore-errors
-        (scroll-down-command)
-        (expose-popup-update-scroll-indicator)))))
+  (expose-popup-scroll-window 'up))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Hover Scroll Keys

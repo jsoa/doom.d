@@ -7,6 +7,7 @@
 (require 'expose-review-context)
 (require 'expose-review-request)
 (require 'expose-review-store)
+(require 'expose-review-source)
 
 (defvar expose-provider-default)
 
@@ -261,6 +262,9 @@
             (expose-review-store-save-session latest-session)
             (expose-review-buffer-refresh-open latest-session)
 
+            (expose-review-source-refresh-project
+             (plist-get latest-session :project-root))
+
             (expose-log
              "Review"
              "Review session %s completed with %d items."
@@ -301,6 +305,9 @@
     (expose-review-store-save-session latest-session)
     (expose-review-buffer-refresh-open latest-session)
 
+    (expose-review-source-refresh-project
+     (plist-get latest-session :project-root))
+
     (expose-log
      "Review"
      "Review session %s failed: %s"
@@ -320,10 +327,21 @@
 
     (when (yes-or-no-p "Complete this Expose review? ")
 
-      (let ((history-path
-             (expose-review-store-complete-active
-              (plist-get session :project-root)
-              (plist-get session :branch))))
+      (let* ((project-root
+              (plist-get session :project-root))
+
+             (branch
+              (plist-get session :branch))
+
+             (history-path
+              (expose-review-store-complete-active
+               project-root
+               branch)))
+
+        ;; Completing the review removes the active session, so source buffers
+        ;; should drop fringe markers, review hovers, and ExReview minor mode.
+        (when (fboundp 'expose-review-source-refresh-project)
+          (expose-review-source-refresh-project project-root))
 
         (message
          "Expose review completed: %s"

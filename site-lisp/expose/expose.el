@@ -16,6 +16,7 @@
 (require 'expose-popup)
 (require 'expose-hover)
 (require 'expose-commands)
+(require 'expose-review-source)
 
 ;;; ---------------------------------------------------------------------------
 ;;; Keybindings
@@ -107,8 +108,13 @@
   :global t
 
   (if expose-mode
-      (expose-hover-mode 1)
-    (expose-hover-mode -1)))
+
+      (progn
+        (expose-hover-mode 1)
+        (expose-review-source-global-mode 1))
+
+    (expose-hover-mode -1)
+    (expose-review-source-global-mode -1)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Bootstrap

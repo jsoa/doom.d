@@ -82,6 +82,13 @@ base64 images."
 ;;; State
 ;;; ---------------------------------------------------------------------------
 
+(defun expose-hover-review-source-active-p ()
+  "Return non-nil if Expose Review owns hover at point."
+
+  (and
+   (fboundp 'expose-review-source-item-at-point)
+   (expose-review-source-item-at-point)))
+
 (defun expose-hover-disabled-mode-p ()
   "Return non-nil if the current major mode disables Expose hover."
 
@@ -711,7 +718,8 @@ entities, and JSDoc formatting noise."
 
   (unless (or
            expose-popup-visible
-           (expose-hover-suppressed-p))
+           (expose-hover-suppressed-p)
+           (expose-hover-review-source-active-p))
 
     (expose-log
      "Hover"
@@ -767,7 +775,8 @@ entities, and JSDoc formatting noise."
   (unless (or
            expose-popup-visible
            (eq (point) expose-hover-last-point)
-           (expose-hover-suppressed-p))
+           (expose-hover-suppressed-p)
+           (expose-hover-review-source-active-p))
 
     (setq expose-hover-timer
           (run-with-idle-timer

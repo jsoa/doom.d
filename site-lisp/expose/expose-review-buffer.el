@@ -4,6 +4,7 @@
 (require 'expose-log)
 (require 'expose-review-store)
 (require 'diff-mode nil t)
+(require 'expose-review-request)
 
 (declare-function expose-review-complete-current "expose-review")
 (declare-function expose-review-rerun-current "expose-review")
@@ -662,6 +663,8 @@
     ;; Blue/link-looking path.
     (expose-review-buffer-insert-item-location item)
 
+    (expose-review-buffer-insert-patch-target item)
+
     ;; Title, bounded to same width as separator.
     (expose-review-buffer-insert-filled-text
      (or
@@ -689,8 +692,7 @@
        block-start
        block-end
        (list
-        'expose-review-item item
-        'mouse-face 'highlight)))
+        'expose-review-item item)))
 
     (insert "\n")))
 
@@ -761,6 +763,67 @@
 
     (expose-review-buffer-insert-filled-text value)
     (insert "\n")))
+
+(defun expose-review-buffer-suggestion-patch-range (item)
+  "Return patch target range for ITEM."
+
+  (let* ((suggestion
+          (plist-get item :suggestion))
+
+         (line-start
+          (plist-get suggestion :patch-line-start))
+
+         (line-end
+          (plist-get suggestion :patch-line-end)))
+
+    (or
+     (and line-start
+          line-end
+          (cons line-start line-end))
+
+     (expose-review-request-patch-new-range
+      (expose-review-buffer-suggestion-patch item)))))
+
+(defun expose-review-buffer-patch-target-location (item)
+  "Return patch target display location for ITEM."
+
+  (when-let ((range
+              (expose-review-buffer-suggestion-patch-range item)))
+
+    (let ((file
+           (plist-get item :file))
+
+          (line-start
+           (car range))
+
+          (line-end
+           (cdr range)))
+
+      (if (= line-start line-end)
+          (format "%s:%s" file line-start)
+        (format "%s:%s-%s" file line-start line-end)))))
+
+(defun expose-review-buffer-insert-patch-target (item)
+  "Insert patch target for ITEM when available."
+
+  (when-let ((location
+              (expose-review-buffer-patch-target-location item)))
+
+    (insert
+     (propertize
+      "Patch target: "
+      'face
+      (expose-review-buffer-subsection-face)))
+
+    (insert
+     (propertize
+      location
+      'face
+      'link
+      'help-echo
+      "Suggested patch target"))
+
+    (insert "\n\n")))
 
 (defun expose-review-buffer-suggestion-kind (item)
   "Return suggestion kind for ITEM."

@@ -36,6 +36,15 @@
     '(review-input git-status review-scope diagnostics)
   "Collapsed section IDs in the current Expose review dashboard.")
 
+(defun expose-review-buffer-goto-line-column (line column)
+  "Move to LINE and COLUMN in the current buffer."
+
+  (goto-char (point-min))
+  (forward-line
+   (max 0
+        (1- line)))
+  (move-to-column column))
+
 (defun expose-review-buffer-normalize-collapsed-sections ()
   "Normalize collapsed sections for the current review buffer."
 
@@ -405,91 +414,6 @@
 
   (insert "\n"))
 
-(defun expose-review-buffer-insert-review-input (session)
-  "Insert review input health information for SESSION."
-
-  (expose-review-buffer-insert-heading "Review Input")
-
-  (let ((stats
-         (plist-get session :review-input-stats)))
-
-    (if stats
-
-        (progn
-          (insert
-           (format
-            "Changed files:        %s\n"
-            (or
-             (plist-get stats :changed-files)
-             0)))
-
-          (insert
-           (format
-            "Branch diff bytes:    %s\n"
-            (or
-             (plist-get stats :branch-diff-bytes)
-             0)))
-
-          (insert
-           (format
-            "Staged diff bytes:    %s\n"
-            (or
-             (plist-get stats :staged-diff-bytes)
-             0)))
-
-          (insert
-           (format
-            "Unstaged diff bytes:  %s\n"
-            (or
-             (plist-get stats :unstaged-diff-bytes)
-             0)))
-
-          (insert
-           (format
-            "Untracked files:      %s\n"
-            (or
-             (plist-get stats :untracked-files)
-             0)))
-
-          (insert
-           (format
-            "Untracked included:   %s\n"
-            (or
-             (plist-get stats :untracked-included)
-             0)))
-
-          (insert
-           (format
-            "Untracked bytes:      %s\n"
-            (or
-             (plist-get stats :untracked-bytes)
-             0)))
-
-          (insert
-           (format
-            "Tracked included:    %s\n"
-            (or
-             (plist-get stats :tracked-files-included)
-             0)))
-
-          (insert
-           (format
-            "Tracked bytes:       %s\n"
-            (or
-             (plist-get stats :tracked-file-bytes)
-             0)))
-
-          (insert
-           (format
-            "Metadata files:       %s\n"
-            (or
-             (plist-get stats :metadata-files)
-             0))))
-
-      (insert "Review input has not been prepared yet.\n")))
-
-  (insert "\n"))
-
 (defun expose-review-buffer-name (session)
   "Return dashboard buffer name for SESSION."
 
@@ -613,14 +537,6 @@
           (beginning-of-line)))
 
     (expose-review-buffer-open-item)))
-
-(defun expose-review-buffer-format-location (item)
-  "Return location string for ITEM."
-
-  (format
-   "%s:%s"
-   (plist-get item :file)
-   (plist-get item :line-start)))
 
 (defun expose-review-buffer-insert-item (item)
   "Insert detailed review ITEM."
@@ -774,15 +690,117 @@
           (plist-get suggestion :patch-line-start))
 
          (line-end
-          (plist-get suggestion :patch-line-end)))
+          (plist-get suggestion :patch-line-end))
+
+         (patch
+          (expose-review-buffer-suggestion-patch item)))
 
     (or
+     ;; Numeric unified diff hunk.
+     (expose-review-request-patch-new-range patch)
+
+     ;; Header-only hunk fallback.
+     (expose-review-buffer-patch-search-range item)
+
+     ;; Stored metadata fallback.
      (and line-start
           line-end
-          (cons line-start line-end))
+          (cons line-start line-end)))))
 
-     (expose-review-request-patch-new-range
-      (expose-review-buffer-suggestion-patch item)))))
+(defun expose-review-buffer-non-empty-string-p (value)
+  "Return non-nil if VALUE is a non-empty string."
+
+  (and
+   (stringp value)
+   (not
+    (string-empty-p
+     (string-trim value)))))
+
+(defun expose-review-buffer-patch-content-lines (patch prefix)
+  "Return meaningful PATCH lines starting with PREFIX."
+
+  (let (lines)
+
+    (dolist (line
+             (split-string
+              (or patch "")
+              "\n"
+              t))
+
+      (when (and
+             (string-prefix-p prefix line)
+             (not
+              (string-prefix-p "+++" line))
+             (not
+              (string-prefix-p "---" line)))
+
+        (let ((content
+               (string-trim
+                (substring line 1))))
+
+          (when (expose-review-buffer-non-empty-string-p content)
+            (push content lines)))))
+
+    (nreverse lines)))
+
+(defun expose-review-buffer-item-file-path (item)
+  "Return absolute file path for ITEM."
+
+  (when-let* ((session
+               expose-review-buffer-session)
+
+              (project-root
+               (plist-get session :project-root))
+
+              (file
+               (plist-get item :file)))
+
+    (expand-file-name file project-root)))
+
+(defun expose-review-buffer-search-file-line-content (path content)
+  "Return line number where CONTENT appears in PATH."
+
+  (when (and path
+             (file-readable-p path)
+             (expose-review-buffer-non-empty-string-p content))
+
+    (with-temp-buffer
+      (insert-file-contents path)
+      (goto-char (point-min))
+
+      (when (search-forward content nil t)
+        (line-number-at-pos
+         (match-beginning 0))))))
+
+(defun expose-review-buffer-patch-search-range (item)
+  "Return patch target range for ITEM by searching patch contents."
+
+  (let* ((patch
+          (expose-review-buffer-suggestion-patch item))
+
+         (path
+          (expose-review-buffer-item-file-path item))
+
+         ;; Dashboard is showing the current file, so removed lines are usually
+         ;; the best target for delete/replace suggestions.
+         (candidate-lines
+          (append
+           (expose-review-buffer-patch-content-lines patch "-")
+           (expose-review-buffer-patch-content-lines patch "+")))
+
+         found-lines)
+
+    (dolist (content candidate-lines)
+      (when-let ((line
+                  (expose-review-buffer-search-file-line-content
+                   path
+                   content)))
+        (push line found-lines)))
+
+    (when found-lines
+      (cons
+       (apply #'min found-lines)
+       (apply #'max found-lines)))))
 
 (defun expose-review-buffer-patch-target-location (item)
   "Return patch target display location for ITEM."
@@ -1065,9 +1083,44 @@
               (get-buffer
                (expose-review-buffer-name session))))
 
-    (with-current-buffer buffer
-      (setq expose-review-buffer-session session)
-      (expose-review-buffer-render session))))
+    (let ((window
+           (get-buffer-window buffer t)))
+
+      (with-current-buffer buffer
+
+        (let ((point-line
+               (line-number-at-pos))
+
+              (point-column
+               (current-column))
+
+              (window-start-line
+               (when window
+                 (with-selected-window window
+                   (line-number-at-pos
+                    (window-start))))))
+
+          (setq expose-review-buffer-session session)
+          (expose-review-buffer-render session)
+
+          ;; `expose-review-buffer-render' intentionally starts at the top for
+          ;; first render. Refreshes should preserve where the user was reading.
+          (expose-review-buffer-goto-line-column
+           point-line
+           point-column)
+
+          (when (and window
+                     window-start-line)
+            (with-selected-window window
+              (save-excursion
+                (expose-review-buffer-goto-line-column
+                 window-start-line
+                 0)
+
+                (set-window-start
+                 window
+                 (point)
+                 t)))))))))
 
 (defun expose-review-buffer-current-item ()
   "Return review item at point."
@@ -1269,7 +1322,7 @@
         ;; Review-specific navigation.
         (define-key map (kbd "TAB") #'expose-review-buffer-next-item)
         (define-key map (kbd "<backtab>") #'expose-review-buffer-previous-item)
-        (define-key map (kbd "RET") #'expose-review-buffer-open-item)
+        (define-key map (kbd "RET") #'expose-review-buffer-activate)
 
         ;; Dashboard actions.
         (define-key map (kbd "g") #'expose-review-buffer-reload)

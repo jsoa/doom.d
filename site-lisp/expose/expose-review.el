@@ -36,6 +36,13 @@
        (expose-review-session-active-state-p
         (plist-get latest-session :state))))
 
+(defun expose-review-latest-session-for (session)
+  "Return latest active session matching SESSION's project and branch."
+
+  (expose-review-store-read-active
+   (plist-get session :project-root)
+   (plist-get session :branch)))
+
 (defun expose-review-current-project-session ()
   "Return active review session for the current project, or nil."
 
@@ -168,52 +175,65 @@
       session
       (error-message-string error)))))
 
-(defun expose-review-send-prepared-context (session context document)
-  "Send prepared review CONTEXT and DOCUMENT for SESSION."
+(defun expose-review-send-prepared-context (original-session context document)
+  "Send prepared review CONTEXT and DOCUMENT for ORIGINAL-SESSION."
 
-  (let* ((provider
-          (plist-get session :provider))
+  (let ((latest-session
+         (expose-review-latest-session-for original-session)))
 
-         (review-input-stats
-          (plist-get context :review-input-stats)))
+    (if (not
+         (expose-review-session-still-active-p
+          original-session
+          latest-session))
 
-    (setq session
-          (plist-put session :state 'sending))
+        (expose-log
+         "Review"
+         "Ignoring stale prepared review context for %s."
+         (plist-get original-session :id))
 
-    (setq session
-          (plist-put session :review-input-stats review-input-stats))
+      (let* ((provider
+              (plist-get latest-session :provider))
 
-    (setq session
-          (plist-put session :diagnostics
-                     (plist-get context :diagnostics)))
+             (review-input-stats
+              (plist-get context :review-input-stats)))
 
-    (setq session
-          (plist-put session :updated-at
-                     (expose-review-context-now)))
+        (setq latest-session
+              (plist-put latest-session :state 'sending))
 
-    (expose-review-store-save-session session)
-    (expose-review-buffer-refresh-open session)
+        (setq latest-session
+              (plist-put latest-session :review-input-stats review-input-stats))
 
-    (expose-log
-     "Review"
-     "Sending review request for %s using %s. Request size: %d bytes."
-     (plist-get session :id)
-     provider
-     (length document))
+        (setq latest-session
+              (plist-put latest-session :diagnostics
+                         (plist-get context :diagnostics)))
 
-    (condition-case error
-        (expose-provider-send-async
+        (setq latest-session
+              (plist-put latest-session :updated-at
+                         (expose-review-context-now)))
+
+        (expose-review-store-save-session latest-session)
+        (expose-review-buffer-refresh-open latest-session)
+
+        (expose-log
+         "Review"
+         "Sending review request for %s using %s. Request size: %d bytes."
+         (plist-get latest-session :id)
          provider
-         document
-         (lambda (response)
-           (expose-review-handle-response
-            session
-            response)))
+         (length document))
 
-      (error
-       (expose-review-handle-error
-        session
-        (error-message-string error))))))
+        (condition-case error
+            (expose-provider-send-async
+             provider
+             document
+             (lambda (response)
+               (expose-review-handle-response
+                latest-session
+                response)))
+
+          (error
+           (expose-review-handle-error
+            latest-session
+            (error-message-string error))))))))
 
 (defun expose-review-handle-response (original-session response)
   "Handle provider RESPONSE for ORIGINAL-SESSION."
@@ -276,43 +296,44 @@
           latest-session
           (error-message-string error)))))))
 
-(defun expose-review-handle-error (session message)
-  "Mark SESSION failed with MESSAGE."
+(defun expose-review-handle-error (original-session error-message)
+  "Mark ORIGINAL-SESSION failed with ERROR-MESSAGE."
 
-  (let* ((project-root
-          (plist-get session :project-root))
+  (let ((latest-session
+         (expose-review-latest-session-for original-session)))
 
-         (branch
-          (plist-get session :branch))
+    (if (not
+         (expose-review-session-still-active-p
+          original-session
+          latest-session))
 
-         (latest-session
-          (or
-           (expose-review-store-read-active
-            project-root
-            branch)
-           session)))
+        (expose-log
+         "Review"
+         "Ignoring stale review error for %s: %s"
+         (plist-get original-session :id)
+         error-message)
 
-    (setq latest-session
-          (plist-put latest-session :state 'failed))
+      (setq latest-session
+            (plist-put latest-session :state 'failed))
 
-    (setq latest-session
-          (plist-put latest-session :error message))
+      (setq latest-session
+            (plist-put latest-session :error error-message))
 
-    (setq latest-session
-          (plist-put latest-session :updated-at
-                     (expose-review-context-now)))
+      (setq latest-session
+            (plist-put latest-session :updated-at
+                       (expose-review-context-now)))
 
-    (expose-review-store-save-session latest-session)
-    (expose-review-buffer-refresh-open latest-session)
+      (expose-review-store-save-session latest-session)
+      (expose-review-buffer-refresh-open latest-session)
 
-    (expose-review-source-refresh-project
-     (plist-get latest-session :project-root))
+      (expose-review-source-refresh-project
+       (plist-get latest-session :project-root))
 
-    (expose-log
-     "Review"
-     "Review session %s failed: %s"
-     (plist-get latest-session :id)
-     message)))
+      (expose-log
+       "Review"
+       "Review session %s failed: %s"
+       (plist-get latest-session :id)
+       error-message))))
 
 (defun expose-review-complete-current ()
   "Complete the current review session."
@@ -369,10 +390,13 @@
             (branch
              (plist-get session :branch)))
 
-        (ignore-errors
-          (expose-review-store-complete-active
-           project-root
-           branch))
+        (expose-review-store-complete-active
+         project-root
+         branch)
+
+        ;; Drop old review source overlays before the new review starts.
+        (when (fboundp 'expose-review-source-refresh-project)
+          (expose-review-source-refresh-project project-root))
 
         (kill-buffer
          (current-buffer))

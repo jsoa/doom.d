@@ -20,13 +20,23 @@
   :type 'integer
   :group 'expose-popup)
 
-(defcustom expose-popup-max-width 120
-  "Maximum width of the popup."
+(defcustom expose-popup-max-width 160
+  "Maximum width of Expose popups."
   :type 'integer
   :group 'expose-popup)
 
-(defcustom expose-popup-max-height 20
-  "Maximum height of the popup."
+(defcustom expose-popup-max-height 30
+  "Maximum height of Expose popups."
+  :type 'integer
+  :group 'expose-popup)
+
+(defcustom expose-popup-min-width 80
+  "Minimum width of Expose popups."
+  :type 'integer
+  :group 'expose-popup)
+
+(defcustom expose-popup-min-height 1
+  "Minimum height of Expose popups."
   :type 'integer
   :group 'expose-popup)
 
@@ -305,9 +315,9 @@
    :right-fringe 8
    :respect-header-line t
    :respect-mode-line t
-   :min-width 65
+   :min-width expose-popup-min-width
    :max-width expose-popup-max-width
-   :min-height 1
+   :min-height expose-popup-min-height
    :max-height expose-popup-max-height)
 
   (setq expose-popup-visible t))

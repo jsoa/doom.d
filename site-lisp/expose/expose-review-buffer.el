@@ -36,6 +36,13 @@
     '(review-input git-status review-scope diagnostics)
   "Collapsed section IDs in the current Expose review dashboard.")
 
+(defun expose-review-buffer-session-progress-message (session fallback)
+  "Return SESSION progress message or FALLBACK."
+
+  (or
+   (plist-get session :progress-message)
+   fallback))
+
 (defun expose-review-buffer-goto-line-column (line column)
   "Move to LINE and COLUMN in the current buffer."
 
@@ -920,10 +927,20 @@
 
   (pcase (plist-get session :state)
     ('preparing
-     (insert "Preparing review context...\n"))
+     (insert
+      (format
+       "%s\n"
+       (expose-review-buffer-session-progress-message
+        session
+        "Preparing review context..."))))
 
     ('sending
-     (insert "Sending review request to provider...\n"))
+     (insert
+      (format
+       "%s\n"
+       (expose-review-buffer-session-progress-message
+        session
+        "Waiting for AI provider response..."))))
 
     ('running
      (insert "AI review is running...\n"))

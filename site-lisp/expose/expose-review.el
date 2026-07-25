@@ -16,6 +16,83 @@
   :type 'integer
   :group 'expose-review)
 
+(defcustom expose-review-progress-interval-seconds 5
+  "Seconds between Expose Review progress updates."
+  :type 'integer
+  :group 'expose-review)
+
+(defun expose-review-progress-started-at (session)
+  "Return progress start time for SESSION."
+
+  (or
+   (plist-get session :progress-started-at)
+   (float-time)))
+
+(defun expose-review-progress-elapsed-seconds (session)
+  "Return elapsed progress seconds for SESSION."
+
+  (floor
+   (-
+    (float-time)
+    (expose-review-progress-started-at session))))
+
+(defun expose-review-progress-message (session)
+  "Return human-readable progress message for SESSION."
+
+  (let ((elapsed
+         (expose-review-progress-elapsed-seconds session)))
+
+    (pcase (plist-get session :state)
+      ('preparing
+       (format "Preparing review context... %ds elapsed" elapsed))
+
+      ('sending
+       (format "Waiting for AI provider response... %ds elapsed" elapsed))
+
+      (_
+       nil))))
+
+(defun expose-review-touch-progress (original-session)
+  "Update progress metadata for ORIGINAL-SESSION while it is still active."
+
+  (let ((latest-session
+         (expose-review-latest-session-for original-session)))
+
+    (when (and
+           latest-session
+           (expose-review-session-still-active-p
+            original-session
+            latest-session)
+           (memq
+            (plist-get latest-session :state)
+            '(preparing sending running)))
+
+      (let ((message
+             (expose-review-progress-message latest-session)))
+
+        (when message
+          (setq latest-session
+                (plist-put latest-session :progress-message message))
+
+          (setq latest-session
+                (plist-put latest-session :updated-at
+                           (expose-review-context-now)))
+
+          (expose-review-store-save-session latest-session)
+          (expose-review-buffer-refresh-open latest-session)
+
+          (expose-log
+           "Review"
+           "%s"
+           message)))
+
+      ;; Schedule the next heartbeat only if the same session is still active.
+      (run-at-time
+       expose-review-progress-interval-seconds
+       nil
+       #'expose-review-touch-progress
+       original-session))))
+
 (defun expose-review-provider ()
   "Return provider used for Expose reviews."
 
@@ -124,11 +201,25 @@
         (plist-put session :state 'preparing))
 
   (setq session
+        (plist-put session :progress-started-at
+                   (float-time)))
+
+  (setq session
+        (plist-put session :progress-message
+                   "Preparing review context..."))
+
+  (setq session
         (plist-put session :updated-at
                    (expose-review-context-now)))
 
   (expose-review-store-save-session session)
   (expose-review-buffer-refresh-open session)
+
+  (run-at-time
+   expose-review-progress-interval-seconds
+   nil
+   #'expose-review-touch-progress
+   session)
 
   (expose-log
    "Review"
@@ -210,6 +301,10 @@
               (plist-put latest-session :state 'sending))
 
         (setq latest-session
+              (plist-put latest-session :progress-started-at
+                         (float-time)))
+
+        (setq latest-session
               (plist-put latest-session :review-input-stats review-input-stats))
 
         (setq latest-session
@@ -222,6 +317,12 @@
 
         (expose-review-store-save-session latest-session)
         (expose-review-buffer-refresh-open latest-session)
+
+        (run-at-time
+         expose-review-progress-interval-seconds
+         nil
+         #'expose-review-touch-progress
+         latest-session)
 
         (expose-log
          "Review"

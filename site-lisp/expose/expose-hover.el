@@ -562,7 +562,7 @@ entities, and JSDoc formatting noise."
      (seq-filter #'stringp value)
      "\n"))
 
-   (_
+   (t
     nil)))
 
 (defun expose-hover-call-eldoc-function (function callback)

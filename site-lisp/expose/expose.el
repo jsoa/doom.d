@@ -2,6 +2,7 @@
 
 (require 'expose-log)
 (require 'expose-review)
+(require 'expose-review-region)
 
 (defgroup expose nil
   "Expose code context and actions."
@@ -97,6 +98,7 @@
                :desc "Clear Log"        "L" #'expose-log-clear
                :desc "Debug Buffer"     "?" #'expose-hover-debug-current-buffer
                :desc "Review Session"   "R" #'expose-review-open-or-start
+               :desc "Review region"    "M" #'expose-review-region
                ))))))
 
 ;;; ---------------------------------------------------------------------------

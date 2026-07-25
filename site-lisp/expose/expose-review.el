@@ -11,6 +11,11 @@
 
 (defvar expose-provider-default)
 
+(defcustom expose-review-provider-timeout-seconds 180
+  "Seconds to wait for an AI review provider before failing the review."
+  :type 'integer
+  :group 'expose-review)
+
 (defun expose-review-provider ()
   "Return provider used for Expose reviews."
 
@@ -195,7 +200,11 @@
               (plist-get latest-session :provider))
 
              (review-input-stats
-              (plist-get context :review-input-stats)))
+              (plist-get context :review-input-stats))
+
+             (completed nil)
+
+             timeout-timer)
 
         (setq latest-session
               (plist-put latest-session :state 'sending))
@@ -221,16 +230,45 @@
          provider
          (length document))
 
+        ;; Provider-level watchdog. If Copilot/Codex/etc. hangs or waits for
+        ;; interactive input, the review should fail loudly instead of staying
+        ;; in `sending' forever.
+        (setq timeout-timer
+              (run-at-time
+               expose-review-provider-timeout-seconds
+               nil
+               (lambda ()
+                 (unless completed
+                   (setq completed t)
+
+                   (expose-review-handle-error
+                    latest-session
+                    (format
+                     "AI provider timed out after %d seconds while using %s."
+                     expose-review-provider-timeout-seconds
+                     provider))))))
+
         (condition-case error
             (expose-provider-send-async
              provider
              document
              (lambda (response)
-               (expose-review-handle-response
-                latest-session
-                response)))
+               (unless completed
+                 (setq completed t)
+
+                 (when (timerp timeout-timer)
+                   (cancel-timer timeout-timer))
+
+                 (expose-review-handle-response
+                  latest-session
+                  response))))
 
           (error
+           (setq completed t)
+
+           (when (timerp timeout-timer)
+             (cancel-timer timeout-timer))
+
            (expose-review-handle-error
             latest-session
             (error-message-string error))))))))

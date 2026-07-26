@@ -85,9 +85,14 @@ base64 images."
 (defun expose-hover-review-source-active-p ()
   "Return non-nil if Expose Review owns hover at point."
 
-  (and
-   (fboundp 'expose-review-source-item-at-point)
-   (expose-review-source-item-at-point)))
+  (or
+   (and
+    (fboundp 'expose-review-source-item-at-point)
+    (expose-review-source-item-at-point))
+
+   (and
+    (fboundp 'expose-review-region-item-at-point)
+    (expose-review-region-item-at-point))))
 
 (defun expose-hover-disabled-mode-p ()
   "Return non-nil if the current major mode disables Expose hover."

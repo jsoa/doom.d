@@ -3,6 +3,7 @@
 (require 'expose-log)
 (require 'expose-review)
 (require 'expose-review-region)
+(require 'expose-continue)
 
 (defgroup expose nil
   "Expose code context and actions."
@@ -98,7 +99,14 @@
                :desc "Clear Log"        "L" #'expose-log-clear
                :desc "Debug Buffer"     "?" #'expose-hover-debug-current-buffer
                :desc "Review Session"   "R" #'expose-review-open-or-start
-               :desc "Review region"    "M" #'expose-review-region
+
+               (:prefix-map ("M" . "Region Review")
+                :desc "Review region"   "m" #'expose-review-region
+                :desc "View full review" "v" #'expose-review-region-show-full-at-point
+                :desc "Complete review" "c" #'expose-review-region-complete-at-point
+                :desc "Cancel review"   "q" #'expose-review-region-cancel-at-point)
+
+               :desc "Continue at point" "c" #'expose-continue-at-point
                ))))))
 
 ;;; ---------------------------------------------------------------------------
@@ -113,10 +121,12 @@
 
       (progn
         (expose-hover-mode 1)
-        (expose-review-source-global-mode 1))
+        (expose-review-source-global-mode 1)
+        (expose-review-region-source-global-mode 1))
 
     (expose-hover-mode -1)
-    (expose-review-source-global-mode -1)))
+    (expose-review-source-global-mode -1)
+    (expose-review-region-source-global-mode -1)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Bootstrap

@@ -1,8 +1,8 @@
 # Expose
 
-Expose is a Doom Emacs helper package for showing code context and running focused AI-assisted code actions from a small `posframe` popup.
+Expose is a Doom Emacs helper package for showing code context, running focused AI-assisted code actions, and maintaining lightweight AI review state directly inside source buffers.
 
-It combines hover documentation, diagnostics, semantic code context, Git diff context, and Codex-powered actions behind a single leader-key interface.
+It combines hover documentation, diagnostics, semantic code context, Git diff context, provider-backed AI actions, review sessions, region reviews, background watch comments, inline continuation, popup history, and archive viewers behind a single leader-key interface.
 
 ## What Expose Does
 
@@ -11,14 +11,20 @@ Expose gives you a lightweight code-context command center at point:
 - Shows LSP hover information when available.
 - Falls back to Eldoc when LSP hover is unavailable.
 - Shows Flycheck diagnostics at point.
-- Displays results in a small `posframe` popup.
-- Runs Codex-backed code actions asynchronously.
-- Captures popup history.
+- Displays focused action results in a small `posframe` popup.
+- Runs provider-backed code actions asynchronously.
+- Supports Clipboard, Codex, Copilot, and other provider implementations.
+- Captures popup history for final action responses.
 - Supports copy/open/log/debug commands.
 - Supports quick hover scrolling with `C-j` / `C-k` while the popup is visible.
 - Includes Git status and diff context for change-oriented actions.
+- Supports persistent full-branch review sessions.
+- Supports persistent selected-region reviews with source hovers.
+- Supports read-only archive viewers for completed/canceled reviews.
+- Supports inline continuation at point.
+- Supports background Watch mode for changed hunks in selected buffers.
 
-The core idea is:
+The core popup/action flow is:
 
 ```text
 source buffer at point
@@ -26,28 +32,91 @@ source buffer at point
   -> render XML request document
   -> send to provider
   -> render Markdown response
-  -> show result in popup
+  -> show result in popup/history
 ```
 
-## Screens / Workflow
-
-Typical workflow:
+The review-session flow is:
 
 ```text
-hover code
-  -> Expose popup shows docs / type info / diagnostics
+project / branch / selected region / changed hunk
+  -> collect Git + source context
+  -> send strict JSON review request
+  -> parse review items
+  -> persist session state under .git/expose
+  -> show source fringe markers
+  -> show item details on hover
+```
 
-SPC c h r
-  -> run Review action
+## Package Layout
 
-SPC c h g
-  -> generate a commit message from current Git changes
+Typical local layout:
 
-SPC c h h
-  -> open popup history
+```text
+~/.doom.d/
+  modules/
+    +expose.el
 
-C-j / C-k
-  -> scroll the visible popup without opening the leader menu
+  site-lisp/
+    expose/
+      expose.el
+      expose-popup.el
+      expose-history.el
+      expose-hover.el
+      expose-log.el
+      expose-document.el
+      expose-request.el
+      expose-context.el
+      expose-xml.el
+      expose-transport.el
+      expose-provider.el
+      expose-clipboard.el
+      expose-codex.el
+      expose-copilot.el
+      expose-commands.el
+      expose-review.el
+      expose-review-store.el
+      expose-review-context.el
+      expose-review-request.el
+      expose-review-buffer.el
+      expose-review-source.el
+      expose-review-region.el
+      expose-review-archive.el
+      expose-watch.el
+      expose-continue.el
+```
+
+## Doom Setup
+
+In `~/.doom.d/modules/+expose.el`:
+
+```elisp
+;;; modules/+expose.el -*- lexical-binding: t; -*-
+
+(add-to-list
+ 'load-path
+ (expand-file-name "site-lisp/expose" doom-user-dir))
+
+(setq expose-hover-delay 0.25
+      expose-popup-min-width 80
+      expose-popup-max-width 160
+      expose-popup-min-height 1
+      expose-popup-max-height 30
+      expose-popup-scroll-lines 1
+      expose-provider-default 'codex
+      expose-context-git-diff-max-length 20000)
+
+(require 'expose)
+
+(expose-mode 1)
+```
+
+`expose-mode` enables:
+
+```text
+expose-hover-mode
+expose-review-source-global-mode
+expose-review-region-source-global-mode
+expose-watch-global-mode
 ```
 
 ## Configuration
@@ -57,8 +126,11 @@ Common settings:
 ```elisp
 (setq expose-key-prefix "c h"
       expose-hover-delay 0.25
-      expose-popup-max-height 20
-      expose-popup-max-width 120
+      expose-popup-min-width 80
+      expose-popup-max-width 160
+      expose-popup-min-height 1
+      expose-popup-max-height 30
+      expose-popup-scroll-lines 1
       expose-provider-default 'codex
       expose-context-git-diff-max-length 20000)
 ```
@@ -71,52 +143,102 @@ Codex settings:
       '("exec" "--skip-git-repo-check"))
 ```
 
-Output formatting instruction:
+Output formatting instruction for normal popup actions:
 
 ```elisp
 (setq expose-request-output-instruction
       "Return the response as concise Markdown. Do not return XML, HTML, JSON, or custom tags. Do not mirror the request document structure. Use headings, bullet lists, and fenced code blocks when useful.")
-``
+```
 
+Watch mode-line icon:
+
+```elisp
+(setq expose-watch-mode-line-icon "nf-fa-eye")
+```
+
+`nerd-icons` is optional. If available, Watch uses a Nerd Font eye icon in the mode line.
+
+## Default Keybindings
 
 Expose installs bindings under `SPC c h` by default.
 
-| Key         | Command                             | Description                               |
-|-------------|-------------------------------------|-------------------------------------------|
-| `SPC c h j` | `expose-popup-scroll-down`          | Scroll popup down                         |
-| `SPC c h k` | `expose-popup-scroll-up`            | Scroll popup up                           |
-| `SPC c h q` | `expose-close`                      | Close popup                               |
-| `SPC c h r` | `expose-run-review`                 | Review current code                       |
-| `SPC c h d` | `expose-run-diagnostics`            | Explain diagnostics                       |
-| `SPC c h e` | `expose-run-explain`                | Explain symbol/construct                  |
-| `SPC c h f` | `expose-run-fix`                    | Suggest a focused fix                     |
-| `SPC c h R` | `expose-run-refactor`               | Suggest behavior-preserving refactor      |
-| `SPC c h s` | `expose-run-security`               | Security review                           |
-| `SPC c h p` | `expose-run-performance`            | Performance review                        |
-| `SPC c h t` | `expose-run-tests`                  | Suggest tests                             |
-| `SPC c h x` | `expose-run-edge-cases`             | Identify edge cases                       |
-| `SPC c h w` | `expose-run-flow`                   | Explain execution flow                    |
-| `SPC c h u` | `expose-run-usage`                  | Explain usage                             |
-| `SPC c h D` | `expose-run-docstring`              | Suggest docstring/comment                 |
-| `SPC c h m` | `expose-run-summary`                | Summarize code                            |
-| `SPC c h T` | `expose-run-types`                  | Explain important types                   |
-| `SPC c h C` | `expose-run-concurrency`            | Review concurrency/race risks             |
-| `SPC c h i` | `expose-run-invariants`             | Identify invariants                       |
-| `SPC c h !` | `expose-run-risks`                  | Identify practical risks                  |
-| `SPC c h Y` | `expose-run-why`                    | Explain likely design intent              |
-| `SPC c h M` | `expose-run-mental-model`           | Build a mental model                      |
-| `SPC c h g` | `expose-run-commit-message`         | Generate commit message from Git changes  |
-| `SPC c h n` | `expose-run-changelog`              | Generate changelog entry from Git changes |
-| `SPC c h y` | `expose-popup-copy`                 | Copy popup contents                       |
-| `SPC c h h` | `expose-history-open`               | Open popup history                        |
-| `SPC c h o` | `expose-popup-open`                 | Open popup in a normal buffer             |
-| `SPC c h l` | `expose-log-open`                   | Open Expose log                           |
-| `SPC c h L` | `expose-log-clear`                  | Clear Expose log                          |
-| `SPC c h ?` | `expose-hover-debug-current-buffer` | Debug current buffer hover state          |
+### Top-level Expose keys
+
+| Key         | Command                             | Description                                  |
+|-------------|-------------------------------------|----------------------------------------------|
+| `SPC c h c` | `expose-continue-at-point`          | Inline continuation at point                 |
+| `SPC c h g` | `expose-run-commit-message`         | Insert generated commit message at point     |
+| `SPC c h n` | `expose-run-changelog`              | Generate changelog entry from Git changes    |
+| `SPC c h j` | `expose-popup-scroll-down`          | Scroll popup down                            |
+| `SPC c h k` | `expose-popup-scroll-up`            | Scroll popup up                              |
+| `SPC c h q` | `expose-popup-hide`                 | Close popup                                  |
+| `SPC c h y` | `expose-popup-copy`                 | Copy popup contents                          |
+| `SPC c h H` | `expose-history-open`               | Open popup history                           |
+| `SPC c h o` | `expose-popup-open`                 | Open popup in a normal buffer                |
+| `SPC c h l` | `expose-log-open`                   | Open Expose log                              |
+| `SPC c h L` | `expose-log-clear`                  | Clear Expose log                             |
+| `SPC c h ?` | `expose-hover-debug-current-buffer` | Debug current buffer hover state             |
+| `SPC c h h` | Thing at Point prefix               | Focused code-context actions                 |
+| `SPC c h R` | Full Review prefix                  | Persistent branch/session reviews            |
+| `SPC c h M` | Region Review prefix                | Persistent selected-region reviews           |
+| `SPC c h W` | Watch prefix                        | Background review for watched source buffers |
+
+### Thing at Point
+
+| Key           | Command                              | Description                          |
+|---------------|--------------------------------------|--------------------------------------|
+| `SPC c h h r` | `expose-run-review`                  | Review current code                  |
+| `SPC c h h d` | `expose-run-diagnostics`             | Explain diagnostics                  |
+| `SPC c h h e` | `expose-run-explain`                 | Explain symbol/construct             |
+| `SPC c h h f` | `expose-run-fix`                     | Suggest a focused fix                |
+| `SPC c h h R` | `expose-run-refactor`                | Suggest behavior-preserving refactor |
+| `SPC c h h s` | `expose-run-security`                | Security review                      |
+| `SPC c h h p` | `expose-run-performance`             | Performance review                   |
+| `SPC c h h t` | `expose-run-tests`                   | Suggest tests                        |
+| `SPC c h h x` | `expose-run-edge-cases`              | Identify edge cases                  |
+| `SPC c h h F` | `expose-run-flow`                    | Explain execution flow               |
+| `SPC c h h u` | `expose-run-usage`                   | Explain usage                        |
+| `SPC c h h D` | `expose-run-docstring`               | Suggest docstring/comment            |
+| `SPC c h h S` | `expose-run-summary`                 | Summarize code                       |
+| `SPC c h h T` | `expose-run-types`                   | Explain important types              |
+| `SPC c h h c` | `expose-run-concurrency`             | Review concurrency/race risks        |
+| `SPC c h h i` | `expose-run-invariants`              | Identify invariants                  |
+| `SPC c h h !` | `expose-run-risks`                   | Identify practical risks             |
+| `SPC c h h y` | `expose-run-why`                     | Explain likely design intent         |
+| `SPC c h h m` | `expose-run-mental-model`            | Build a mental model                 |
+| `SPC c h h ?` | `expose-hover-debug-current-buffer`  | Debug current buffer hover state     |
+
+### Full Review
+
+| Key           | Command                           | Description                      |
+|---------------|-----------------------------------|----------------------------------|
+| `SPC c h R r` | `expose-review-open-or-start`     | Open or start full branch review |
+| `SPC c h R a` | `expose-review-archive-open-full` | Open full review archive viewer  |
+
+### Region Review
+
+| Key           | Command                                    | Description                       |
+|---------------|--------------------------------------------|-----------------------------------|
+| `SPC c h M m` | `expose-review-region`                     | Review selected region            |
+| `SPC c h M v` | `expose-review-region-show-full-at-point`  | View full region review at point  |
+| `SPC c h M c` | `expose-review-region-complete-at-point`   | Complete/archive region review    |
+| `SPC c h M q` | `expose-review-region-cancel-at-point`     | Cancel/archive region review      |
+| `SPC c h M a` | `expose-review-archive-open-region`        | Open region review archive viewer |
+
+### Watch
+
+| Key           | Command                               | Description                             |
+|---------------|---------------------------------------|-----------------------------------------|
+| `SPC c h W w` | `expose-watch-current-buffer`         | Watch current buffer                    |
+| `SPC c h W u` | `expose-watch-unwatch-current-buffer` | Unwatch current buffer                  |
+| `SPC c h W r` | `expose-watch-review-current-buffer`  | Review changed hunks now                |
+| `SPC c h W l` | `expose-watch-open-list`              | Open Watch list buffer                  |
+| `SPC c h W c` | `expose-watch-clear-current-buffer`   | Clear Watch comments for current buffer |
+| `SPC c h W C` | `expose-watch-clear-project`          | Clear Watch comments for current project |
 
 ## Quick Hover Scroll Keys
 
-While an Expose popup is visible, Expose also installs a temporary emulation keymap:
+While an Expose popup is visible, Expose installs a temporary emulation keymap:
 
 | Key   | Command                    | Description                   |
 |-------|----------------------------|-------------------------------|
@@ -153,9 +275,198 @@ Expose actions are intentionally small, focused lenses over the current code con
 | Commit Message | Conventional-style commit message from Git diff/status           |
 | Changelog      | User/developer-facing changelog entry from Git diff/status       |
 
+## Commit Message Insertion
+
+`expose-run-commit-message` uses the normal commit-message request flow, but it does not show a loading popup.
+
+Instead:
+
+```text
+SPC c h g
+  -> generate commit message from current Git changes
+  -> insert returned text at the point where the command was invoked
+```
+
+This is useful inside Magit commit buffers or any scratch/edit buffer where you want the commit message placed directly into the buffer.
+
+## Inline Continuation
+
+`expose-continue-at-point` requests a project-aware continuation at point.
+
+```text
+SPC c h c
+  -> send continuation request
+  -> show inline ghost text
+  -> accept or dismiss the suggestion
+```
+
+Continuation runs from the project root so provider-side files like `.codex` are not accidentally created in nested source directories.
+
+## Full Review Sessions
+
+Full Review is a persistent branch/session review workflow.
+
+```text
+SPC c h R r
+  -> open existing review session for the current branch
+  -> or start a new async review
+```
+
+A full review collects branch and Git context, sends a strict JSON review request, parses review items, and displays them in a dashboard buffer.
+
+The dashboard supports:
+
+- Review status and progress.
+- Git input/context sections.
+- Parsed review items.
+- Source navigation for review items.
+- Source overlays and right-fringe markers.
+- Hovers in source buffers with review comment details.
+- Completing/archiving review sessions.
+
+Active and historical full reviews are stored under:
+
+```text
+.git/expose/reviews/<branch-slug>/active.eld
+.git/expose/reviews/<branch-slug>/history/<timestamp>.eld
+```
+
+## Region Reviews
+
+Region Review is a persistent selected-region review workflow.
+
+```text
+select region
+SPC c h M m
+  -> review selected source range
+  -> show full review popup when ready
+  -> keep source markers active until completed/canceled
+```
+
+Region Review behavior:
+
+- Reviews only the selected range.
+- Includes surrounding context and symbol/type context.
+- Persists the active review session.
+- Rejects overlapping active region reviews in the same file.
+- Shows a subtle active-region indicator.
+- Shows right-fringe markers for active review ranges.
+- Shows item hovers only on concrete review item lines.
+- Does not auto-popup merely by moving through the active region.
+- Can be completed or canceled from the source buffer.
+
+Active and historical region reviews are stored under:
+
+```text
+.git/expose/region-reviews/active/<sha>.eld
+.git/expose/region-reviews/history/<timestamp>-<sha>.eld
+```
+
+## Review Archive Viewers
+
+Expose includes read-only archive viewers for completed/canceled reviews.
+
+```text
+SPC c h R a
+  -> full review archives
+
+SPC c h M a
+  -> region review archives
+```
+
+Archive viewer keys:
+
+| Key     | Description                 |
+|---------|-----------------------------|
+| `TAB`   | Expand/collapse one entry   |
+| `S-TAB` | Expand/collapse all entries |
+| `q`     | Quit archive buffer         |
+
+Archive viewers are intentionally non-actionable:
+
+- They do not jump to files.
+- They do not apply patches.
+- They do not mutate stored archive entries.
+- They are for reading historical review context only.
+
+Expanded archive entries are colorized with severity, metadata, location, comments, anchors, suggestions, and patches.
+
+Archive buffers set `default-directory` to the displayed project root, so project-aware commands like Magit open against the correct repository.
+
+## Watch Mode
+
+Watch mode is a background reviewer for changed hunks in buffers you explicitly opt into.
+
+```text
+SPC c h W w
+  -> watch current buffer
+```
+
+After that:
+
+```text
+edit watched file
+save file
+  -> Expose gets current git diff hunks for this file
+  -> skips hunks already reviewed by hash
+  -> reviews only new/changed hunks
+  -> stores comments
+  -> shows right-fringe markers only
+  -> hover shows the watch comment
+```
+
+Watch mode is designed to stay out of the way:
+
+- It does not block editing.
+- It does not open loading popups.
+- It does not highlight entire source lines.
+- It marks only concrete comments in the right fringe.
+- It uses invisible overlays only for hover detection.
+- It keeps historical comments in the Watch list.
+- It only shows source markers for hunks that still exist in the current working-tree diff.
+
+This means if you remove or rewrite code that produced a Watch comment, the old comment stays available historically in `*EXPOSE Watch*`, but the source fringe marker and hover disappear after save.
+
+### Watch Mode Line
+
+Watched buffers show a compact mode-line indicator using Nerd Icons when available:
+
+```text
+eye icon       watched / idle
+eye icon …     currently reviewing changed hunks
+eye icon :2    watched with two visible comments
+eye icon !     last watch run failed
+```
+
+The idle/running/error states use different faces so active processing is visible without adding source-buffer noise.
+
+### Watch List
+
+```text
+SPC c h W l
+  -> open *EXPOSE Watch*
+```
+
+The Watch list shows accumulated comments by project and file.
+
+It includes:
+
+- Watched files.
+- Enabled/disabled state.
+- Reviewed hunks.
+- Stored comments.
+- No-comment saves.
+- Failed watch runs.
+
+Watch state is stored under:
+
+```text
+.git/expose/watch/active.eld
+```
+
 ## Context Collected
 
-Expose builds a structured context object from the current buffer. Depending on the action, it may include:
+Expose builds structured context from the current buffer. Depending on the action, it may include:
 
 - Project name
 - Language
@@ -169,8 +480,140 @@ Expose builds a structured context object from the current buffer. Depending on 
 - Current code
 - Git status
 - Git diff
+- Selected region
+- Changed hunks
+- Surrounding source context
+- LSP/Eldoc symbol/type context
 
-Git context is opt-in per request type. It is included for change-oriented actions such as Review, Security, Performance, Risks, Commit Message, and Changelog.
+Git context is opt-in per request type. It is included for change-oriented actions such as Review, Security, Performance, Risks, Commit Message, Changelog, Full Review, Region Review, and Watch.
+
+## Providers
+
+Expose uses a provider layer so UI, request building, and transport stay separate.
+
+Provider boundary:
+
+```text
+expose-context.el
+  builds semantic context
+
+expose-request.el
+  selects context and defines action prompts
+
+expose-document.el / expose-xml.el
+  renders request documents
+
+expose-transport.el
+  sends requests to providers
+
+expose-provider.el
+  dispatches provider calls
+
+expose-popup.el
+  displays final popup responses
+```
+
+Provider implementations include:
+
+- Clipboard provider for debugging/manual workflows.
+- Codex provider for async CLI-backed requests.
+- Copilot or other provider modules when available.
+
+## Storage
+
+Expose stores persistent review/watch state inside the Git repository:
+
+```text
+.git/expose/
+  reviews/
+    <branch-slug>/
+      active.eld
+      history/
+        <timestamp>.eld
+
+  region-reviews/
+    active/
+      <sha>.eld
+    history/
+      <timestamp>-<sha>.eld
+
+  watch/
+    active.eld
+```
+
+Files are written as Lisp data using `prin1`/`read`, not loaded as code.
+
+## Troubleshooting
+
+### Keybindings did not install
+
+Expose only installs Doom leader bindings when `map!` is available. Check the log:
+
+```text
+SPC c h l
+```
+
+If the prefix conflicts with another non-prefix binding, Expose logs and skips installation.
+
+### Hover does not appear
+
+Check:
+
+```text
+SPC c h ?
+```
+
+Common causes:
+
+- Buffer mode is disabled in `expose-hover-disabled-modes`.
+- Buffer name matches `expose-hover-disabled-buffer-name-regexps`.
+- No LSP hover and no Eldoc source is available.
+- Point is in an internal/special buffer.
+- A review/region/watch hover owns the current source location.
+
+### Codex action hangs on Loading
+
+Check:
+
+```elisp
+M-x expose-provider-codex-version
+```
+
+Then inspect:
+
+```text
+SPC c h l
+```
+
+Common causes:
+
+- `codex` is not on `PATH` inside Emacs.
+- Codex command/arguments are wrong.
+- Codex failed before writing the output file.
+
+### Git diff is too large
+
+Reduce:
+
+```elisp
+(setq expose-context-git-diff-max-length 10000)
+```
+
+### Watch comments appear stale
+
+Watch source markers only appear for reviewed hunks whose hash still exists in the current working-tree diff.
+
+If stale markers remain, save the file or run:
+
+```elisp
+M-x expose-watch-review-current-buffer
+```
+
+or:
+
+```elisp
+M-x expose-watch-clear-current-buffer
+```
 
 ## Current Limitations
 
@@ -178,4 +621,9 @@ Git context is opt-in per request type. It is included for change-oriented actio
 - Context extraction is best-effort and depends on Tree-sitter grammars.
 - Git diff context is truncated to avoid huge prompts.
 - Untracked file contents may not be included in Git diff context.
-- Codex process failures should be hardened further for production use.
+- Full Review, Region Review, and Watch depend on Git repositories.
+- Watch dedupes by hunk hash, so meaningful edits to the same area create a new review opportunity.
+- Provider process failures should be hardened further for production use.
+- Archive viewers are read-only and intentionally do not apply suggestions or patches.
+
+

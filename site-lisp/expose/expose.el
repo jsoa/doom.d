@@ -5,6 +5,7 @@
 (require 'expose-review-region)
 (require 'expose-continue)
 (require 'expose-review-archive)
+(require 'expose-watch)
 
 (defgroup expose nil
   "Expose code context and actions."
@@ -119,6 +120,15 @@
                 :desc "Complete review"   "c" #'expose-review-region-complete-at-point
                 :desc "Cancel review"     "q" #'expose-review-region-cancel-at-point
                 :desc "Region archives"   "a" #'expose-review-archive-open-region)
+
+               (:prefix-map ("W" . "Watch")
+                :desc "Watch current buffer"       "w" #'expose-watch-current-buffer
+                :desc "Unwatch current buffer"     "u" #'expose-watch-unwatch-current-buffer
+                :desc "Review changed hunks now"   "r" #'expose-watch-review-current-buffer
+                :desc "Open watch list"            "l" #'expose-watch-open-list
+                :desc "Clear current buffer"       "c" #'expose-watch-clear-current-buffer
+                :desc "Clear project comments"     "C" #'expose-watch-clear-project)
+
                ))))))
 
 ;;; ---------------------------------------------------------------------------
@@ -134,11 +144,13 @@
       (progn
         (expose-hover-mode 1)
         (expose-review-source-global-mode 1)
-        (expose-review-region-source-global-mode 1))
+        (expose-review-region-source-global-mode 1)
+        (expose-watch-global-mode 1))
 
     (expose-hover-mode -1)
     (expose-review-source-global-mode -1)
-    (expose-review-region-source-global-mode -1)))
+    (expose-review-region-source-global-mode -1)
+    (expose-watch-global-mode -1)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Bootstrap

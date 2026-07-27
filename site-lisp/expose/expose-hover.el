@@ -92,7 +92,11 @@ base64 images."
 
    (and
     (fboundp 'expose-review-region-item-at-point)
-    (expose-review-region-item-at-point))))
+    (expose-review-region-item-at-point))
+
+   (and
+    (fboundp 'expose-watch-item-at-point)
+    (expose-watch-item-at-point))))
 
 (defun expose-hover-disabled-mode-p ()
   "Return non-nil if the current major mode disables Expose hover."

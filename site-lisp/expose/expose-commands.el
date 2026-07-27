@@ -4,6 +4,8 @@
 (require 'expose-popup)
 (require 'expose-hover)
 (require 'expose-transport)
+(require 'project)
+(require 'subr-x)
 
 (defcustom expose-provider-default
   'codex
@@ -13,6 +15,131 @@
           (const codex)
           (const copilot))
   :group 'expose)
+
+(defun expose-commands-project-root-or-default ()
+  "Return current project root, Git root, or `default-directory'."
+
+  (or
+   (when-let ((project
+               (project-current nil)))
+
+     (file-name-as-directory
+      (project-root project)))
+
+   (when (fboundp 'vc-git-root)
+     (ignore-errors
+       (vc-git-root default-directory)))
+
+   default-directory))
+
+
+(defun expose-commands-view-body-text (view)
+  "Return display body text from VIEW."
+
+  (cond
+   ((stringp view)
+    view)
+
+   ((and
+     (listp view)
+     (plist-member view :body))
+    (plist-get view :body))
+
+   (t
+    (format "%s" view))))
+
+
+(defun expose-commands-clean-insert-text (text)
+  "Clean provider TEXT before inserting it into the current buffer."
+
+  (let ((cleaned
+         (substring-no-properties
+          (or text ""))))
+
+    (setq cleaned
+          (string-trim cleaned))
+
+    ;; Strip a simple surrounding Markdown fence if the model wrapped the
+    ;; commit message in one.
+    (setq cleaned
+          (replace-regexp-in-string
+           "\\````[[:alnum:]_-]*[ \t]*\n"
+           ""
+           cleaned))
+
+    (setq cleaned
+          (replace-regexp-in-string
+           "\n```\\'"
+           ""
+           cleaned))
+
+    (string-trim cleaned)))
+
+
+(defun expose-commands-insert-text-at-marker (buffer marker text label)
+  "Insert TEXT into BUFFER at MARKER.
+
+LABEL is used for user-facing status messages."
+
+  (if (not
+       (and
+        (buffer-live-p buffer)
+        (markerp marker)
+        (marker-position marker)))
+
+      (message
+       "Expose %s result ignored because the original buffer is gone."
+       label)
+
+    (with-current-buffer buffer
+
+      (condition-case error-data
+
+          (let* ((cleaned
+                  (expose-commands-clean-insert-text text))
+
+                 (move-point
+                  (= (point)
+                     (marker-position marker)))
+
+                 end-position)
+
+            (if (string-empty-p cleaned)
+
+                (message
+                 "Expose %s returned an empty response."
+                 label)
+
+              (save-excursion
+                (goto-char
+                 (marker-position marker))
+
+                (insert cleaned)
+
+                (unless (string-suffix-p "\n" cleaned)
+                  (insert "\n"))
+
+                (setq end-position
+                      (point)))
+
+              ;; If point is still where the command started, move it after
+              ;; the inserted text. If the user moved while waiting, leave
+              ;; their point alone.
+              (when move-point
+                (goto-char end-position))
+
+              (message
+               "Expose %s inserted."
+               label)))
+
+        (error
+         (message
+          "Expose failed to insert %s: %s"
+          label
+          (error-message-string error-data))))))
+
+  (when (markerp marker)
+    (set-marker marker nil)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Popup Commands
@@ -158,12 +285,53 @@
 
   (expose-popup-run-action ?M))
 
+;;;###autoload
 (defun expose-run-commit-message ()
-  "Run the registered Expose commit message action."
+  "Generate a commit message and insert it at point."
 
   (interactive)
 
-  (expose-popup-run-action ?g))
+  (let* ((source-buffer
+          (current-buffer))
+
+         ;; Insert at the point where the command was invoked, like
+         ;; `expose-continue-at-point'.
+         (anchor
+          (copy-marker
+           (point)))
+
+         (project-root
+          (expose-commands-project-root-or-default)))
+
+    (expose-log
+     "Commands"
+     "Generating commit message for insertion from %s."
+     project-root)
+
+    (message "Expose commit message: generating...")
+
+    (condition-case error-data
+
+        (let ((default-directory
+               project-root))
+
+          (expose-send-view-action-async
+           'commit-message
+           "Commit Message"
+
+           (lambda (view)
+             (expose-commands-insert-text-at-marker
+              source-buffer
+              anchor
+              (expose-commands-view-body-text view)
+              "commit message"))))
+
+      (error
+       (set-marker anchor nil)
+
+       (message
+        "Expose commit message failed: %s"
+        (error-message-string error-data))))))
 
 (defun expose-run-changelog ()
   "Run the registered Expose changelog action."

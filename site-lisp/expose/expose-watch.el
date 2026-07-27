@@ -277,6 +277,36 @@ user config to redefine the whole modeline."
 ;;; Basic helpers
 ;;; ---------------------------------------------------------------------------
 
+(defun expose-watch-refresh-running-state (&optional failed)
+  "Refresh Expose Watch running state.
+
+When FAILED is non-nil, show the error state. Otherwise keep showing
+running while any hunk hashes are still pending."
+
+  (cond
+   (failed
+    (expose-watch-set-state 'error))
+
+   (expose-watch-pending-hashes
+    (expose-watch-set-state 'running))
+
+   (t
+    (expose-watch-set-state 'idle))))
+
+
+(defun expose-watch-finish-pending-hashes (hashes &optional failed)
+  "Remove HASHES from pending Watch state and refresh mode line.
+
+When FAILED is non-nil, leave Watch in the error state."
+
+  (setq expose-watch-pending-hashes
+        (seq-difference
+         expose-watch-pending-hashes
+         hashes
+         #'string=))
+
+  (expose-watch-refresh-running-state failed))
+
 (defun expose-watch-now ()
   "Return current timestamp string."
 
@@ -1609,11 +1639,7 @@ Expose Watch only marks concrete comments in the right fringe."
 
                    (with-current-buffer source-buffer
 
-                     (setq expose-watch-pending-hashes
-                           (seq-difference
-                            expose-watch-pending-hashes
-                            hashes
-                            #'string=))
+                     (expose-watch-finish-pending-hashes hashes)
 
                      (condition-case parse-error
 
@@ -1628,7 +1654,6 @@ Expose Watch only marks concrete comments in the right fringe."
                               (expose-watch-items-for-hunk items hunk)
                               response))
 
-                           (expose-watch-set-state 'idle)
                            (expose-watch-source-refresh)
 
                            (expose-log
@@ -1647,7 +1672,7 @@ Expose Watch only marks concrete comments in the right fringe."
                            response
                            (error-message-string parse-error)))
 
-                        (expose-watch-set-state 'error)
+                        (expose-watch-refresh-running-state t)
                         (expose-watch-source-refresh)
 
                         (message
@@ -1655,13 +1680,7 @@ Expose Watch only marks concrete comments in the right fringe."
                          (error-message-string parse-error)))))))))
 
           (error
-           (setq expose-watch-pending-hashes
-                 (seq-difference
-                  expose-watch-pending-hashes
-                  hashes
-                  #'string=))
-
-           (expose-watch-set-state 'error)
+           (expose-watch-finish-pending-hashes hashes t)
 
            (message
             "Expose Watch failed: %s"

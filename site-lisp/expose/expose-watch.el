@@ -461,8 +461,61 @@ Return nil when git fails."
    "active.eld"
    (expose-watch-store-dir project-root)))
 
+(defun expose-watch-readable-value (value)
+  "Return a read-safe copy of VALUE for persistent storage."
+
+  (cond
+   ((null value)
+    nil)
+
+   ((stringp value)
+    (substring-no-properties value))
+
+   ((or
+     (numberp value)
+     (symbolp value))
+    value)
+
+   ((markerp value)
+    (format "%s" value))
+
+   ((bufferp value)
+    (format "#<buffer %s>" (buffer-name value)))
+
+   ((processp value)
+    (format "#<process %s>" (process-name value)))
+
+   ((hash-table-p value)
+    (let (items)
+      (maphash
+       (lambda (key val)
+         (push
+          (cons
+           (expose-watch-readable-value key)
+           (expose-watch-readable-value val))
+          items))
+       value)
+      (nreverse items)))
+
+   ((vectorp value)
+    (mapcar
+     #'expose-watch-readable-value
+     (append value nil)))
+
+   ((consp value)
+    (cons
+     (expose-watch-readable-value
+      (car value))
+     (expose-watch-readable-value
+      (cdr value))))
+
+   (t
+    (format "%s" value))))
+
 (defun expose-watch-read-file (path)
-  "Read Lisp data from PATH."
+  "Read Lisp data from PATH.
+
+If PATH contains unreadable data, move it aside and return nil."
 
   (when (file-readable-p path)
 
@@ -474,13 +527,23 @@ Return nil when git fails."
           (read (current-buffer)))
 
       (error
-       (expose-log
-        "Watch"
-        "Failed to read %s: %s"
-        path
-        (error-message-string error-data))
+       (let ((bad-path
+              (format
+               "%s.bad.%s"
+               path
+               (format-time-string "%Y%m%d%H%M%S"))))
 
-       nil))))
+         (ignore-errors
+           (rename-file path bad-path t))
+
+         (expose-log
+          "Watch"
+          "Failed to read %s: %s. Moved bad file to %s."
+          path
+          (error-message-string error-data)
+          bad-path)
+
+         nil)))))
 
 (defun expose-watch-write-file (path data)
   "Write DATA to PATH."
@@ -491,10 +554,12 @@ Return nil when git fails."
 
   (with-temp-file path
     (let ((print-length nil)
-          (print-level nil))
+          (print-level nil)
+          (print-circle t))
 
-      (prin1 data
-             (current-buffer)))))
+      (prin1
+       (expose-watch-readable-value data)
+       (current-buffer)))))
 
 (defun expose-watch-empty-session (project-root)
   "Return empty Expose Watch session for PROJECT-ROOT."
@@ -671,9 +736,14 @@ Return nil when git fails."
            :line-start (plist-get hunk :line-start)
            :line-end (plist-get hunk :line-end)
            :created-at (expose-watch-now)
-           :items items
-           :response response
-           :error error)))
+           :items (expose-watch-readable-value items)
+           :response
+           (if (stringp response)
+               (substring-no-properties response)
+             (expose-watch-string response))
+           :error
+           (when error
+             (expose-watch-string error)))))
 
     (setq state
           (plist-put state :enabled t))
@@ -683,7 +753,9 @@ Return nil when git fails."
                      (expose-watch-now)))
 
     (setq state
-          (plist-put state :last-error error))
+          (plist-put state :last-error
+                     (when error
+                       (expose-watch-string error))))
 
     (setq state
           (plist-put state :updated-at

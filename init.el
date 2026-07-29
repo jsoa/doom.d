@@ -60,12 +60,15 @@
 
        :tools
        ansible
+       (debugger +lsp)
        docker
+       direnv
        (eval +overlay)
        lookup
        (lsp +peek)
        magit
        rgb
+       terraform
        tree-sitter
 
        :os

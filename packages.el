@@ -54,3 +54,5 @@
 (package! avy)
 (package! consult)
 (package! embark)
+
+(package! flycheck-popup-tip :disable t)

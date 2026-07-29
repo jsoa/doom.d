@@ -1,40 +1,41 @@
-;;; ~/.doom.d/modes/lsp.el -*- lexical-binding: t; -*-
-
-;;
-;; LSP
-;;
+;;; ~/.doom.d/modes/+lsp.el -*- lexical-binding: t; -*-
 
 (after! lsp-mode
   (setq lsp-completion-provider :capf
-        lsp-enable-snippet t)
-  (setq lsp-enable-symbol-highlighting t
-        lsp-ui-doc-enable nil
-        lsp-pyright-disable-tagged-hints t
-        lsp-ui-doc-show-with-cursor t
-        lsp-ui-sideline-enable t)
+        lsp-enable-snippet t
+        lsp-enable-symbol-highlighting t
 
-  ;; Performance
-  (setq lsp-headerline-breadcrumb-enable nil
+        ;; Performance
+        lsp-headerline-breadcrumb-enable nil
         read-process-output-max (* 1024 1024)
         lsp-idle-delay 0.5
-        lsp-log-io nil)
+        lsp-log-io nil
 
-  ;; Disable conflicting HTML server
-  (setq lsp-disabled-clients '(html-ls))
+        ;; Disable conflicting HTML server
+        lsp-disabled-clients '(html-ls)
 
-  (add-to-list 'lsp-language-id-configuration
-               '(html-ts-mode . "html"))
+        ;; Python
+        lsp-pyright-python-executable-cmd "python"
+        lsp-pyright-disable-tagged-hints t
 
-  ;; Python
-  (setq lsp-pyright-python-executable-cmd "python3")
-
-  ;; Angular (stable command)
-  (setq lsp-angular-language-server-command
+        ;; Angular
+        lsp-angular-language-server-command
         '("ngserver" "--stdio"
           "--tsProbeLocations" "."
-          "--ngProbeLocations" ".")))
+          "--ngProbeLocations" "."))
+
+  (add-to-list
+   'lsp-language-id-configuration
+   '(html-ts-mode . "html")))
 
 (after! lsp-ui
-  (setq lsp-ui-doc-delay 0.3
-        lsp-ui-doc-position 'at-point))
+  ;; Expose is the hover/documentation UI now.
+  ;; Keep LSP diagnostics available, but disable competing visual popups/text.
+  (setq lsp-ui-doc-enable nil
+        lsp-ui-doc-show-with-cursor nil
+        lsp-ui-doc-show-with-mouse nil
 
+        lsp-ui-sideline-enable t
+        lsp-ui-sideline-show-hover nil
+        lsp-ui-sideline-show-diagnostics nil
+        lsp-ui-sideline-show-code-actions nil))

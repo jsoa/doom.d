@@ -90,6 +90,7 @@
                ;; Thing-at-point actions.
                (:prefix-map ("h" . "Thing at Point")
                 :desc "Review"           "r" #'expose-run-review
+                :desc "Comment"          "#" #'expose-run-code-comment
                 :desc "Diagnostics"      "d" #'expose-run-diagnostics
                 :desc "Explain"          "e" #'expose-run-explain
                 :desc "Fix"              "f" #'expose-run-fix

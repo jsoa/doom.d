@@ -15,7 +15,23 @@
   "Background watch reviews for changed hunks."
   :group 'expose)
 
-(defcustom expose-watch-context-lines 20
+(defcustom expose-watch-show-fringe-markers nil
+  "When non-nil, show Expose Watch markers in the right fringe.
+
+This is disabled by default because diagnostics, Git gutters, and other
+tools may already use the same fringe space."
+  :type 'boolean
+  :group 'expose-watch)
+
+(defcustom expose-watch-response-storage-max-length 50000
+  "Maximum number of provider response characters stored by Expose Watch.
+
+Set to nil to store full responses."
+  :type '(choice integer
+          (const :tag "No limit" nil))
+  :group 'expose-watch)
+
+(defcustom expose-watch-context-lines 60
   "Number of source context lines included around each changed hunk."
   :type 'integer
   :group 'expose-watch)
@@ -79,7 +95,7 @@ Expected values are `idle', `running', and `error'.")
 
 (defface expose-watch-item-face
   '((t (:inherit diff-refine-added :extend t)))
-  "Face for concrete Expose Watch comments."
+  "Face for concrete Expose Watch comment lines."
   :group 'expose-watch)
 
 (defface expose-watch-fringe-face
@@ -311,6 +327,68 @@ When FAILED is non-nil, leave Watch in the error state."
   "Return current timestamp string."
 
   (format-time-string "%Y-%m-%dT%H:%M:%S%z"))
+
+(defun expose-watch-truncate-string (text max-length)
+  "Return TEXT truncated to MAX-LENGTH characters.
+
+When MAX-LENGTH is nil, return TEXT unchanged."
+
+  (if (or
+       (not max-length)
+       (<= (length text)
+           max-length))
+
+      text
+
+    (concat
+     (substring text 0 max-length)
+     "\n\n[Expose Watch truncated stored provider response.]")))
+
+
+(defun expose-watch-provider-response-text (response)
+  "Return provider RESPONSE as plain text.
+
+Providers normally return strings, but some integrations may return
+plists or other structured values."
+
+  (cond
+   ((stringp response)
+    (substring-no-properties response))
+
+   ((and
+     (listp response)
+     (plist-member response :body))
+    (expose-watch-provider-response-text
+     (plist-get response :body)))
+
+   ((and
+     (listp response)
+     (plist-member response :content))
+    (expose-watch-provider-response-text
+     (plist-get response :content)))
+
+   ((and
+     (listp response)
+     (plist-member response :text))
+    (expose-watch-provider-response-text
+     (plist-get response :text)))
+
+   ((and
+     (listp response)
+     (plist-member response :response))
+    (expose-watch-provider-response-text
+     (plist-get response :response)))
+
+   (t
+    (expose-watch-string response))))
+
+
+(defun expose-watch-storage-response (response)
+  "Return provider RESPONSE normalized for persistent storage."
+
+  (expose-watch-truncate-string
+   (expose-watch-provider-response-text response)
+   expose-watch-response-storage-max-length))
 
 (defun expose-watch-string (value)
   "Return VALUE as a display string."
@@ -738,9 +816,7 @@ If PATH contains unreadable data, move it aside and return nil."
            :created-at (expose-watch-now)
            :items (expose-watch-readable-value items)
            :response
-           (if (stringp response)
-               (substring-no-properties response)
-             (expose-watch-string response))
+           (expose-watch-storage-response response)
            :error
            (when error
              (expose-watch-string error)))))
@@ -1063,11 +1139,57 @@ If PATH contains unreadable data, move it aside and return nil."
    (expose-watch-escape
     (expose-watch-hunk-context hunk))))
 
+(defun expose-watch-diagnostic-file-current-p (diagnostic-file)
+  "Return non-nil when DIAGNOSTIC-FILE belongs to current buffer."
+
+  (or
+   (not diagnostic-file)
+   (not buffer-file-name)
+   (ignore-errors
+     (file-equal-p diagnostic-file buffer-file-name))))
+
+
+(defun expose-watch-diagnostics ()
+  "Return current buffer diagnostics as plain text."
+
+  (let (lines)
+
+    (when (boundp 'flycheck-current-errors)
+
+      (dolist (error flycheck-current-errors)
+
+        (when (and
+               (fboundp 'flycheck-error-message)
+               (fboundp 'flycheck-error-line)
+               (fboundp 'flycheck-error-level)
+               (expose-watch-diagnostic-file-current-p
+                (when (fboundp 'flycheck-error-filename)
+                  (flycheck-error-filename error))))
+
+          (push
+           (format
+            "%s:%s: %s"
+            (or
+             (flycheck-error-line error)
+             "?")
+            (flycheck-error-level error)
+            (flycheck-error-message error))
+           lines))))
+
+    (if lines
+        (string-join
+         (nreverse lines)
+         "\n")
+      "No editor diagnostics reported.")))
+
 (defun expose-watch-request (file hunks)
   "Build Expose Watch request for FILE and HUNKS."
 
-  (format
-   "<expose-watch-request>
+  (let ((diagnostics
+         (expose-watch-diagnostics)))
+
+    (format
+     "<expose-watch-request>
   <instruction>
     You are watching me code. Review only the changed hunks below.
 
@@ -1082,6 +1204,13 @@ If PATH contains unreadable data, move it aside and return nil."
     - Maximum findings: %s.
     - Every finding must use real file line_start and line_end values.
     - Findings should point to the smallest useful changed-line range.
+
+    Scope / name-resolution rules:
+    - All changed-hunk blocks are from the same current file.
+    - A variable, function, import, class, or type may be declared outside the shown hunk.
+    - Absence from the shown context is not evidence that a name is undeclared.
+    - Do not report undefined-variable, undeclared-variable, missing-import, or unknown-name findings unless the editor diagnostics explicitly report that problem.
+    - If editor diagnostics do not report an undefined-name problem, assume name resolution is unknown and do not create that finding.
 
     Return exactly this shape:
 
@@ -1117,17 +1246,22 @@ If PATH contains unreadable data, move it aside and return nil."
 
   <location file=\"%s\" major_mode=\"%s\" />
 
+  <editor-diagnostics>
+%s
+  </editor-diagnostics>
+
 %s
 </expose-watch-request>"
-   expose-watch-max-items-per-run
-   (expose-watch-escape file)
-   (expose-watch-escape file)
-   major-mode
-   (string-join
-    (mapcar
-     #'expose-watch-request-hunk-block
-     hunks)
-    "\n\n")))
+     expose-watch-max-items-per-run
+     (expose-watch-escape file)
+     (expose-watch-escape file)
+     major-mode
+     (expose-watch-escape diagnostics)
+     (string-join
+      (mapcar
+       #'expose-watch-request-hunk-block
+       hunks)
+      "\n\n"))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Review item helpers
@@ -1313,7 +1447,7 @@ lines after the changed code was edited again or removed."
 (defun expose-watch-source-add-hunk-overlay (_hunk)
   "Do not visually mark reviewed hunks.
 
-Expose Watch only marks concrete comments in the right fringe."
+Expose Watch only marks concrete comments in the source buffer."
   nil)
 
 (defun expose-watch-source-add-fringe-overlay (item file)
@@ -1350,7 +1484,7 @@ Expose Watch only marks concrete comments in the right fringe."
     (push overlay expose-watch-source-overlays)))
 
 (defun expose-watch-source-add-item-overlay (item file)
-  "Add invisible hover overlay and right-fringe marker for ITEM in FILE."
+  "Add visible source overlay and optional right-fringe marker for ITEM in FILE."
 
   (let* ((line-start
           (expose-watch-item-line-start item))
@@ -1367,9 +1501,10 @@ Expose Watch only marks concrete comments in the right fringe."
          (overlay
           (make-overlay start end nil t nil)))
 
-    ;; No `face' here on purpose. Watch should not highlight the whole line.
-    ;; This overlay only makes hover-at-point work.
-    (overlay-put overlay 'priority 50)
+    ;; Full-line marker is the primary Watch indicator. This avoids relying
+    ;; on the right fringe, which may already be used by diagnostics or Git.
+    (overlay-put overlay 'face 'expose-watch-item-face)
+    (overlay-put overlay 'priority 48)
     (overlay-put overlay 'evaporate nil)
     (overlay-put overlay 'help-echo "Expose Watch comment")
     (overlay-put overlay 'expose-watch-item item)
@@ -1377,7 +1512,8 @@ Expose Watch only marks concrete comments in the right fringe."
 
     (push overlay expose-watch-source-overlays)
 
-    (expose-watch-source-add-fringe-overlay item file)))
+    (when expose-watch-show-fringe-markers
+      (expose-watch-source-add-fringe-overlay item file))))
 
 (defun expose-watch-source-refresh ()
   "Refresh Expose Watch source overlays for current buffer."
@@ -1713,43 +1849,46 @@ Expose Watch only marks concrete comments in the right fringe."
 
                      (expose-watch-finish-pending-hashes hashes)
 
-                     (condition-case parse-error
+                     (let ((response-text
+                            (expose-watch-provider-response-text response)))
 
-                         (let ((items
-                                (expose-review-request-parse-items response)))
+                       (condition-case parse-error
 
-                           (dolist (hunk hunks)
-                             (expose-watch-record-hunk
-                              project-root
+                           (let ((items
+                                  (expose-review-request-parse-items response-text)))
+
+                             (dolist (hunk hunks)
+                               (expose-watch-record-hunk
+                                project-root
+                                file
+                                hunk
+                                (expose-watch-items-for-hunk items hunk)
+                                response-text))
+
+                             (expose-watch-source-refresh)
+
+                             (expose-log
+                              "Watch"
+                              "Watch review completed for %s with %d item(s)."
                               file
-                              hunk
-                              (expose-watch-items-for-hunk items hunk)
-                              response))
+                              (length items)))
 
-                           (expose-watch-source-refresh)
+                         (error
+                          (dolist (hunk hunks)
+                            (expose-watch-record-hunk
+                             project-root
+                             file
+                             hunk
+                             nil
+                             response-text
+                             (error-message-string parse-error)))
 
-                           (expose-log
-                            "Watch"
-                            "Watch review completed for %s with %d item(s)."
-                            file
-                            (length items)))
+                          (expose-watch-refresh-running-state t)
+                          (expose-watch-source-refresh)
 
-                       (error
-                        (dolist (hunk hunks)
-                          (expose-watch-record-hunk
-                           project-root
-                           file
-                           hunk
-                           nil
-                           response
-                           (error-message-string parse-error)))
-
-                        (expose-watch-refresh-running-state t)
-                        (expose-watch-source-refresh)
-
-                        (message
-                         "Expose Watch parse failed: %s"
-                         (error-message-string parse-error)))))))))
+                          (message
+                           "Expose Watch parse failed: %s"
+                           (error-message-string parse-error))))))))))
 
           (error
            (expose-watch-finish-pending-hashes hashes t)

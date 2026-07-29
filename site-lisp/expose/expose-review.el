@@ -1,8 +1,10 @@
 ;;; expose-review.el -*- lexical-binding: t; -*-
 
+(require 'seq)
 (require 'subr-x)
 (require 'expose-log)
 (require 'expose-provider)
+(require 'expose-redact)
 (require 'expose-transport)
 (require 'expose-review-buffer)
 (require 'expose-review-context)
@@ -93,6 +95,251 @@
        nil
        #'expose-review-touch-progress
        original-session))))
+
+
+(defcustom expose-review-max-request-bytes 180000
+  "Maximum provider request size for a full Expose review."
+  :type 'integer
+  :group 'expose-review)
+
+
+(defun expose-review-safe-string (value)
+  "Return VALUE as a simple string for dashboard display."
+
+  (cond
+   ((null value)
+    "")
+
+   ((stringp value)
+    (substring-no-properties value))
+
+   ((symbolp value)
+    (symbol-name value))
+
+   ((numberp value)
+    (number-to-string value))
+
+   (t
+    (let ((print-length 30)
+          (print-level 4)
+          (print-circle t))
+      (format "%S" value)))))
+
+
+(defun expose-review-git-output (project-root &rest args)
+  "Run git ARGS in PROJECT-ROOT and return output, or empty string."
+
+  (condition-case error-data
+      (or
+       (apply
+        #'expose-review-context-call-git
+        project-root
+        args)
+       "")
+    (error
+     (expose-log
+      "Review"
+      "Git command failed: git %s: %s"
+      (string-join args " ")
+      (error-message-string error-data))
+     "")))
+
+
+(defun expose-review-git-lines (project-root &rest args)
+  "Run git ARGS in PROJECT-ROOT and return non-empty output lines."
+
+  (seq-filter
+   (lambda (line)
+     (not
+      (string-empty-p
+       (string-trim line))))
+   (split-string
+    (string-trim
+     (apply
+      #'expose-review-git-output
+      project-root
+      args))
+    "\n")))
+
+
+(defun expose-review-scope-line-excluded-p (line project-root)
+  "Return non-nil if git name-status LINE references an excluded path."
+
+  (let ((parts
+         (split-string line "\t" t)))
+
+    ;; name-status lines are usually:
+    ;; M<TAB>file
+    ;; A<TAB>file
+    ;; R100<TAB>old<TAB>new
+    ;; For untracked files we normalize to:
+    ;; ??<TAB>file
+    (seq-some
+     (lambda (path)
+       (expose-redact-excluded-path-p path project-root))
+     (cdr parts))))
+
+
+(defun expose-review-filter-scope-lines (lines project-root)
+  "Return git name-status LINES with excluded paths removed."
+
+  (seq-remove
+   (lambda (line)
+     (expose-review-scope-line-excluded-p line project-root))
+   lines))
+
+
+(defun expose-review-scope-section (title lines)
+  "Return flat dashboard lines for scope section TITLE and LINES."
+
+  (if lines
+
+      (append
+       (list
+        (format "%s: %d file(s)" title (length lines)))
+       (mapcar
+        (lambda (line)
+          (format
+           "  %s"
+           (replace-regexp-in-string "\t" "  " line)))
+        lines))
+
+    (list
+     (format "%s: none" title))))
+
+
+(defun expose-review-scope-lines (project-root context)
+  "Return flat, display-safe full review scope lines."
+
+  (let* ((current-branch
+          (or
+           (plist-get context :branch)
+           (expose-review-context-current-branch project-root)))
+
+         (base-branch
+          (or
+           (plist-get context :base-branch)
+           (expose-review-context-base-branch project-root)))
+
+         (branch-files
+          (when base-branch
+            (expose-review-filter-scope-lines
+             (expose-review-git-lines
+              project-root
+              "diff"
+              "--name-status"
+              (format "%s...HEAD" base-branch)
+              "--")
+             project-root)))
+
+         (staged-files
+          (expose-review-filter-scope-lines
+           (expose-review-git-lines
+            project-root
+            "diff"
+            "--cached"
+            "--name-status"
+            "--")
+           project-root))
+
+         (unstaged-files
+          (expose-review-filter-scope-lines
+           (expose-review-git-lines
+            project-root
+            "diff"
+            "--name-status"
+            "--")
+           project-root))
+
+         (untracked-files
+          (expose-review-filter-scope-lines
+           (mapcar
+            (lambda (file)
+              (format "??\t%s" file))
+            (expose-review-git-lines
+             project-root
+             "ls-files"
+             "--others"
+             "--exclude-standard"))
+           project-root)))
+
+    (append
+     (list
+      (format "Current branch: %s" current-branch)
+      (format "Base branch: %s" base-branch))
+
+     (expose-review-scope-section
+      "Branch changed files"
+      branch-files)
+
+     (expose-review-scope-section
+      "Staged files"
+      staged-files)
+
+     (expose-review-scope-section
+      "Unstaged files"
+      unstaged-files)
+
+     (expose-review-scope-section
+      "Untracked files"
+      untracked-files))))
+
+
+(defun expose-review-safe-review-input-stats (stats)
+  "Return display-safe review input STATS."
+
+  (cond
+   ((null stats)
+    nil)
+
+   ((stringp stats)
+    stats)
+
+   ((listp stats)
+    (let (lines)
+      (while stats
+        (let ((key
+               (pop stats))
+              (value
+               (pop stats)))
+          (push
+           (format
+            "%s: %s"
+            (expose-review-safe-string key)
+            (expose-review-safe-string value))
+           lines)))
+      (nreverse lines)))
+
+   (t
+    (list
+     (expose-review-safe-string stats)))))
+
+
+(defun expose-review-safe-diagnostics (diagnostics)
+  "Return display-safe DIAGNOSTICS."
+
+  (cond
+   ((null diagnostics)
+    nil)
+
+   ((stringp diagnostics)
+    diagnostics)
+
+   ((listp diagnostics)
+    (mapcar
+     #'expose-review-safe-string
+     diagnostics))
+
+   (t
+    (expose-review-safe-string diagnostics))))
+
+
+(defun expose-review-safe-document (document project-root)
+  "Return DOCUMENT after redaction/exclusion."
+
+  (if (fboundp 'expose-redact-request-document)
+      (expose-redact-request-document document project-root)
+    document))
 
 (defun expose-review-provider ()
   "Return provider used for Expose reviews."
@@ -288,11 +535,25 @@
          "Ignoring stale prepared review context for %s."
          (plist-get original-session :id))
 
-      (let* ((provider
+      (let* ((project-root
+              (plist-get latest-session :project-root))
+
+             (provider
               (plist-get latest-session :provider))
 
+             (safe-document
+              (expose-review-safe-document document project-root))
+
+             (review-scope
+              (expose-review-scope-lines project-root context))
+
              (review-input-stats
-              (plist-get context :review-input-stats))
+              (expose-review-safe-review-input-stats
+               (plist-get context :review-input-stats)))
+
+             (diagnostics
+              (expose-review-safe-diagnostics
+               (plist-get context :diagnostics)))
 
              (completed nil)
 
@@ -306,12 +567,21 @@
                          (float-time)))
 
         (setq latest-session
+              (plist-put latest-session :progress-message
+                         "Waiting for AI provider response..."))
+
+        (setq latest-session
+              (plist-put latest-session :review-scope review-scope))
+
+        (setq latest-session
               (plist-put latest-session :review-input-stats review-input-stats))
 
         (setq latest-session
-              (plist-put latest-session :diagnostics
-                         (expose-transport-readable-value
-                          (plist-get context :diagnostics))))
+              (plist-put latest-session :diagnostics diagnostics))
+
+        (setq latest-session
+              (plist-put latest-session :request-size
+                         (length safe-document)))
 
         (setq latest-session
               (plist-put latest-session :updated-at
@@ -320,63 +590,75 @@
         (expose-review-store-save-session latest-session)
         (expose-review-buffer-refresh-open latest-session)
 
-        (run-at-time
-         expose-review-progress-interval-seconds
-         nil
-         #'expose-review-touch-progress
-         latest-session)
+        (if (> (length safe-document)
+               expose-review-max-request-bytes)
 
-        (expose-log
-         "Review"
-         "Sending review request for %s using %s. Request size: %d bytes."
-         (plist-get latest-session :id)
-         provider
-         (length document))
+            (progn
+              (setq completed t)
 
-        ;; Provider-level watchdog. If Copilot/Codex/etc. hangs or waits for
-        ;; interactive input, the review should fail loudly instead of staying
-        ;; in `sending' forever.
-        (setq timeout-timer
-              (run-at-time
-               expose-review-provider-timeout-seconds
-               nil
-               (lambda ()
-                 (unless completed
-                   (setq completed t)
+              (expose-review-handle-error
+               latest-session
+               (format
+                "Expose review request is too large: %d bytes. Limit is %d bytes. Narrow the diff or increase `expose-review-max-request-bytes'."
+                (length safe-document)
+                expose-review-max-request-bytes)))
 
-                   (expose-review-handle-error
-                    latest-session
-                    (format
-                     "AI provider timed out after %d seconds while using %s."
-                     expose-review-provider-timeout-seconds
-                     provider))))))
+          (run-at-time
+           expose-review-progress-interval-seconds
+           nil
+           #'expose-review-touch-progress
+           latest-session)
 
-        (expose-transport-send-document-async
-         provider
-         document
+          (expose-log
+           "Review"
+           "Sending review request for %s using %s. Request size: %d bytes."
+           (plist-get latest-session :id)
+           provider
+           (length safe-document))
 
-         (lambda (response-text)
-           (unless completed
-             (setq completed t)
+          (setq timeout-timer
+                (run-at-time
+                 expose-review-provider-timeout-seconds
+                 nil
+                 (lambda ()
+                   (unless completed
+                     (setq completed t)
 
-             (when (timerp timeout-timer)
-               (cancel-timer timeout-timer))
+                     (expose-review-handle-error
+                      latest-session
+                      (format
+                       "AI provider timed out after %d seconds while using %s. Request size was %d bytes."
+                       expose-review-provider-timeout-seconds
+                       provider
+                       (length safe-document)))))))
 
-             (expose-review-handle-response
-              latest-session
-              response-text)))
+          (expose-transport-send-document-async
+           provider
+           safe-document
 
-         (plist-get latest-session :project-root)
+           (lambda (response-text)
+             (unless completed
+               (setq completed t)
 
-         (lambda (error-data)
-           (setq completed t)
+               (when (timerp timeout-timer)
+                 (cancel-timer timeout-timer))
 
-           (when (timerp timeout-timer)
-             (cancel-timer timeout-timer))
+               (expose-review-handle-response
+                latest-session
+                response-text)))
 
-           (expose-review-handle-error
-            latest-session
-            (error-message-string error-data))))))))
+           project-root
+
+           (lambda (error-data)
+             (unless completed
+               (setq completed t)
+
+               (when (timerp timeout-timer)
+                 (cancel-timer timeout-timer))
+
+               (expose-review-handle-error
+                latest-session
+                (error-message-string error-data))))))))))
 
 (defun expose-review-handle-response (original-session response)
   "Handle provider RESPONSE for ORIGINAL-SESSION."

@@ -55,46 +55,10 @@
       (_
        nil))))
 
-(defun expose-review-touch-progress (original-session)
-  "Update progress metadata for ORIGINAL-SESSION while it is still active."
+(defun expose-review-touch-progress (&rest _args)
+  "Temporarily disabled while stabilizing Full Review dashboard refresh."
 
-  (let ((latest-session
-         (expose-review-latest-session-for original-session)))
-
-    (when (and
-           latest-session
-           (expose-review-session-still-active-p
-            original-session
-            latest-session)
-           (memq
-            (plist-get latest-session :state)
-            '(preparing sending running)))
-
-      (let ((message
-             (expose-review-progress-message latest-session)))
-
-        (when message
-          (setq latest-session
-                (plist-put latest-session :progress-message message))
-
-          (setq latest-session
-                (plist-put latest-session :updated-at
-                           (expose-review-context-now)))
-
-          (expose-review-store-save-session latest-session)
-          (expose-review-buffer-refresh-open latest-session)
-
-          (expose-log
-           "Review"
-           "%s"
-           message)))
-
-      ;; Schedule the next heartbeat only if the same session is still active.
-      (run-at-time
-       expose-review-progress-interval-seconds
-       nil
-       #'expose-review-touch-progress
-       original-session))))
+  nil)
 
 
 (defcustom expose-review-max-request-bytes 180000
@@ -548,12 +512,10 @@
               (expose-review-scope-lines project-root context))
 
              (review-input-stats
-              (expose-review-safe-review-input-stats
-               (plist-get context :review-input-stats)))
+              (plist-get context :review-input-stats))
 
              (diagnostics
-              (expose-review-safe-diagnostics
-               (plist-get context :diagnostics)))
+              (plist-get context :diagnostics))
 
              (completed nil)
 

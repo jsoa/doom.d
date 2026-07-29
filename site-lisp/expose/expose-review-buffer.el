@@ -348,19 +348,103 @@
 
       (insert "Clean or no status available.\n"))))
 
+(defun expose-review-buffer-proper-list-p (value)
+  "Return non-nil when VALUE is a proper, non-circular list."
+
+  (let ((slow value)
+        (fast value))
+
+    (catch 'done
+      (while t
+        (cond
+         ((null fast)
+          (throw 'done t))
+
+         ((not
+           (consp fast))
+          (throw 'done nil)))
+
+        (setq fast
+              (cdr fast))
+
+        (cond
+         ((null fast)
+          (throw 'done t))
+
+         ((not
+           (consp fast))
+          (throw 'done nil)))
+
+        (setq fast
+              (cdr fast))
+
+        (setq slow
+              (cdr slow))
+
+        (when (eq slow fast)
+          (throw 'done nil))))))
+
+
+(defun expose-review-buffer-display-lines (value)
+  "Return VALUE as safe display lines."
+
+  (cond
+   ((null value)
+    nil)
+
+   ((stringp value)
+    (split-string
+     (substring-no-properties value)
+     "\n"
+     t))
+
+   ((and
+     (listp value)
+     (expose-review-buffer-proper-list-p value))
+    (mapcar
+     (lambda (item)
+       (format "%s" item))
+     value))
+
+   ((consp value)
+    (list
+     (let ((print-length 20)
+           (print-level 4)
+           (print-circle t))
+       (format "%S" value))))
+
+   (t
+    (list
+     (format "%s" value)))))
+
 (defun expose-review-buffer-insert-review-scope-body (session)
   "Insert review scope body for SESSION."
 
-  (let ((files
-         (plist-get session :changed-files)))
+  (let* ((review-scope
+          (plist-get session :review-scope))
 
-    (if files
+         (changed-files
+          (plist-get session :changed-files))
 
-        (dolist (file files)
-          (insert
-           (format "- %s\n" file)))
+         (scope-lines
+          (expose-review-buffer-display-lines review-scope))
 
-      (insert "No changed files detected.\n"))))
+         (changed-file-lines
+          (expose-review-buffer-display-lines changed-files)))
+
+    (cond
+     (scope-lines
+      (dolist (line scope-lines)
+        (insert
+         (format "%s\n" line))))
+
+     (changed-file-lines
+      (dolist (file changed-file-lines)
+        (insert
+         (format "- %s\n" file))))
+
+     (t
+      (insert "No changed files detected.\n")))))
 
 (defun expose-review-buffer-section-at-point ()
   "Return collapsible section id at point, or nil."

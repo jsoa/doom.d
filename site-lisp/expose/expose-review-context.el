@@ -171,14 +171,13 @@ the branch whose merge-base with HEAD is newest."
             (cdr right))))))))
 
 
-(defun expose-review-context-base-branch (project-root)
-  "Return inferred base branch for PROJECT-ROOT."
+(defun expose-review-context-detect-base-branch (project-root)
+  "Return the base branch ref for PROJECT-ROOT."
 
   (or
-   (expose-review-context-normalize-base-branch
-    (expose-review-context-best-base-branch-ref project-root))
-
-   "master"))
+   expose-review-base-branch
+   (expose-review-context-best-base-branch-ref project-root)
+   "HEAD~1"))
 
 (defcustom expose-review-base-branch-candidates
   '("origin/main"

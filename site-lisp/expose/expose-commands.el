@@ -1,11 +1,13 @@
 ;;; expose-commands.el -*- lexical-binding: t; -*-
 
+(require 'project)
+(require 'subr-x)
+(require 'newcomment)
 (require 'expose-log)
 (require 'expose-popup)
 (require 'expose-hover)
 (require 'expose-transport)
-(require 'project)
-(require 'subr-x)
+(require 'expose-provider)
 
 (defcustom expose-provider-default
   'codex
@@ -142,6 +144,648 @@ LABEL is used for user-facing status messages."
     (set-marker marker nil)))
 
 ;;; ---------------------------------------------------------------------------
+;;; Code Comment
+;;; ---------------------------------------------------------------------------
+
+(defcustom expose-code-comment-context-lines 12
+  "Number of lines of context to send for generated code comments."
+  :type 'integer
+  :group 'expose)
+
+(defun expose-code-comment-project-root ()
+  "Return current project root or `default-directory'."
+
+  (or
+   (when-let ((project
+               (project-current nil)))
+
+     (file-name-as-directory
+      (project-root project)))
+
+   default-directory))
+
+
+(defun expose-code-comment-relative-file ()
+  "Return current buffer file relative to project root."
+
+  (if buffer-file-name
+
+      (file-relative-name
+       buffer-file-name
+       (expose-code-comment-project-root))
+
+    (buffer-name)))
+
+
+(defun expose-code-comment-line-blank-p ()
+  "Return non-nil when current line is blank."
+
+  (string-empty-p
+   (string-trim
+    (buffer-substring-no-properties
+     (line-beginning-position)
+     (line-end-position)))))
+
+
+(defun expose-code-comment-target-position ()
+  "Return position of code to comment.
+
+If point is on a blank line, use the next nonblank line. Otherwise use
+the current line."
+
+  (save-excursion
+    (beginning-of-line)
+
+    (when (expose-code-comment-line-blank-p)
+
+      (while (and
+              (not
+               (eobp))
+              (expose-code-comment-line-blank-p))
+
+        (forward-line 1)))
+
+    (point)))
+
+
+(defun expose-code-comment-context (target-position)
+  "Return source context around TARGET-POSITION."
+
+  (save-excursion
+    (goto-char target-position)
+
+    (let* ((target-line
+            (line-number-at-pos target-position))
+
+           (start-line
+            (max
+             1
+             (- target-line
+                expose-code-comment-context-lines)))
+
+           (end-line
+            (min
+             (line-number-at-pos
+              (point-max))
+             (+ target-line
+                expose-code-comment-context-lines)))
+
+           start
+           end)
+
+      (goto-char (point-min))
+      (forward-line
+       (1- start-line))
+      (setq start
+            (point))
+
+      (goto-char (point-min))
+      (forward-line end-line)
+      (setq end
+            (point))
+
+      (buffer-substring-no-properties
+       start
+       end))))
+
+
+(defun expose-code-comment-target-line-text (target-position)
+  "Return source line text at TARGET-POSITION."
+
+  (save-excursion
+    (goto-char target-position)
+
+    (string-trim
+     (buffer-substring-no-properties
+      (line-beginning-position)
+      (line-end-position)))))
+
+
+(defun expose-code-comment-target-line-number (target-position)
+  "Return line number for TARGET-POSITION."
+
+  (line-number-at-pos target-position))
+
+
+(defun expose-code-comment-request (target-position)
+  "Build AI request for a code comment at TARGET-POSITION."
+
+  (let* ((file
+          (expose-code-comment-relative-file))
+
+         (line-number
+          (expose-code-comment-target-line-number target-position))
+
+         (target-line
+          (expose-code-comment-target-line-text target-position))
+
+         (context
+          (expose-code-comment-context target-position)))
+
+    (format
+     "<expose-code-comment-request>
+  <instruction>
+    Generate one useful source-code comment for the target line.
+
+    Rules:
+    - Return only the comment text.
+    - Do not include Markdown.
+    - Do not wrap the response in code fences.
+    - Do not include comment delimiters like #, //, /*, or */.
+    - Do not explain your reasoning.
+    - Avoid obvious comments that simply repeat the code.
+    - Prefer a concise comment that explains why the code exists, a non-obvious edge case, or an important behavior.
+    - If no useful comment is warranted, return an empty string.
+  </instruction>
+
+  <location file=\"%s\" line=\"%s\" major_mode=\"%s\" />
+
+  <target-line>
+%s
+  </target-line>
+
+  <surrounding-context>
+%s
+  </surrounding-context>
+</expose-code-comment-request>"
+     file
+     line-number
+     major-mode
+     target-line
+     context)))
+
+
+(defun expose-code-comment-clean-response (response)
+  "Clean provider RESPONSE into raw comment text."
+
+  (let ((text
+         (string-trim
+          (substring-no-properties
+           (format "%s" response)))))
+
+    ;; Strip simple Markdown fences.
+    (setq text
+          (replace-regexp-in-string
+           "\\````[[:alnum:]_-]*[ \t]*\n?"
+           ""
+           text))
+
+    (setq text
+          (replace-regexp-in-string
+           "\n?```\\'"
+           ""
+           text))
+
+    ;; Strip common comment delimiters if the provider ignored instructions.
+    (setq text
+          (replace-regexp-in-string
+           "\\`[ \t]*\\(?:#\\|//\\|--\\|;+\\)[ \t]*"
+           ""
+           text))
+
+    (setq text
+          (replace-regexp-in-string
+           "\\`[ \t]*/\\*+[ \t]*"
+           ""
+           text))
+
+    (setq text
+          (replace-regexp-in-string
+           "[ \t]*\\*/[ \t]*\\'"
+           ""
+           text))
+
+    (string-trim text)))
+
+
+(defun expose-code-comment-target-indentation (target-position)
+  "Return indentation string for TARGET-POSITION."
+
+  (save-excursion
+    (goto-char target-position)
+
+    (buffer-substring-no-properties
+     (line-beginning-position)
+     (progn
+       (back-to-indentation)
+       (point)))))
+
+
+(defun expose-code-comment-insert-at-marker (buffer marker target-position response)
+  "Insert generated comment into BUFFER at MARKER.
+
+TARGET-POSITION is used to copy indentation."
+
+  (if (not
+       (and
+        (buffer-live-p buffer)
+        (markerp marker)
+        (marker-position marker)))
+
+      (message "Expose code comment ignored because the original buffer is gone.")
+
+    (with-current-buffer buffer
+
+      (let ((comment
+             (expose-code-comment-clean-response response)))
+
+        (if (string-empty-p comment)
+
+            (message "Expose code comment: no useful comment returned.")
+
+          (let* ((indent
+                  (expose-code-comment-target-indentation target-position))
+
+                 start
+                 end)
+
+            (save-excursion
+              (goto-char
+               (marker-position marker))
+
+              (setq start
+                    (point))
+
+              (dolist (line
+                       (split-string comment "\n"))
+
+                (insert indent)
+                (insert line)
+                (insert "\n"))
+
+              (setq end
+                    (point))
+
+              (comment-region start end))
+
+            (message "Expose code comment inserted."))))))
+
+  (when (markerp marker)
+    (set-marker marker nil)))
+
+
+
+;;; ---------------------------------------------------------------------------
+;;; Docstring Insertion
+;;; ---------------------------------------------------------------------------
+
+(defcustom expose-docstring-context-lines 20
+  "Number of lines of context to send for generated docstrings."
+  :type 'integer
+  :group 'expose)
+
+(defun expose-docstring-project-root ()
+  "Return current project root or `default-directory'."
+
+  (or
+   (when-let ((project
+               (project-current nil)))
+
+     (file-name-as-directory
+      (project-root project)))
+
+   default-directory))
+
+
+(defun expose-docstring-relative-file ()
+  "Return current buffer file relative to project root."
+
+  (if buffer-file-name
+
+      (file-relative-name
+       buffer-file-name
+       (expose-docstring-project-root))
+
+    (buffer-name)))
+
+(defun expose-docstring-context (target-position)
+  "Return source context around TARGET-POSITION."
+
+  (save-excursion
+    (goto-char target-position)
+
+    (let* ((target-line
+            (line-number-at-pos target-position))
+
+           (start-line
+            (max
+             1
+             (- target-line
+                expose-docstring-context-lines)))
+
+           (end-line
+            (min
+             (line-number-at-pos
+              (point-max))
+             (+ target-line
+                expose-docstring-context-lines)))
+
+           start
+           end)
+
+      (goto-char (point-min))
+      (forward-line
+       (1- start-line))
+      (setq start
+            (point))
+
+      (goto-char (point-min))
+      (forward-line end-line)
+      (setq end
+            (point))
+
+      (buffer-substring-no-properties
+       start
+       end))))
+
+
+(defun expose-docstring-target-line-text (target-position)
+  "Return source line text at TARGET-POSITION."
+
+  (save-excursion
+    (goto-char target-position)
+
+    (string-trim
+     (buffer-substring-no-properties
+      (line-beginning-position)
+      (line-end-position)))))
+
+
+(defun expose-docstring-target-line-number (target-position)
+  "Return line number for TARGET-POSITION."
+
+  (line-number-at-pos target-position))
+
+(defun expose-docstring-line-blank-p ()
+  "Return non-nil when current line is blank."
+
+  (string-empty-p
+   (string-trim
+    (buffer-substring-no-properties
+     (line-beginning-position)
+     (line-end-position)))))
+
+
+(defun expose-docstring-target-position ()
+  "Return position whose surrounding code should be documented.
+
+If point is on a blank line, use the next nonblank line as the target.
+Otherwise use the current line."
+
+  (save-excursion
+    (beginning-of-line)
+
+    (when (expose-docstring-line-blank-p)
+
+      (while (and
+              (not
+               (eobp))
+              (expose-docstring-line-blank-p))
+
+        (forward-line 1)))
+
+    (back-to-indentation)
+    (point)))
+
+
+(defun expose-docstring-insert-position (target-position)
+  "Return position where the generated docstring should be inserted.
+
+If point is on a blank line, insert at point's line. If point is on code,
+insert under TARGET-POSITION."
+
+  (if (expose-docstring-line-blank-p)
+
+      (line-beginning-position)
+
+    (save-excursion
+      (goto-char target-position)
+      (forward-line 1)
+      (line-beginning-position))))
+
+(defun expose-docstring-request (target-position)
+  "Build AI request for a docstring at TARGET-POSITION."
+
+  (let* ((file
+          (expose-docstring-relative-file))
+
+         (line-number
+          (expose-docstring-target-line-number target-position))
+
+         (target-line
+          (expose-docstring-target-line-text target-position))
+
+         (context
+          (expose-docstring-context target-position)))
+
+    (format
+     "<expose-docstring-request>
+  <instruction>
+    Generate one useful docstring or documentation comment for the code at the target line.
+
+    Rules:
+    - Return only ready-to-insert source text.
+    - Do not return Markdown.
+    - Do not wrap the response in code fences.
+    - Do not explain your reasoning.
+    - Use the correct documentation style for the language and major mode.
+    - For Python, prefer triple-quoted docstrings.
+    - For JavaScript/TypeScript, prefer JSDoc when documenting functions, classes, methods, or exported values.
+    - For Emacs Lisp, prefer a normal Elisp docstring when appropriate.
+    - Avoid obvious documentation that simply repeats the symbol name.
+    - Prefer concise documentation that explains purpose, arguments, return value, side effects, or non-obvious behavior.
+    - If no useful docstring is warranted, return an empty string.
+  </instruction>
+
+  <location file=\"%s\" line=\"%s\" major_mode=\"%s\" />
+
+  <target-line>
+%s
+  </target-line>
+
+  <surrounding-context>
+%s
+  </surrounding-context>
+</expose-docstring-request>"
+     file
+     line-number
+     major-mode
+     target-line
+     context)))
+
+
+(defun expose-docstring-clean-response (response)
+  "Clean provider RESPONSE into ready-to-insert docstring text."
+
+  (let ((text
+         (string-trim
+          (substring-no-properties
+           (format "%s" response)))))
+
+    ;; Strip simple Markdown fences if the provider ignored instructions.
+    (setq text
+          (replace-regexp-in-string
+           "\\````[[:alnum:]_-]*[ \t]*\n?"
+           ""
+           text))
+
+    (setq text
+          (replace-regexp-in-string
+           "\n?```\\'"
+           ""
+           text))
+
+    (string-trim text)))
+
+
+(defun expose-docstring-current-line-blank-p ()
+  "Return non-nil when the current line is blank."
+
+  (string-empty-p
+   (string-trim
+    (buffer-substring-no-properties
+     (line-beginning-position)
+     (line-end-position)))))
+
+
+(defun expose-docstring-existing-line-indent-string ()
+  "Return indentation string from the current line without modifying it."
+
+  (buffer-substring-no-properties
+   (line-beginning-position)
+   (progn
+     (back-to-indentation)
+     (point))))
+
+
+(defun expose-docstring-blank-line-indent-string ()
+  "Return indentation string for the current blank line.
+
+This lets the major mode decide indentation, then removes only the
+whitespace inserted by indentation. It does not delete real code."
+
+  (let ((start
+         (line-beginning-position))
+
+        end
+        indent)
+
+    (indent-according-to-mode)
+
+    (setq end
+          (point))
+
+    (setq indent
+          (buffer-substring-no-properties
+           start
+           end))
+
+    ;; Only remove the whitespace that `indent-according-to-mode' inserted
+    ;; on this blank line.
+    (delete-region start end)
+
+    indent))
+
+
+(defun expose-docstring-line-indent-string-at (position)
+  "Return indentation string appropriate at POSITION.
+
+When POSITION is on an existing code line, reuse that line's indentation.
+When POSITION is on a blank line, ask the current major mode what the
+indentation should be without deleting any real code."
+
+  (save-excursion
+    (goto-char position)
+
+    (if (expose-docstring-current-line-blank-p)
+
+        (expose-docstring-blank-line-indent-string)
+
+      (expose-docstring-existing-line-indent-string))))
+
+
+(defun expose-docstring-insert-text-with-indent (text indent)
+  "Insert TEXT with INDENT prefixed to every line."
+
+  (dolist (line
+           (split-string text "\n"))
+
+    (insert indent)
+
+    (unless (string-empty-p line)
+      (insert line))
+
+    (insert "\n")))
+
+
+(defun expose-docstring-insert-at-marker (buffer marker target-position response)
+  "Insert generated docstring into BUFFER at MARKER.
+
+TARGET-POSITION is cleared after insertion."
+
+  (if (not
+       (and
+        (buffer-live-p buffer)
+        (markerp marker)
+        (marker-position marker)))
+
+      (message "Expose docstring ignored because the original buffer is gone.")
+
+    (with-current-buffer buffer
+
+      (let ((docstring
+             (expose-docstring-clean-response response)))
+
+        (if (string-empty-p docstring)
+
+            (message "Expose docstring: no useful docstring returned.")
+
+          (let* ((move-point
+                  (= (point)
+                     (marker-position marker)))
+
+                 start
+                 end-marker
+                 indent)
+
+            (save-excursion
+              (goto-char
+               (marker-position marker))
+
+              ;; Compute indentation without deleting the insertion line.
+              ;; If this line already has code, we reuse its indentation and
+              ;; insert the docstring before it.
+              (setq indent
+                    (expose-docstring-line-indent-string-at
+                     (point)))
+
+              (setq start
+                    (point))
+
+              (expose-docstring-insert-text-with-indent
+               docstring
+               indent)
+
+              (setq end-marker
+                    (copy-marker
+                     (point)
+                     t)))
+
+            (when move-point
+              (goto-char
+               (marker-position end-marker)))
+
+            (set-marker end-marker nil)
+
+            (message "Expose docstring inserted."))))))
+
+  (when (markerp marker)
+    (set-marker marker nil))
+
+  (when (markerp target-position)
+    (set-marker target-position nil)))
+
+;;; ---------------------------------------------------------------------------
 ;;; Popup Commands
 ;;; ---------------------------------------------------------------------------
 
@@ -229,12 +873,133 @@ LABEL is used for user-facing status messages."
 
   (expose-popup-run-action ?u))
 
-(defun expose-run-docstring ()
-  "Run the registered Expose docstring action."
+;;;###autoload
+(defun expose-run-code-comment ()
+  "Generate and insert a useful comment for the code at point."
 
   (interactive)
 
-  (expose-popup-run-action ?D))
+  (unless buffer-file-name
+    (user-error "Expose code comment requires a file buffer"))
+
+  (let* ((source-buffer
+          (current-buffer))
+
+         (project-root
+          (expose-code-comment-project-root))
+
+         (target-position
+          (copy-marker
+           (expose-code-comment-target-position)))
+
+         ;; Insert where point is. This lets you stand on the blank line above
+         ;; the code and have the comment appear there.
+         (insert-marker
+          (copy-marker
+           (line-beginning-position)))
+
+         (provider
+          expose-provider-default)
+
+         (document
+          (expose-code-comment-request target-position)))
+
+    (message "Expose code comment: generating...")
+
+    (expose-log
+     "Commands"
+     "Generating code comment for %s using %s."
+     (expose-code-comment-relative-file)
+     provider)
+
+    (condition-case error-data
+
+        (let ((default-directory
+               project-root))
+
+          (expose-provider-send-async
+           provider
+           document
+
+           (lambda (response)
+
+             (expose-code-comment-insert-at-marker
+              source-buffer
+              insert-marker
+              target-position
+              response))))
+
+      (error
+       (set-marker insert-marker nil)
+       (set-marker target-position nil)
+
+       (message
+        "Expose code comment failed: %s"
+        (error-message-string error-data))))))
+
+;;;###autoload
+(defun expose-run-docstring ()
+  "Generate and insert a useful docstring at point."
+
+  (interactive)
+
+  (unless buffer-file-name
+    (user-error "Expose docstring requires a file buffer"))
+
+  (let* ((source-buffer
+          (current-buffer))
+
+         (project-root
+          (expose-docstring-project-root))
+
+         (target-position
+          (copy-marker
+           (expose-docstring-target-position)))
+
+         ;; Blank line above code -> insert on that blank line.
+         ;; Code line -> insert directly below the code line.
+         (insert-marker
+          (copy-marker
+           (expose-docstring-insert-position target-position)))
+
+         (provider
+          expose-provider-default)
+
+         (document
+          (expose-docstring-request target-position)))
+
+    (message "Expose docstring: generating...")
+
+    (expose-log
+     "Commands"
+     "Generating docstring for %s using %s."
+     (expose-docstring-relative-file)
+     provider)
+
+    (condition-case error-data
+
+        (let ((default-directory
+               project-root))
+
+          (expose-provider-send-async
+           provider
+           document
+
+           (lambda (response)
+
+             (expose-docstring-insert-at-marker
+              source-buffer
+              insert-marker
+              target-position
+              response))))
+
+      (error
+       (set-marker insert-marker nil)
+       (set-marker target-position nil)
+
+       (message
+        "Expose docstring failed: %s"
+        (error-message-string error-data))))))
 
 (defun expose-run-summary ()
   "Run the registered Expose summary action."

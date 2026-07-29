@@ -22,6 +22,164 @@ When nil, Expose tries `origin/main', `main', `origin/master', then `master'."
   :type 'boolean
   :group 'expose-review)
 
+(defcustom expose-review-context-base-branch-candidates
+  '("develop" "main" "master")
+  "Preferred base branch candidates for Expose full review.
+
+Expose scores existing local/remote candidates by merge-base recency and picks
+the branch whose merge-base with HEAD is newest."
+  :type '(repeat string)
+  :group 'expose-review)
+
+(defun expose-review-context-git-string (project-root &rest args)
+  "Run git ARGS in PROJECT-ROOT and return trimmed output, or nil."
+
+  (condition-case nil
+      (let ((result
+             (apply
+              #'expose-review-context-call-git
+              project-root
+              args)))
+
+        (when-let ((text
+                    (and result
+                         (string-trim result))))
+
+          (unless (string-empty-p text)
+            text)))
+
+    (error nil)))
+
+
+(defun expose-review-context-git-ref-exists-p (project-root ref)
+  "Return non-nil if git REF exists in PROJECT-ROOT."
+
+  (not
+   (null
+    (expose-review-context-git-string
+     project-root
+     "rev-parse"
+     "--verify"
+     "--quiet"
+     ref))))
+
+
+(defun expose-review-context-normalize-base-branch (branch)
+  "Return display-friendly branch name for BRANCH."
+
+  (when branch
+    (let ((name
+           (string-trim branch)))
+
+      (setq name
+            (replace-regexp-in-string
+             "\\`refs/heads/"
+             ""
+             name))
+
+      (setq name
+            (replace-regexp-in-string
+             "\\`refs/remotes/"
+             ""
+             name))
+
+      (setq name
+            (replace-regexp-in-string
+             "\\`origin/"
+             ""
+             name))
+
+      name)))
+
+
+(defun expose-review-context-base-branch-ref-candidates (project-root)
+  "Return existing base branch refs for PROJECT-ROOT."
+
+  (let (refs)
+
+    (dolist (branch expose-review-context-base-branch-candidates)
+
+      (let ((local-ref branch)
+            (remote-ref
+             (format "origin/%s" branch)))
+
+        (when (expose-review-context-git-ref-exists-p
+               project-root
+               local-ref)
+
+          (push local-ref refs))
+
+        (when (expose-review-context-git-ref-exists-p
+               project-root
+               remote-ref)
+
+          (push remote-ref refs))))
+
+    (nreverse refs)))
+
+
+(defun expose-review-context-merge-base-time (project-root ref)
+  "Return merge-base commit timestamp for REF against HEAD."
+
+  (when-let ((merge-base
+              (expose-review-context-git-string
+               project-root
+               "merge-base"
+               ref
+               "HEAD")))
+
+    (let ((timestamp
+           (expose-review-context-git-string
+            project-root
+            "show"
+            "-s"
+            "--format=%ct"
+            merge-base)))
+
+      (when timestamp
+        (string-to-number timestamp)))))
+
+
+(defun expose-review-context-score-base-branch-ref (project-root ref)
+  "Return score cons for base branch REF in PROJECT-ROOT."
+
+  (cons
+   ref
+   (or
+    (expose-review-context-merge-base-time project-root ref)
+    0)))
+
+
+(defun expose-review-context-best-base-branch-ref (project-root)
+  "Return the best base branch ref for PROJECT-ROOT."
+
+  (let* ((refs
+          (expose-review-context-base-branch-ref-candidates project-root))
+
+         (scored
+          (mapcar
+           (lambda (ref)
+             (expose-review-context-score-base-branch-ref project-root ref))
+           refs)))
+
+    (car
+     (car
+      (sort
+       scored
+       (lambda (left right)
+         (> (cdr left)
+            (cdr right))))))))
+
+
+(defun expose-review-context-base-branch (project-root)
+  "Return inferred base branch for PROJECT-ROOT."
+
+  (or
+   (expose-review-context-normalize-base-branch
+    (expose-review-context-best-base-branch-ref project-root))
+
+   "master"))
+
 (defcustom expose-review-base-branch-candidates
   '("origin/main"
     "main"

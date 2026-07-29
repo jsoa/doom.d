@@ -310,7 +310,8 @@
 
         (setq latest-session
               (plist-put latest-session :diagnostics
-                         (plist-get context :diagnostics)))
+                         (expose-transport-readable-value
+                          (plist-get context :diagnostics))))
 
         (setq latest-session
               (plist-put latest-session :updated-at

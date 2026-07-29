@@ -95,10 +95,19 @@ characters."
    max-length))
 
 
-(defun expose-transport-readable-value (value)
-  "Return a read-safe copy of VALUE for persistent storage."
+(defcustom expose-transport-readable-value-max-depth 40
+  "Maximum nested depth copied by `expose-transport-readable-value'."
+  :type 'integer
+  :group 'expose)
+
+
+(defun expose-transport-readable-value-1 (value seen depth)
+  "Return a read-safe copy of VALUE using SEEN and DEPTH."
 
   (cond
+   ((> depth expose-transport-readable-value-max-depth)
+    "#<expose max readable depth>")
+
    ((null value)
     nil)
 
@@ -107,11 +116,12 @@ characters."
 
    ((or
      (numberp value)
-     (symbolp value))
+     (symbolp value)
+     (keywordp value))
     value)
 
    ((markerp value)
-    (format "%s" value))
+    (format "#<marker %s>" value))
 
    ((bufferp value)
     (format "#<buffer %s>" (buffer-name value)))
@@ -120,31 +130,79 @@ characters."
     (format "#<process %s>" (process-name value)))
 
    ((hash-table-p value)
-    (let (items)
-      (maphash
-       (lambda (key val)
-         (push
-          (cons
-           (expose-transport-readable-value key)
-           (expose-transport-readable-value val))
-          items))
-       value)
-      (nreverse items)))
+    (if (gethash value seen)
+
+        "#<circular hash-table>"
+
+      (puthash value t seen)
+
+      (let (items)
+        (maphash
+         (lambda (key val)
+           (push
+            (cons
+             (expose-transport-readable-value-1
+              key
+              seen
+              (1+ depth))
+             (expose-transport-readable-value-1
+              val
+              seen
+              (1+ depth)))
+            items))
+         value)
+
+        (nreverse items))))
 
    ((vectorp value)
-    (mapcar
-     #'expose-transport-readable-value
-     (append value nil)))
+    (if (gethash value seen)
+
+        "#<circular vector>"
+
+      (puthash value t seen)
+
+      (mapcar
+       (lambda (item)
+         (expose-transport-readable-value-1
+          item
+          seen
+          (1+ depth)))
+       (append value nil))))
 
    ((consp value)
-    (cons
-     (expose-transport-readable-value
-      (car value))
-     (expose-transport-readable-value
-      (cdr value))))
+    (if (gethash value seen)
+
+        "#<circular cons>"
+
+      (puthash value t seen)
+
+      (cons
+       (expose-transport-readable-value-1
+        (car value)
+        seen
+        (1+ depth))
+       (expose-transport-readable-value-1
+        (cdr value)
+        seen
+        (1+ depth)))))
 
    (t
-    (format "%s" value))))
+    (condition-case nil
+        (let ((print-circle t)
+              (print-length 50)
+              (print-level 10))
+          (format "%S" value))
+      (error
+       "#<unreadable value>")))))
+
+
+(defun expose-transport-readable-value (value)
+  "Return a read-safe, cycle-safe copy of VALUE for persistent storage."
+
+  (expose-transport-readable-value-1
+   value
+   (make-hash-table :test 'eq)
+   0))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Normal Expose Action Transport

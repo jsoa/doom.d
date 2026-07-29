@@ -19,8 +19,25 @@
 ;; They all accept either a font-spec, font string ("Input Mono-12"), or xlfd
 ;; font string. You generally only need these two:
 ;; (setq doom-font (font-spec :family "monospace" :size 14))
-(setq doom-font (font-spec :family "JetBrainsMono" :size 14 :weight 'regular)
-      doom-variable-pitch-font (font-spec :family "sans" :size 15))
+
+(defun js/font-available-p (font-name)
+  (find-font (font-spec :family font-name)))
+
+(defun js/first-available-font (&rest fonts)
+  (seq-find #'js/font-available-p fonts))
+
+(let ((font-family
+       (js/first-available-font
+        "JetBrainsMono Nerd Font"
+        "JetBrainsMono Nerd Font Mono"
+        "JetBrainsMono"
+        )))
+  (when font-family
+    (setq doom-font
+          (font-spec
+           :family font-family
+           :size: (if (eq system-type 'darwin) 14 15)))))
+
 
 ;; There are two ways to load a theme. Both assume the theme is installed and
 ;; available. You can either set `doom-theme' or manually load a theme with the
@@ -83,7 +100,7 @@
 
 ;; Custom modules
 (load! "modules/+env")
-(load! "modules/+hover")
+(load! "modules/+expose")
 (load! "modules/+large-file")
 (load! "modules/+dashboard")
 
@@ -110,10 +127,10 @@
 ;; Programming mode configuration
 (load! "modules/+groovy")
 (load! "modules/+python")
+(load! "modules/+python-debug")
 (load! "modules/+typescript")
 (load! "modules/+javascript")
 (load! "modules/+html")
 
-;; Private locals
-(when (file-exists-p "~/.doom.d/private/vars.el")
-  (load-file "~/.doom.d/private/vars.el"))
+;; Private
+(load! "modules/+private")

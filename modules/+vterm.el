@@ -1,54 +1,115 @@
 ;;; +vterm.el -*- lexical-binding: t; -*-
 
+(require 'project)
+(require 'subr-x)
+
 (after! vterm
-  ;; Keep terminal buffers around after the shell exits.
   (setq vterm-kill-buffer-on-exit nil))
 
-(defun jsoa/project-codex ()
-  "Open a dedicated Codex terminal for the current project."
-  (interactive)
-  (let* ((project-root
-          (if-let ((proj (project-current)))
-              (project-root proj)
-            default-directory))
-         (project-name
-          (file-name-nondirectory
-           (directory-file-name project-root)))
-         (buffer-name
-          (format "*codex:%s*" project-name)))
+(defun jsoa/project-root ()
+  "Return the current project root, or `default-directory'."
 
-    (if-let ((buf (get-buffer buffer-name)))
-        (pop-to-buffer buf)
+  (if-let ((project
+            (project-current nil)))
+
+      (project-root project)
+
+    default-directory))
+
+(defun jsoa/project-name ()
+  "Return the current project name."
+
+  (file-name-nondirectory
+   (directory-file-name
+    (jsoa/project-root))))
+
+(defun jsoa/vterm-buffer-live-p (buffer)
+  "Return non-nil if BUFFER has a live process."
+
+  (when-let ((process
+              (get-buffer-process buffer)))
+
+    (process-live-p process)))
+
+(defun jsoa/project-codex-buffer-name ()
+  "Return the project Codex vterm buffer name."
+
+  (format
+   "*codex:%s*"
+   (jsoa/project-name)))
+
+(defun jsoa/project-codex-start-command ()
+  "Return the command used to start Codex."
+
+  "codex --no-alt-screen")
+
+(defun jsoa/project-codex ()
+  "Open a dedicated Codex terminal for the current project.
+
+Return the Codex buffer."
+
+  (interactive)
+
+  (let* ((project-root
+          (jsoa/project-root))
+
+         (buffer-name
+          (jsoa/project-codex-buffer-name))
+
+         (existing-buffer
+          (get-buffer buffer-name)))
+
+    (cond
+     ((and existing-buffer
+           (jsoa/vterm-buffer-live-p existing-buffer))
+      (pop-to-buffer existing-buffer)
+      existing-buffer)
+
+     (existing-buffer
+      (kill-buffer existing-buffer)
+      (jsoa/project-codex))
+
+     (t
       (let ((default-directory project-root))
+
         (vterm buffer-name)
 
-        ;; Give vterm a moment to initialize.
-        (run-at-time
-         0.25 nil
-         (lambda ()
-           (when-let ((buf (get-buffer buffer-name)))
-             (with-current-buffer buf
-               (vterm-send-string "codex --no-alt-screen")
-               (vterm-send-return)))))))))
+        (let ((buffer
+               (get-buffer buffer-name)))
+
+          (run-at-time
+           0.25
+           nil
+           (lambda (buffer command)
+             (when (and
+                    (buffer-live-p buffer)
+                    (jsoa/vterm-buffer-live-p buffer))
+
+               (with-current-buffer buffer
+                 (vterm-send-string command)
+                 (vterm-send-return))))
+           buffer
+           (jsoa/project-codex-start-command))
+
+          buffer))))))
 
 (defun jsoa/kill-project-codex ()
-  (interactive)
-  (let* ((project-root
-          (if-let ((proj (project-current)))
-              (project-root proj)
-            default-directory))
-         (project-name
-          (file-name-nondirectory
-           (directory-file-name project-root)))
-         (buffer-name
-          (format "*codex:%s*" project-name)))
+  "Kill the dedicated Codex terminal for the current project."
 
-    (when-let ((buf (get-buffer buffer-name)))
-      (kill-buffer buf)
-      (message "Killed %s" buffer-name))))
+  (interactive)
+
+  (let ((buffer-name
+         (jsoa/project-codex-buffer-name)))
+
+    (if-let ((buffer
+              (get-buffer buffer-name)))
+
+        (progn
+          (kill-buffer buffer)
+          (message "Killed %s" buffer-name))
+
+      (message "No Codex buffer found for %s" buffer-name))))
 
 (map! :leader
-      (:prefix ("v" . "vterm")
-       :desc "Toggle VTerm"      "t" #'+vterm/toggle
-       :desc "Project Codex"     "c" #'jsoa/project-codex
-       :desc "Kill Codex"        "C" #'jsoa/kill-project-codex))
+      :desc "Codex"      "v c" #'jsoa/project-codex
+      :desc "Kill Codex" "v C" #'jsoa/kill-project-codex)

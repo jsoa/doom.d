@@ -26,6 +26,7 @@ This config is built around a few core principles:
 . 
 ├── core/               # foundational configuration 
 ├── modules/            # language + tooling modules 
+├── site-lisp/          # custom local packages
 ├── private/vars.el     # private variables (must be defined if needed)
 ├── config.el           # user configuration 
 ├── init.el             # module declarations 

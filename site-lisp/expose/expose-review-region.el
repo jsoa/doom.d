@@ -8,6 +8,7 @@
 (require 'expose-log)
 (require 'expose-popup)
 (require 'expose-provider)
+(require 'expose-transport)
 (require 'expose-hover)
 (require 'expose-review-request)
 
@@ -232,9 +233,12 @@
 
   (with-temp-file path
     (let ((print-length nil)
-          (print-level nil))
-      (prin1 session
-             (current-buffer)))))
+          (print-level nil)
+          (print-circle t))
+
+      (prin1
+       (expose-transport-readable-value session)
+       (current-buffer)))))
 
 (defun expose-review-region-save-active (session)
   "Save active region review SESSION."
@@ -1174,6 +1178,25 @@
 
   (setq expose-review-region-hover-timer nil))
 
+(defun expose-review-region-show-item-hover ()
+  "Show review item hover at point."
+
+  (when-let* ((item
+               (expose-review-region-item-at-point))
+
+              (session
+               (expose-review-region-session-at-point)))
+
+    (expose-popup-show-view
+     (list
+      :title "Region Review Item"
+      :body
+      (expose-review-region-render-markdown
+       (concat
+        "## Region Review Item\n\n"
+        (expose-review-region-render-item-markdown item session)))
+      :history nil))))
+
 (defun expose-review-region-source-post-command ()
   "Schedule region review item hover when point is on an item overlay."
 
@@ -1185,7 +1208,10 @@
 
     (expose-review-region-source-cancel-hover))
 
-   ((expose-review-region-item-at-point)
+   ((and
+     (expose-review-region-item-at-point)
+     (fboundp 'expose-review-region-show-item-hover))
+
     (expose-review-region-source-cancel-hover)
 
     (setq expose-review-region-hover-timer
@@ -1330,94 +1356,94 @@
        line-end
        provider)
 
-      (condition-case error-data
+      (expose-transport-send-document-async
+       provider
+       document
 
-          (let ((default-directory
-                 project-root))
+       (lambda (response-text)
 
-            (expose-provider-send-async
-             provider
-             document
+         (let ((latest-session
+                (expose-review-region-read-active-by-id
+                 project-root
+                 id)))
 
-             (lambda (response)
+           ;; Ignore stale response if user completed/canceled while
+           ;; provider was still running.
+           (when latest-session
 
-               (let ((latest-session
-                      (expose-review-region-read-active-by-id
-                       project-root
-                       id)))
+             (condition-case parse-error
 
-                 ;; Ignore stale response if user completed/canceled while
-                 ;; provider was still running.
-                 (when latest-session
+                 ;; Success path: parse JSON into review items.
+                 (let ((items
+                        (expose-review-request-parse-items response-text)))
 
-                   (condition-case parse-error
+                   (setq latest-session
+                         (plist-put latest-session :state 'ready))
 
-                       ;; Success path: parse JSON into review items.
-                       (let ((items
-                              (expose-review-request-parse-items response)))
+                   (setq latest-session
+                         (plist-put
+                          latest-session
+                          :items
+                          (expose-transport-readable-value items)))
 
-                         (setq latest-session
-                               (plist-put latest-session :state 'ready))
+                   (setq latest-session
+                         (plist-put latest-session :response response-text))
 
-                         (setq latest-session
-                               (plist-put latest-session :items items))
+                   (setq latest-session
+                         (plist-put latest-session :updated-at
+                                    (expose-review-region-now)))
 
-                         (setq latest-session
-                               (plist-put latest-session :response response))
+                   (expose-review-region-save-active latest-session)
+                   (expose-review-region-source-refresh-all)
 
-                         (setq latest-session
-                               (plist-put latest-session :updated-at
-                                          (expose-review-region-now)))
+                   ;; Review succeeded. Leave selection/visual mode,
+                   ;; then show the full review popup.
+                   (when (buffer-live-p source-buffer)
+                     (with-current-buffer source-buffer
+                       (expose-review-region-deactivate-selection)
 
-                         (expose-review-region-save-active latest-session)
-                         (expose-review-region-source-refresh-all)
+                       (expose-review-region-show-full-session
+                        latest-session)))
 
-                         ;; Review succeeded. Leave selection/visual mode,
-                         ;; then show the full review popup.
-                         (when (buffer-live-p source-buffer)
-                           (with-current-buffer source-buffer
-                             (expose-review-region-deactivate-selection)
+                   (expose-log
+                    "ReviewRegion"
+                    "Region review %s completed with %d items."
+                    id
+                    (length items)))
 
-                             (expose-review-region-show-full-session
-                              latest-session)))
+               ;; Parse-error path: provider returned something we could
+               ;; not parse as region-review JSON.
+               (error
+                (setq latest-session
+                      (plist-put latest-session :state 'failed))
 
-                         (expose-log
-                          "ReviewRegion"
-                          "Region review %s completed with %d items."
-                          id
-                          (length items)))
+                (setq latest-session
+                      (plist-put latest-session :error
+                                 (error-message-string parse-error)))
 
-                     ;; Parse-error path: provider returned something we could
-                     ;; not parse as region-review JSON.
-                     (error
-                      (setq latest-session
-                            (plist-put latest-session :state 'failed))
+                (setq latest-session
+                      (plist-put latest-session :response response-text))
 
-                      (setq latest-session
-                            (plist-put latest-session :error
-                                       (error-message-string parse-error)))
+                (setq latest-session
+                      (plist-put latest-session :updated-at
+                                 (expose-review-region-now)))
 
-                      (setq latest-session
-                            (plist-put latest-session :response response))
+                (expose-review-region-save-active latest-session)
+                (expose-review-region-source-refresh-all)
 
-                      (setq latest-session
-                            (plist-put latest-session :updated-at
-                                       (expose-review-region-now)))
+                ;; Review failed to parse. Still leave selection/visual
+                ;; mode so navigation works normally.
+                (when (buffer-live-p source-buffer)
+                  (with-current-buffer source-buffer
+                    (expose-review-region-deactivate-selection)
 
-                      (expose-review-region-save-active latest-session)
-                      (expose-review-region-source-refresh-all)
+                    (expose-review-region-show-full-session
+                     latest-session))))))))
 
-                      ;; Review failed to parse. Still leave selection/visual
-                      ;; mode so navigation works normally.
-                      (when (buffer-live-p source-buffer)
-                        (with-current-buffer source-buffer
-                          (expose-review-region-deactivate-selection)
+       project-root
 
-                          (expose-review-region-show-full-session
-                           latest-session))))))))))
-
-        ;; Provider start/send error path.
-        (error
+       ;; Provider start/send error path.
+       (lambda (error-data)
          (setq session
                (plist-put session :state 'failed))
 

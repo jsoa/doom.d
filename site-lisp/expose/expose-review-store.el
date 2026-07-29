@@ -3,6 +3,7 @@
 (require 'cl-lib)
 (require 'subr-x)
 (require 'expose-log)
+(require 'expose-transport)
 
 (defgroup expose-review nil
   "Branch-level AI code review sessions for Expose."
@@ -110,8 +111,11 @@
       (let ((print-length nil)
             (print-level nil)
             (print-circle t))
-        (prin1 session
-               (current-buffer))
+
+        (prin1
+         (expose-transport-readable-value session)
+         (current-buffer))
+
         (insert "\n")))
 
     (expose-log

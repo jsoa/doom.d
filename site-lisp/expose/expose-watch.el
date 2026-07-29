@@ -10,6 +10,7 @@
 (require 'expose-hover)
 (require 'expose-review-request)
 (require 'expose-transport)
+(require 'expose-redact)
 (require 'nerd-icons nil t)
 
 (defgroup expose-watch nil
@@ -909,11 +910,17 @@ If PATH contains unreadable data, move it aside and return nil."
 (defun expose-watch-current-file-hunks (project-root file)
   "Return changed hunks for FILE in PROJECT-ROOT."
 
-  (expose-watch-parse-diff-hunks
-   file
-   (expose-watch-current-file-diff
-    project-root
-    file)))
+  (if (expose-redact-excluded-path-p file project-root)
+
+      (progn
+        (expose-redact-log-excluded-path file project-root)
+        nil)
+
+    (expose-watch-parse-diff-hunks
+     file
+     (expose-watch-current-file-diff
+      project-root
+      file))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Source text / request
@@ -1691,102 +1698,114 @@ Expose Watch only marks concrete comments in the source buffer."
           (expose-watch-project-root))
 
          (file
-          (expose-watch-buffer-file project-root))
+          (expose-watch-buffer-file project-root)))
 
-         (hunks
-          (expose-watch-new-hunks project-root file)))
+    (when (expose-redact-excluded-path-p file project-root)
+      (expose-redact-log-excluded-path file project-root)
+      (user-error "Expose Watch refuses to review excluded path: %s" file))
 
-    (unless hunks
-      (when (called-interactively-p 'interactive)
-        (message "Expose Watch: no new changed hunks to review")))
+    (let* ((hunks
+            (expose-watch-new-hunks project-root file)))
 
-    (when hunks
-      (let* ((provider
-              expose-provider-default)
+      (unless hunks
+        (when (called-interactively-p 'interactive)
+          (message "Expose Watch: no new changed hunks to review")))
 
-             (document
-              (expose-watch-request file hunks))
+      (when hunks
+        (let* ((provider
+                expose-provider-default)
 
-             (hashes
-              (mapcar
-               (lambda (hunk)
-                 (plist-get hunk :hash))
-               hunks)))
+               (document
+                (expose-watch-request file hunks))
 
-        (setq expose-watch-pending-hashes
-              (append
-               expose-watch-pending-hashes
-               hashes))
+               (hashes
+                (mapcar
+                 (lambda (hunk)
+                   (plist-get hunk :hash))
+                 hunks)))
 
-        (expose-watch-set-state 'running)
+          (setq expose-watch-pending-hashes
+                (append
+                 expose-watch-pending-hashes
+                 hashes))
 
-        (expose-log
-         "Watch"
-         "Reviewing %d changed hunk(s) in %s using %s."
-         (length hunks)
-         file
-         provider)
+          (expose-watch-set-state 'running)
 
-        (expose-transport-send-document-async
-         provider
-         document
+          (expose-log
+           "Watch"
+           "Reviewing %d changed hunk(s) in %s using %s."
+           (length hunks)
+           file
+           provider)
 
-         (lambda (response-text)
+          (expose-transport-send-document-async
+           provider
+           document
 
-           (when (buffer-live-p source-buffer)
+           (lambda (response-text)
 
-             (with-current-buffer source-buffer
+             (when (buffer-live-p source-buffer)
 
-               (expose-watch-finish-pending-hashes hashes)
+               (with-current-buffer source-buffer
 
-               (condition-case parse-error
+                 (setq expose-watch-pending-hashes
+                       (seq-difference
+                        expose-watch-pending-hashes
+                        hashes
+                        #'string=))
 
-                   (let ((items
-                          (expose-review-request-parse-items response-text)))
+                 (condition-case parse-error
 
-                     (dolist (hunk hunks)
-                       (expose-watch-record-hunk
-                        project-root
+                     (let ((items
+                            (expose-review-request-parse-items response-text)))
+
+                       (dolist (hunk hunks)
+                         (expose-watch-record-hunk
+                          project-root
+                          file
+                          hunk
+                          (expose-watch-items-for-hunk items hunk)
+                          response-text))
+
+                       (expose-watch-set-state 'idle)
+                       (expose-watch-source-refresh)
+
+                       (expose-log
+                        "Watch"
+                        "Watch review completed for %s with %d item(s)."
                         file
-                        hunk
-                        (expose-watch-items-for-hunk items hunk)
-                        response-text))
+                        (length items)))
 
-                     (expose-watch-source-refresh)
+                   (error
+                    (expose-watch-set-state 'error)
 
-                     (expose-log
-                      "Watch"
-                      "Watch review completed for %s with %d item(s)."
-                      file
-                      (length items)))
-
-                 (error
-                  (dolist (hunk hunks)
-                    (expose-watch-record-hunk
-                     project-root
+                    (expose-log
+                     "Watch"
+                     "Watch review failed to parse response for %s: %s"
                      file
-                     hunk
-                     nil
-                     response-text
-                     (error-message-string parse-error)))
+                     (error-message-string parse-error)))))))
 
-                  (expose-watch-refresh-running-state t)
-                  (expose-watch-source-refresh)
+           project-root
 
-                  (message
-                   "Expose Watch parse failed: %s"
-                   (error-message-string parse-error)))))))
+           (lambda (error-data)
 
-         project-root
+             (when (buffer-live-p source-buffer)
 
-         (lambda (error-data)
-           (when (buffer-live-p source-buffer)
-             (with-current-buffer source-buffer
-               (expose-watch-finish-pending-hashes hashes t)
+               (with-current-buffer source-buffer
 
-               (message
-                "Expose Watch failed: %s"
-                (error-message-string error-data))))))))))
+                 (setq expose-watch-pending-hashes
+                       (seq-difference
+                        expose-watch-pending-hashes
+                        hashes
+                        #'string=))
+
+                 (expose-watch-set-state 'error)
+
+                 (expose-log
+                  "Watch"
+                  "Watch review failed for %s: %s"
+                  file
+                  (error-message-string error-data)))))))))))
 
 (defun expose-watch-after-save ()
   "Run Expose Watch after saving the current buffer."

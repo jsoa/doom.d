@@ -8,6 +8,7 @@
 (require 'expose-log)
 (require 'expose-popup)
 (require 'expose-provider)
+(require 'expose-redact)
 (require 'expose-transport)
 (require 'expose-hover)
 (require 'expose-review-request)
@@ -1297,6 +1298,10 @@
            line-start
            line-end)))
 
+    (when (expose-redact-excluded-path-p file project-root)
+      (expose-redact-log-excluded-path file project-root)
+      (user-error "Expose Region Review refuses to review excluded path: %s" file))
+
     (when conflict
       (user-error
        "Region review already active for %s:%s-%s"
@@ -1367,13 +1372,12 @@
                  project-root
                  id)))
 
-           ;; Ignore stale response if user completed/canceled while
-           ;; provider was still running.
+           ;; Ignore stale response if user completed/canceled while provider
+           ;; was still running.
            (when latest-session
 
              (condition-case parse-error
 
-                 ;; Success path: parse JSON into review items.
                  (let ((items
                         (expose-review-request-parse-items response-text)))
 
@@ -1396,8 +1400,6 @@
                    (expose-review-region-save-active latest-session)
                    (expose-review-region-source-refresh-all)
 
-                   ;; Review succeeded. Leave selection/visual mode,
-                   ;; then show the full review popup.
                    (when (buffer-live-p source-buffer)
                      (with-current-buffer source-buffer
                        (expose-review-region-deactivate-selection)
@@ -1411,8 +1413,6 @@
                     id
                     (length items)))
 
-               ;; Parse-error path: provider returned something we could
-               ;; not parse as region-review JSON.
                (error
                 (setq latest-session
                       (plist-put latest-session :state 'failed))
@@ -1431,8 +1431,6 @@
                 (expose-review-region-save-active latest-session)
                 (expose-review-region-source-refresh-all)
 
-                ;; Review failed to parse. Still leave selection/visual
-                ;; mode so navigation works normally.
                 (when (buffer-live-p source-buffer)
                   (with-current-buffer source-buffer
                     (expose-review-region-deactivate-selection)
@@ -1442,8 +1440,8 @@
 
        project-root
 
-       ;; Provider start/send error path.
        (lambda (error-data)
+
          (setq session
                (plist-put session :state 'failed))
 

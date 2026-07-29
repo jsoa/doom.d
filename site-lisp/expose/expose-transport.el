@@ -3,6 +3,7 @@
 (require 'subr-x)
 (require 'expose-document)
 (require 'expose-provider)
+(require 'expose-redact)
 
 ;;; ---------------------------------------------------------------------------
 ;;; Provider Response Normalization
@@ -187,12 +188,15 @@ starting the provider call. The return value is normalized response text."
 
   (let ((default-directory
          (or working-directory
-             default-directory)))
+             default-directory))
+
+        (safe-document
+         (expose-redact-request-document document working-directory)))
 
     (expose-transport-response-text
      (expose-provider-send
       provider
-      document))))
+      safe-document))))
 
 
 (defun expose-transport-send-document-async
@@ -211,11 +215,14 @@ the provider call fails. If ERROR-CALLBACK is nil, errors are re-signaled."
 
       (let ((default-directory
              (or working-directory
-                 default-directory)))
+                 default-directory))
+
+            (safe-document
+             (expose-redact-request-document document working-directory)))
 
         (expose-provider-send-async
          provider
-         document
+         safe-document
 
          (lambda (response)
            (funcall

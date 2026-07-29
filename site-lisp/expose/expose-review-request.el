@@ -255,8 +255,8 @@ Example patch suggestion:
 
 {
   \"kind\": \"patch\",
-  \"text\": \"Correct the visible footer typo.\",
-  \"patch\": \"--- a/src/app/components/global/footer.tsx\n+++ b/src/app/components/global/footer.tsx\n@@\n-Intagram\n+Instagram\"
+  \"text\": \"Concrete suggested fix or implementation direction.\",
+  \"patch\": \"\"
 }
 "
   )

@@ -101,6 +101,43 @@ characters."
   :group 'expose)
 
 
+(defun expose-transport-proper-list-p (value)
+  "Return non-nil when VALUE is a proper, non-circular list."
+
+  (let ((slow value)
+        (fast value))
+
+    (catch 'done
+      (while t
+        (cond
+         ((null fast)
+          (throw 'done t))
+
+         ((not
+           (consp fast))
+          (throw 'done nil)))
+
+        (setq fast
+              (cdr fast))
+
+        (cond
+         ((null fast)
+          (throw 'done t))
+
+         ((not
+           (consp fast))
+          (throw 'done nil)))
+
+        (setq fast
+              (cdr fast))
+
+        (setq slow
+              (cdr slow))
+
+        (when (eq slow fast)
+          (throw 'done nil))))))
+
+
 (defun expose-transport-readable-value-1 (value seen depth)
   "Return a read-safe copy of VALUE using SEEN and DEPTH."
 
@@ -161,19 +198,36 @@ characters."
 
       (puthash value t seen)
 
+      (vconcat
+       (mapcar
+        (lambda (item)
+          (expose-transport-readable-value-1
+           item
+           seen
+           (1+ depth)))
+        (append value nil)))))
+
+   ((consp value)
+    (cond
+     ((gethash value seen)
+      "#<circular cons>")
+
+     ;; This is the important fix.
+     ;; A long plist/list should not count as deeper and deeper nesting just
+     ;; because it has many elements.
+     ((expose-transport-proper-list-p value)
+      (puthash value t seen)
+
       (mapcar
        (lambda (item)
          (expose-transport-readable-value-1
           item
           seen
           (1+ depth)))
-       (append value nil))))
+       value))
 
-   ((consp value)
-    (if (gethash value seen)
-
-        "#<circular cons>"
-
+     ;; Dotted pair fallback.
+     (t
       (puthash value t seen)
 
       (cons
@@ -184,7 +238,7 @@ characters."
        (expose-transport-readable-value-1
         (cdr value)
         seen
-        (1+ depth)))))
+        (1+ depth))))))
 
    (t
     (condition-case nil

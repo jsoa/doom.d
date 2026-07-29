@@ -912,24 +912,21 @@ TARGET-POSITION is cleared after insertion."
      (expose-code-comment-relative-file)
      provider)
 
-    (condition-case error-data
+    (expose-transport-send-document-async
+     provider
+     document
 
-        (let ((default-directory
-               project-root))
+     (lambda (response-text)
 
-          (expose-provider-send-async
-           provider
-           document
+       (expose-code-comment-insert-at-marker
+        source-buffer
+        insert-marker
+        target-position
+        response-text))
 
-           (lambda (response)
+     project-root
 
-             (expose-code-comment-insert-at-marker
-              source-buffer
-              insert-marker
-              target-position
-              response))))
-
-      (error
+     (lambda (error-data)
        (set-marker insert-marker nil)
        (set-marker target-position nil)
 
@@ -976,24 +973,21 @@ TARGET-POSITION is cleared after insertion."
      (expose-docstring-relative-file)
      provider)
 
-    (condition-case error-data
+    (expose-transport-send-document-async
+     provider
+     document
 
-        (let ((default-directory
-               project-root))
+     (lambda (response-text)
 
-          (expose-provider-send-async
-           provider
-           document
+       (expose-docstring-insert-at-marker
+        source-buffer
+        insert-marker
+        target-position
+        response-text))
 
-           (lambda (response)
+     project-root
 
-             (expose-docstring-insert-at-marker
-              source-buffer
-              insert-marker
-              target-position
-              response))))
-
-      (error
+     (lambda (error-data)
        (set-marker insert-marker nil)
        (set-marker target-position nil)
 

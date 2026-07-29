@@ -9,6 +9,7 @@
 (require 'expose-provider)
 (require 'expose-hover)
 (require 'expose-review-request)
+(require 'expose-transport)
 (require 'nerd-icons nil t)
 
 (defgroup expose-watch nil
@@ -328,66 +329,11 @@ When FAILED is non-nil, leave Watch in the error state."
 
   (format-time-string "%Y-%m-%dT%H:%M:%S%z"))
 
-(defun expose-watch-truncate-string (text max-length)
-  "Return TEXT truncated to MAX-LENGTH characters.
-
-When MAX-LENGTH is nil, return TEXT unchanged."
-
-  (if (or
-       (not max-length)
-       (<= (length text)
-           max-length))
-
-      text
-
-    (concat
-     (substring text 0 max-length)
-     "\n\n[Expose Watch truncated stored provider response.]")))
-
-
-(defun expose-watch-provider-response-text (response)
-  "Return provider RESPONSE as plain text.
-
-Providers normally return strings, but some integrations may return
-plists or other structured values."
-
-  (cond
-   ((stringp response)
-    (substring-no-properties response))
-
-   ((and
-     (listp response)
-     (plist-member response :body))
-    (expose-watch-provider-response-text
-     (plist-get response :body)))
-
-   ((and
-     (listp response)
-     (plist-member response :content))
-    (expose-watch-provider-response-text
-     (plist-get response :content)))
-
-   ((and
-     (listp response)
-     (plist-member response :text))
-    (expose-watch-provider-response-text
-     (plist-get response :text)))
-
-   ((and
-     (listp response)
-     (plist-member response :response))
-    (expose-watch-provider-response-text
-     (plist-get response :response)))
-
-   (t
-    (expose-watch-string response))))
-
-
 (defun expose-watch-storage-response (response)
   "Return provider RESPONSE normalized for persistent storage."
 
-  (expose-watch-truncate-string
-   (expose-watch-provider-response-text response)
+  (expose-transport-storage-response
+   response
    expose-watch-response-storage-max-length))
 
 (defun expose-watch-string (value)
@@ -539,57 +485,6 @@ Return nil when git fails."
    "active.eld"
    (expose-watch-store-dir project-root)))
 
-(defun expose-watch-readable-value (value)
-  "Return a read-safe copy of VALUE for persistent storage."
-
-  (cond
-   ((null value)
-    nil)
-
-   ((stringp value)
-    (substring-no-properties value))
-
-   ((or
-     (numberp value)
-     (symbolp value))
-    value)
-
-   ((markerp value)
-    (format "%s" value))
-
-   ((bufferp value)
-    (format "#<buffer %s>" (buffer-name value)))
-
-   ((processp value)
-    (format "#<process %s>" (process-name value)))
-
-   ((hash-table-p value)
-    (let (items)
-      (maphash
-       (lambda (key val)
-         (push
-          (cons
-           (expose-watch-readable-value key)
-           (expose-watch-readable-value val))
-          items))
-       value)
-      (nreverse items)))
-
-   ((vectorp value)
-    (mapcar
-     #'expose-watch-readable-value
-     (append value nil)))
-
-   ((consp value)
-    (cons
-     (expose-watch-readable-value
-      (car value))
-     (expose-watch-readable-value
-      (cdr value))))
-
-   (t
-    (format "%s" value))))
-
 (defun expose-watch-read-file (path)
   "Read Lisp data from PATH.
 
@@ -636,7 +531,7 @@ If PATH contains unreadable data, move it aside and return nil."
           (print-circle t))
 
       (prin1
-       (expose-watch-readable-value data)
+       (expose-transport-readable-value data)
        (current-buffer)))))
 
 (defun expose-watch-empty-session (project-root)
@@ -814,7 +709,7 @@ If PATH contains unreadable data, move it aside and return nil."
            :line-start (plist-get hunk :line-start)
            :line-end (plist-get hunk :line-end)
            :created-at (expose-watch-now)
-           :items (expose-watch-readable-value items)
+           :items (expose-transport-readable-value items)
            :response
            (expose-watch-storage-response response)
            :error
@@ -1832,70 +1727,66 @@ Expose Watch only marks concrete comments in the source buffer."
          file
          provider)
 
-        (condition-case error-data
+        (expose-transport-send-document-async
+         provider
+         document
 
-            (let ((default-directory
-                   project-root))
+         (lambda (response-text)
 
-              (expose-provider-send-async
-               provider
-               document
+           (when (buffer-live-p source-buffer)
 
-               (lambda (response)
+             (with-current-buffer source-buffer
 
-                 (when (buffer-live-p source-buffer)
+               (expose-watch-finish-pending-hashes hashes)
 
-                   (with-current-buffer source-buffer
+               (condition-case parse-error
 
-                     (expose-watch-finish-pending-hashes hashes)
+                   (let ((items
+                          (expose-review-request-parse-items response-text)))
 
-                     (let ((response-text
-                            (expose-watch-provider-response-text response)))
+                     (dolist (hunk hunks)
+                       (expose-watch-record-hunk
+                        project-root
+                        file
+                        hunk
+                        (expose-watch-items-for-hunk items hunk)
+                        response-text))
 
-                       (condition-case parse-error
+                     (expose-watch-source-refresh)
 
-                           (let ((items
-                                  (expose-review-request-parse-items response-text)))
+                     (expose-log
+                      "Watch"
+                      "Watch review completed for %s with %d item(s)."
+                      file
+                      (length items)))
 
-                             (dolist (hunk hunks)
-                               (expose-watch-record-hunk
-                                project-root
-                                file
-                                hunk
-                                (expose-watch-items-for-hunk items hunk)
-                                response-text))
+                 (error
+                  (dolist (hunk hunks)
+                    (expose-watch-record-hunk
+                     project-root
+                     file
+                     hunk
+                     nil
+                     response-text
+                     (error-message-string parse-error)))
 
-                             (expose-watch-source-refresh)
+                  (expose-watch-refresh-running-state t)
+                  (expose-watch-source-refresh)
 
-                             (expose-log
-                              "Watch"
-                              "Watch review completed for %s with %d item(s)."
-                              file
-                              (length items)))
+                  (message
+                   "Expose Watch parse failed: %s"
+                   (error-message-string parse-error)))))))
 
-                         (error
-                          (dolist (hunk hunks)
-                            (expose-watch-record-hunk
-                             project-root
-                             file
-                             hunk
-                             nil
-                             response-text
-                             (error-message-string parse-error)))
+         project-root
 
-                          (expose-watch-refresh-running-state t)
-                          (expose-watch-source-refresh)
+         (lambda (error-data)
+           (when (buffer-live-p source-buffer)
+             (with-current-buffer source-buffer
+               (expose-watch-finish-pending-hashes hashes t)
 
-                          (message
-                           "Expose Watch parse failed: %s"
-                           (error-message-string parse-error))))))))))
-
-          (error
-           (expose-watch-finish-pending-hashes hashes t)
-
-           (message
-            "Expose Watch failed: %s"
-            (error-message-string error-data))))))))
+               (message
+                "Expose Watch failed: %s"
+                (error-message-string error-data))))))))))
 
 (defun expose-watch-after-save ()
   "Run Expose Watch after saving the current buffer."

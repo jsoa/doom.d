@@ -3,6 +3,7 @@
 (require 'subr-x)
 (require 'expose-log)
 (require 'expose-provider)
+(require 'expose-transport)
 (require 'expose-review-buffer)
 (require 'expose-review-context)
 (require 'expose-review-request)
@@ -349,22 +350,24 @@
                      expose-review-provider-timeout-seconds
                      provider))))))
 
-        (condition-case error
-            (expose-provider-send-async
-             provider
-             document
-             (lambda (response)
-               (unless completed
-                 (setq completed t)
+        (expose-transport-send-document-async
+         provider
+         document
 
-                 (when (timerp timeout-timer)
-                   (cancel-timer timeout-timer))
+         (lambda (response-text)
+           (unless completed
+             (setq completed t)
 
-                 (expose-review-handle-response
-                  latest-session
-                  response))))
+             (when (timerp timeout-timer)
+               (cancel-timer timeout-timer))
 
-          (error
+             (expose-review-handle-response
+              latest-session
+              response-text)))
+
+         (plist-get latest-session :project-root)
+
+         (lambda (error-data)
            (setq completed t)
 
            (when (timerp timeout-timer)
@@ -372,12 +375,15 @@
 
            (expose-review-handle-error
             latest-session
-            (error-message-string error))))))))
+            (error-message-string error-data))))))))
 
 (defun expose-review-handle-response (original-session response)
   "Handle provider RESPONSE for ORIGINAL-SESSION."
 
-  (let* ((project-root
+  (let* ((response-text
+          (expose-transport-response-text response))
+
+         (project-root
           (plist-get original-session :project-root))
 
          (branch
@@ -398,21 +404,33 @@
          "Ignoring stale review response for %s."
          (plist-get original-session :id))
 
+      ;; Always persist the raw provider response before parsing. If parsing
+      ;; fails, the failed session still contains the exact response that broke.
+      (setq latest-session
+            (plist-put latest-session :raw-response response-text))
+
+      (setq latest-session
+            (plist-put latest-session :updated-at
+                       (expose-review-context-now)))
+
+      (expose-review-store-save-session latest-session)
+
       (condition-case error
 
           (let ((items
-                 (expose-review-request-parse-items response)))
+                 (expose-review-request-parse-items response-text)))
 
             (setq latest-session
-                  (plist-put latest-session :items items))
+                  (plist-put
+                   latest-session
+                   :items
+                   (expose-transport-readable-value items)))
 
             (setq latest-session
                   (plist-put latest-session :state 'ready))
 
             (setq latest-session
-                  (plist-put latest-session :raw-response
-                             (substring-no-properties
-                              (or response ""))))
+                  (plist-put latest-session :error nil))
 
             (setq latest-session
                   (plist-put latest-session :updated-at
@@ -431,8 +449,31 @@
              (length items)))
 
         (error
-         (expose-review-handle-error
-          latest-session
+         (setq latest-session
+               (plist-put latest-session :state 'failed))
+
+         (setq latest-session
+               (plist-put
+                latest-session
+                :error
+                (format
+                 "Could not parse AI review JSON: %s"
+                 (error-message-string error))))
+
+         (setq latest-session
+               (plist-put latest-session :updated-at
+                          (expose-review-context-now)))
+
+         (expose-review-store-save-session latest-session)
+         (expose-review-buffer-refresh-open latest-session)
+
+         (expose-review-source-refresh-project
+          (plist-get latest-session :project-root))
+
+         (expose-log
+          "Review"
+          "Review session %s failed to parse JSON: %s"
+          (plist-get latest-session :id)
           (error-message-string error)))))))
 
 (defun expose-review-handle-error (original-session error-message)

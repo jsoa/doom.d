@@ -4,6 +4,7 @@
 (require 'project)
 (require 'expose-log)
 (require 'expose-provider)
+(require 'expose-transport)
 
 (defgroup expose-continue nil
   "Project-aware inline continuation suggestions."
@@ -390,44 +391,33 @@
      project-root
      (length document))
 
-    (condition-case error-data
+    (expose-transport-send-document-async
+     provider
+     document
 
-        ;; Important:
-        ;; Run provider from project root so Codex does not create/read `.codex`
-        ;; relative to nested source folders like src/app/events/[eventId]/.
-        (let ((default-directory
-               project-root))
+     (lambda (response-text)
+       (when (buffer-live-p source-buffer)
+         (with-current-buffer source-buffer
+           (when (and
+                  (markerp expose-continue-anchor)
+                  (marker-position expose-continue-anchor))
 
-          (expose-provider-send-async
-           provider
-           document
-           (lambda (response)
+             (save-excursion
+               (goto-char
+                (marker-position expose-continue-anchor))
 
-             ;; Important:
-             ;; Async provider callbacks may run with a process buffer current.
-             ;; Return to the original source buffer before touching buffer-local
-             ;; continuation state or overlays.
-             (when (buffer-live-p source-buffer)
+               (expose-continue-show-ghost response-text))))))
 
-               (with-current-buffer source-buffer
+     project-root
 
-                 (when (and
-                        (markerp expose-continue-anchor)
-                        (marker-position expose-continue-anchor))
-
-                   (save-excursion
-                     (goto-char
-                      (marker-position expose-continue-anchor))
-
-                     (expose-continue-show-ghost response))))))))
-
-      (error
+     (lambda (error-data)
        (when (buffer-live-p source-buffer)
          (with-current-buffer source-buffer
            (expose-continue-clear)))
 
        (message
         "Expose continuation failed: %s"
-        (error-message-string error-data))))))
+        (error-message-string error-data))))
+    ))
 
 (provide 'expose-continue)

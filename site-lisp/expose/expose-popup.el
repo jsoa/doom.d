@@ -6,6 +6,7 @@
 (require 'posframe)
 (require 'expose-history)
 (require 'expose-log)
+(require 'markdown-mode nil t)
 
 (declare-function posframe-hide "posframe")
 (declare-function posframe-show "posframe")
@@ -288,6 +289,7 @@
   (list
    :title title
    :body "Loading..."
+   :format 'plain
    :history nil))
 
 ;;; ---------------------------------------------------------------------------
@@ -321,6 +323,92 @@
    :max-height expose-popup-max-height)
 
   (setq expose-popup-visible t))
+
+(defun expose-popup-string-has-face-p (text)
+  "Return non-nil if TEXT already has face properties."
+
+  (let ((position 0)
+        found)
+
+    (while (and
+            (not found)
+            (< position
+               (length text)))
+
+      (when (get-text-property position 'face text)
+        (setq found t))
+
+      (setq position
+            (or
+             (next-single-property-change
+              position
+              'face
+              text)
+             (length text))))
+
+    found))
+
+
+(defun expose-popup-render-markdown (text)
+  "Return TEXT fontified as Markdown when possible."
+
+  (cond
+   ((not
+     (stringp text))
+    (format "%s" text))
+
+   ;; Do not re-fontify strings that already carry faces. Watch, Review,
+   ;; Region Review, and other custom views may already build propertized
+   ;; popup bodies.
+   ((expose-popup-string-has-face-p text)
+    text)
+
+   ((not
+     (fboundp 'markdown-mode))
+    text)
+
+   (t
+    (with-temp-buffer
+      (delay-mode-hooks
+        (markdown-mode))
+
+      (font-lock-mode 1)
+
+      (insert
+       (string-trim-right
+        (or text "")))
+
+      (font-lock-ensure
+       (point-min)
+       (point-max))
+
+      (buffer-string)))))
+
+
+(defun expose-popup-render-body (view)
+  "Return rendered popup body for VIEW."
+
+  (let ((body
+         (expose-popup-view-body view))
+
+        (format
+         (or
+          (plist-get view :format)
+          'markdown)))
+
+    (pcase format
+      ('plain
+       (if (stringp body)
+           body
+         (format "%s" body)))
+
+      ('markdown
+       (expose-popup-render-markdown body))
+
+      (_
+       (if (stringp body)
+           body
+         (format "%s" body))))))
 
 (defun expose-popup-show-view (view)
   "Display VIEW in the popup."
@@ -361,7 +449,7 @@
       (insert "\n")
 
       (insert
-       (expose-popup-view-body view))
+       (expose-popup-render-body view))
 
       (goto-char (point-min))
       (setq buffer-read-only t))

@@ -172,15 +172,26 @@ the branch whose merge-base with HEAD is newest."
 
 
 (defun expose-review-context-detect-base-branch (project-root)
-  "Return the base branch ref for PROJECT-ROOT."
+  "Return the base branch ref for PROJECT-ROOT.
 
+Prefer `expose-review-base-branch' when explicitly configured.
+Otherwise use the newer merge-base scoring logic, which considers
+develop/main/master locally and remotely."
   (or
    expose-review-base-branch
    (expose-review-context-best-base-branch-ref project-root)
+   (seq-find
+    (lambda (candidate)
+      (expose-review-context-ref-exists-p
+       project-root
+       candidate))
+    expose-review-base-branch-candidates)
    "HEAD~1"))
 
 (defcustom expose-review-base-branch-candidates
-  '("origin/main"
+  '("origin/develop"
+    "develop"
+    "origin/main"
     "main"
     "origin/master"
     "master")
@@ -1261,21 +1272,6 @@ Return nil when git exits unsuccessfully."
      "--verify"
      "--quiet"
      ref))))
-
-(defun expose-review-context-detect-base-branch (project-root)
-  "Return the base branch for PROJECT-ROOT."
-
-  (or
-   expose-review-base-branch
-
-   (seq-find
-    (lambda (candidate)
-      (expose-review-context-ref-exists-p
-       project-root
-       candidate))
-    expose-review-base-branch-candidates)
-
-   "HEAD~1"))
 
 (defun expose-review-context-merge-base (project-root base-branch)
   "Return merge-base between HEAD and BASE-BRANCH."

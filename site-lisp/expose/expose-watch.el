@@ -692,16 +692,13 @@ If PATH contains unreadable data, move it aside and return nil."
    (plist-get hunk :hash)
    (expose-watch-reviewed-hunk-hashes state)))
 
-(defun expose-watch-record-hunk (project-root file hunk items response &optional error)
-  "Record reviewed HUNK for FILE in PROJECT-ROOT with ITEMS and RESPONSE."
+(defun expose-watch-record-hunk-into-state (state hunk items response &optional error)
+  "Return STATE with HUNK recorded using ITEMS, RESPONSE, and optional ERROR.
 
-  (let* ((session
-          (expose-watch-load-session project-root))
+Pure state transform: performs no I/O, so callers can record several hunks
+against one loaded STATE before saving it once."
 
-         (state
-          (expose-watch-ensure-file-state session file))
-
-         (hash
+  (let* ((hash
           (plist-get hunk :hash))
 
          (existing
@@ -746,8 +743,67 @@ If PATH contains unreadable data, move it aside and return nil."
                      (append existing
                              (list entry))))
 
-    (expose-watch-save-session
-     (expose-watch-put-file-state session state))))
+    state))
+
+(defun expose-watch-prune-stale-hunks-in-state (state current-hashes)
+  "Return STATE with reviewed hunks whose hash is not in CURRENT-HASHES removed.
+
+Pure state transform: performs no I/O. This is how already-reviewed hunks
+that no longer exist in the working-tree diff (committed, reverted, or
+superseded by further edits) stop accumulating forever in storage."
+
+  (plist-put
+   state
+   :reviewed-hunks
+   (seq-filter
+    (lambda (entry)
+      (member
+       (plist-get entry :hash)
+       current-hashes))
+    (plist-get state :reviewed-hunks))))
+
+(defun expose-watch-sync-file-state (project-root file &optional hunk-items-alist response)
+  "Load FILE's watch state for PROJECT-ROOT, update it, and save at most once.
+
+Always prunes reviewed hunks that no longer exist in the current diff.
+HUNK-ITEMS-ALIST, when non-nil, is a list of (HUNK . ITEMS) conses newly
+reviewed with RESPONSE; each is recorded into the same state before the
+single save, instead of one load/save per hunk."
+
+  (let* ((session
+          (expose-watch-load-session project-root))
+
+         (original-state
+          (expose-watch-ensure-file-state session file))
+
+         ;; `plist-put' mutates an existing key in place, so capture the
+         ;; original :reviewed-hunks value now -- comparing the whole STATE
+         ;; plist against ORIGINAL-STATE later would always look equal, since
+         ;; pruning mutates ORIGINAL-STATE's own :reviewed-hunks binding too.
+         (original-hunks
+          (plist-get original-state :reviewed-hunks))
+
+         (state
+          (expose-watch-prune-stale-hunks-in-state
+           original-state
+           (expose-watch-current-hunk-hashes project-root file))))
+
+    (dolist (pair hunk-items-alist)
+      (setq state
+            (expose-watch-record-hunk-into-state
+             state
+             (car pair)
+             (cdr pair)
+             response)))
+
+    (when (or hunk-items-alist
+              (not
+               (equal
+                (plist-get state :reviewed-hunks)
+                original-hunks)))
+
+      (expose-watch-save-session
+       (expose-watch-put-file-state session state)))))
 
 (defun expose-watch-clear-file (project-root file)
   "Clear stored watch comments for FILE in PROJECT-ROOT."
@@ -1716,6 +1772,12 @@ Expose Watch only marks concrete comments in the source buffer."
             (expose-watch-new-hunks project-root file)))
 
       (unless hunks
+        ;; Nothing new to send the provider, but this is still a good time to
+        ;; drop any reviewed-hunk entries whose hunk no longer exists in the
+        ;; current diff, so storage doesn't grow forever on files that keep
+        ;; getting saved without producing new hunks.
+        (expose-watch-sync-file-state project-root file)
+
         (when (called-interactively-p 'interactive)
           (message "Expose Watch: no new changed hunks to review")))
 
@@ -1817,13 +1879,16 @@ Expose Watch only marks concrete comments in the source buffer."
                              (let ((items
                                     (expose-review-request-parse-items response-text)))
 
-                               (dolist (hunk hunks)
-                                 (expose-watch-record-hunk
-                                  project-root
-                                  file
-                                  hunk
-                                  (expose-watch-items-for-hunk items hunk)
-                                  response-text))
+                               (expose-watch-sync-file-state
+                                project-root
+                                file
+                                (mapcar
+                                 (lambda (hunk)
+                                   (cons
+                                    hunk
+                                    (expose-watch-items-for-hunk items hunk)))
+                                 hunks)
+                                response-text)
 
                                (expose-watch-set-state 'idle)
                                (expose-watch-source-refresh)

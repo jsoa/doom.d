@@ -22,7 +22,56 @@
   :type 'integer
   :group 'expose-review-region)
 
+(defcustom expose-review-region-provider-timeout-seconds 180
+  "Seconds to wait for an AI region review provider before failing the review."
+  :type 'integer
+  :group 'expose-review-region)
+
 (defvar expose-provider-default)
+
+(defvar expose-review-region-active-processes
+  (make-hash-table :test 'equal)
+  "Map of active Expose region review session IDs to their live provider process.
+
+This is intentionally not part of the persisted session plist: process
+objects are only meaningful within the current Emacs session, so tracking
+them here (rather than in the on-disk `.eld' session) lets both the timeout
+handler and manual cancellation terminate the right process without trying
+to serialize it.")
+
+(defun expose-review-region-register-process (id process)
+  "Record PROCESS as the live provider process for region review ID."
+
+  (if (and process
+           (processp process))
+
+      (puthash id process expose-review-region-active-processes)
+
+    (remhash id expose-review-region-active-processes)))
+
+(defun expose-review-region-forget-process (id)
+  "Stop tracking the provider process for region review ID."
+
+  (remhash id expose-review-region-active-processes))
+
+(defun expose-review-region-kill-process (id)
+  "Terminate the live provider process tracked for region review ID, if any."
+
+  (let ((process
+         (gethash id expose-review-region-active-processes)))
+
+    (when (and process
+               (processp process)
+               (process-live-p process))
+
+      (expose-log
+       "ReviewRegion"
+       "Killing provider process for %s."
+       id)
+
+      (delete-process process))
+
+    (expose-review-region-forget-process id)))
 
 (defvar-local expose-review-region-source-overlays nil
   "Overlays for active Expose region reviews in the current buffer.")
@@ -1412,7 +1461,10 @@
              :updated-at (expose-review-region-now)
              :items nil
              :response nil
-             :error nil)))
+             :error nil))
+
+           (completed nil)
+           timeout-timer)
 
       (expose-review-region-save-active session)
       (expose-review-region-source-refresh-all)
@@ -1438,37 +1490,34 @@
        line-end
        provider)
 
-      (expose-transport-send-document-async
-       provider
-       document
+      (setq timeout-timer
+            (run-at-time
+             expose-review-region-provider-timeout-seconds
+             nil
+             (lambda ()
+               (unless completed
+                 (setq completed t)
 
-       (lambda (response-text)
+                 (expose-review-region-kill-process id)
 
-         (let ((latest-session
-                (expose-review-region-read-active-by-id
-                 project-root
-                 id)))
-
-           ;; Ignore stale response if user completed/canceled while provider
-           ;; was still running.
-           (when latest-session
-
-             (condition-case parse-error
-
-                 (let ((items
-                        (expose-review-request-parse-items response-text)))
+                 (let ((latest-session
+                        (or
+                         (expose-review-region-read-active-by-id
+                          project-root
+                          id)
+                         session)))
 
                    (setq latest-session
-                         (plist-put latest-session :state 'ready))
+                         (plist-put latest-session :state 'failed))
 
                    (setq latest-session
                          (plist-put
                           latest-session
-                          :items
-                          (expose-transport-readable-value items)))
-
-                   (setq latest-session
-                         (plist-put latest-session :response response-text))
+                          :error
+                          (format
+                           "AI provider timed out after %d seconds while using %s."
+                           expose-review-region-provider-timeout-seconds
+                           provider)))
 
                    (setq latest-session
                          (plist-put latest-session :updated-at
@@ -1482,67 +1531,138 @@
                        (expose-review-region-deactivate-selection)
 
                        (expose-review-region-show-full-session
-                        latest-session)))
+                        latest-session))))))))
 
-                   (expose-log
-                    "ReviewRegion"
-                    "Region review %s completed with %d items."
-                    id
-                    (length items)))
+      (expose-review-region-register-process
+       id
+       (expose-transport-send-document-async
+        provider
+        document
 
-               (error
-                (setq latest-session
-                      (plist-put latest-session :state 'failed))
+        (lambda (response-text)
 
-                (setq latest-session
-                      (plist-put latest-session :error
-                                 (error-message-string parse-error)))
+          (unless completed
+            (setq completed t)
 
-                (setq latest-session
-                      (plist-put latest-session :response response-text))
+            (when (timerp timeout-timer)
+              (cancel-timer timeout-timer))
 
-                (setq latest-session
-                      (plist-put latest-session :updated-at
-                                 (expose-review-region-now)))
+            (expose-review-region-forget-process id))
 
-                (expose-review-region-save-active latest-session)
-                (expose-review-region-source-refresh-all)
+          (let ((latest-session
+                 (expose-review-region-read-active-by-id
+                  project-root
+                  id)))
 
-                (when (buffer-live-p source-buffer)
-                  (with-current-buffer source-buffer
-                    (expose-review-region-deactivate-selection)
+            ;; Ignore stale response if user completed/canceled while provider
+            ;; was still running.
+            (when latest-session
 
-                    (expose-review-region-show-full-session
-                     latest-session))))))))
+              (condition-case parse-error
 
-       project-root
+                  (let ((items
+                         (expose-review-request-parse-items response-text)))
 
-       (lambda (error-data)
+                    (setq latest-session
+                          (plist-put latest-session :state 'ready))
 
-         (setq session
-               (plist-put session :state 'failed))
+                    (setq latest-session
+                          (plist-put
+                           latest-session
+                           :items
+                           (expose-transport-readable-value items)))
 
-         (setq session
-               (plist-put session :error
-                          (error-message-string error-data)))
+                    (setq latest-session
+                          (plist-put latest-session :response response-text))
 
-         (setq session
-               (plist-put session :updated-at
-                          (expose-review-region-now)))
+                    (setq latest-session
+                          (plist-put latest-session :updated-at
+                                     (expose-review-region-now)))
 
-         (expose-review-region-save-active session)
-         (expose-review-region-source-refresh-all)
+                    (expose-review-region-save-active latest-session)
+                    (expose-review-region-source-refresh-all)
 
-         (when (buffer-live-p source-buffer)
-           (with-current-buffer source-buffer
-             (expose-review-region-deactivate-selection)
+                    (when (buffer-live-p source-buffer)
+                      (with-current-buffer source-buffer
+                        (expose-review-region-deactivate-selection)
 
-             (expose-review-region-show-full-session
-              session)))
+                        (expose-review-region-show-full-session
+                         latest-session)))
 
-         (message
-          "Expose region review failed: %s"
-          (error-message-string error-data)))))))
+                    (expose-log
+                     "ReviewRegion"
+                     "Region review %s completed with %d items."
+                     id
+                     (length items)))
+
+                (error
+                 (setq latest-session
+                       (plist-put latest-session :state 'failed))
+
+                 (setq latest-session
+                       (plist-put latest-session :error
+                                  (error-message-string parse-error)))
+
+                 (setq latest-session
+                       (plist-put latest-session :response response-text))
+
+                 (setq latest-session
+                       (plist-put latest-session :updated-at
+                                  (expose-review-region-now)))
+
+                 (expose-review-region-save-active latest-session)
+                 (expose-review-region-source-refresh-all)
+
+                 (when (buffer-live-p source-buffer)
+                   (with-current-buffer source-buffer
+                     (expose-review-region-deactivate-selection)
+
+                     (expose-review-region-show-full-session
+                      latest-session))))))))
+
+        project-root
+
+        (lambda (error-data)
+
+          (unless completed
+            (setq completed t)
+
+            (when (timerp timeout-timer)
+              (cancel-timer timeout-timer))
+
+            (expose-review-region-forget-process id))
+
+          (let ((latest-session
+                 (or
+                  (expose-review-region-read-active-by-id
+                   project-root
+                   id)
+                  session)))
+
+            (setq latest-session
+                  (plist-put latest-session :state 'failed))
+
+            (setq latest-session
+                  (plist-put latest-session :error
+                             (error-message-string error-data)))
+
+            (setq latest-session
+                  (plist-put latest-session :updated-at
+                             (expose-review-region-now)))
+
+            (expose-review-region-save-active latest-session)
+            (expose-review-region-source-refresh-all)
+
+            (when (buffer-live-p source-buffer)
+              (with-current-buffer source-buffer
+                (expose-review-region-deactivate-selection)
+
+                (expose-review-region-show-full-session
+                 latest-session)))
+
+            (message
+             "Expose region review failed: %s"
+             (error-message-string error-data)))))))))
 
 ;;;###autoload
 (defun expose-review-region-show-full-at-point ()
@@ -1611,6 +1731,9 @@
              (plist-get session :file)
              (expose-review-region-session-line-start session)
              (expose-review-region-session-line-end session))))
+
+      (expose-review-region-kill-process
+       (plist-get session :id))
 
       (let ((history-path
              (expose-review-region-archive-session

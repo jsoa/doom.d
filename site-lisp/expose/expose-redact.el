@@ -136,8 +136,15 @@ replaced with a redaction placeholder.")
      "stripe_secret_key"
      "stripe_webhook_secret"
      "aws_secret_access_key")
-   t)
-  "Case-insensitive key-name fragments used for assignment redaction.")
+   "\\(?:")
+  "Case-insensitive key-name fragments used for assignment redaction.
+
+Built with a shy group (not a capturing one): this is always spliced via
+%s into `expose-redact-assignment-line''s own hand-numbered regexp, which
+reads its match groups by fixed index. A capturing group here would shift
+every subsequent group number by one, silently corrupting which text gets
+treated as \"the secret value\" versus \"trailing punctuation\" -- exactly
+the bug this comment is here to prevent regressing.")
 
 (defun expose-redact-diff-line-paths (line)
   "Return file paths mentioned by unified diff header LINE."

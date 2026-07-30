@@ -4,6 +4,7 @@
 (require 'expose-clipboard)
 (require 'expose-codex)
 (require 'expose-copilot)
+(require 'expose-claude)
 
 ;;; ---------------------------------------------------------------------------
 ;;; Dispatcher
@@ -26,6 +27,9 @@
 
     ('copilot
      (expose-provider-copilot-send document))
+
+    ('claude
+     (expose-provider-claude-send document))
 
     (_
      (error "Unknown provider: %s" provider))))
@@ -51,6 +55,11 @@
 
     ('copilot
      (expose-provider-copilot-send-async
+      document
+      callback))
+
+    ('claude
+     (expose-provider-claude-send-async
       document
       callback))
 

@@ -13,7 +13,7 @@ Expose gives you a lightweight code-context command center at point:
 - Shows Flycheck diagnostics at point.
 - Displays focused action results in a small `posframe` popup.
 - Runs provider-backed code actions asynchronously.
-- Supports Clipboard, Codex, Copilot, and other provider implementations.
+- Supports Clipboard, Codex, Copilot, Claude Code, and other provider implementations.
 - Captures popup history for final action responses.
 - Supports copy/open/log/debug commands.
 - Supports quick hover scrolling with `C-j` / `C-k` while the popup is visible.
@@ -72,6 +72,7 @@ Typical local layout:
       expose-clipboard.el
       expose-codex.el
       expose-copilot.el
+      expose-claude.el
       expose-commands.el
       expose-review.el
       expose-review-store.el
@@ -142,6 +143,20 @@ Codex settings:
       expose-provider-codex-arguments
       '("exec" "--skip-git-repo-check"))
 ```
+
+Claude Code settings:
+
+```elisp
+(setq expose-provider-claude-command "claude"
+      expose-provider-claude-arguments
+      '("-p" "--permission-mode" "plan"))
+```
+
+`-p` is Claude Code's print/non-interactive mode. `--permission-mode plan`
+keeps the call read/analysis-only, since Expose already embeds all relevant
+context in the request document and does not expect the provider to read or
+modify the project itself. Verify these flags against your installed CLI
+version with `M-x expose-provider-claude-version` or `claude --help`.
 
 Output formatting instruction for normal popup actions:
 
@@ -517,7 +532,9 @@ Provider implementations include:
 
 - Clipboard provider for debugging/manual workflows.
 - Codex provider for async CLI-backed requests.
-- Copilot or other provider modules when available.
+- Copilot provider for async CLI-backed requests.
+- Claude Code provider for async CLI-backed requests.
+- Other provider modules when available.
 
 ## Storage
 

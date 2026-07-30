@@ -15,7 +15,8 @@
   :type '(choice
           (const clipboard)
           (const codex)
-          (const copilot))
+          (const copilot)
+          (const claude))
   :group 'expose)
 
 (defun expose-commands-project-root-or-default ()

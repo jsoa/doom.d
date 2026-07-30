@@ -739,14 +739,27 @@ Example patch suggestion:
           (expose-review-request-json-get raw :suggestion)))))))
 
 (defun expose-review-request-normalize-items (items)
-  "Normalize raw review ITEMS."
+  "Normalize raw review ITEMS.
 
-  (cl-loop
-   for raw in items
-   for index from 1
-   for item = (expose-review-request-normalize-item raw index)
-   when item
-   collect item))
+Signal an error when ITEMS was non-empty but every entry was filtered out as
+a template placeholder. That combination almost always means the JSON
+extractor latched onto the schema example embedded in the prompt (e.g. a
+provider error echoed the request back) rather than a real response, and
+should surface as a failure instead of a silent empty review."
+
+  (let ((normalized
+         (cl-loop
+          for raw in items
+          for index from 1
+          for item = (expose-review-request-normalize-item raw index)
+          when item
+          collect item)))
+
+    (when (and items (not normalized))
+      (error
+       "Expose review response only contained placeholder/template values; the provider likely failed or echoed the prompt instead of returning real findings"))
+
+    normalized))
 
 (defun expose-review-request-response-preview (response)
   "Return a short preview of RESPONSE for parse errors."

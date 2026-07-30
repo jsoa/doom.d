@@ -776,13 +776,30 @@ should surface as a failure instead of a silent empty review."
       text)))
 
 
+(defcustom expose-review-request-json-search-window 500
+  "How many leading characters of a provider response to scan for JSON.
+
+Providers are instructed to return JSON with no surrounding commentary, so a
+real response's JSON starts at or very near the beginning. Bounding the
+search this way stops Expose from wandering deep into an unrelated provider
+error dump (a crash message, an auth failure, a CLI log) and mistaking some
+coincidental JSON-shaped fragment there (e.g. the schema example echoed back
+from the prompt itself) for the real response."
+  :type 'integer
+  :group 'expose)
+
 (defun expose-review-request-json-start-indices (text)
-  "Return possible JSON start positions in TEXT."
+  "Return possible JSON start positions within the leading window of TEXT.
+
+Only positions within `expose-review-request-json-search-window' characters
+of the start of TEXT are considered. See that variable for why."
 
   (let ((indices nil)
         (index 0)
         (length
-         (length text)))
+         (min
+          (length text)
+          expose-review-request-json-search-window)))
 
     (while (< index length)
       (when (memq

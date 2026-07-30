@@ -117,29 +117,6 @@
   :group 'expose-review)
 
 
-(defun expose-review-safe-string (value)
-  "Return VALUE as a simple string for dashboard display."
-
-  (cond
-   ((null value)
-    "")
-
-   ((stringp value)
-    (substring-no-properties value))
-
-   ((symbolp value)
-    (symbol-name value))
-
-   ((numberp value)
-    (number-to-string value))
-
-   (t
-    (let ((print-length 30)
-          (print-level 4)
-          (print-circle t))
-      (format "%S" value)))))
-
-
 (defun expose-review-git-output (project-root &rest args)
   "Run git ARGS in PROJECT-ROOT and return output, or empty string."
 
@@ -297,55 +274,6 @@
      (expose-review-scope-section
       "Untracked files"
       untracked-files))))
-
-
-(defun expose-review-safe-review-input-stats (stats)
-  "Return display-safe review input STATS."
-
-  (cond
-   ((null stats)
-    nil)
-
-   ((stringp stats)
-    stats)
-
-   ((listp stats)
-    (let (lines)
-      (while stats
-        (let ((key
-               (pop stats))
-              (value
-               (pop stats)))
-          (push
-           (format
-            "%s: %s"
-            (expose-review-safe-string key)
-            (expose-review-safe-string value))
-           lines)))
-      (nreverse lines)))
-
-   (t
-    (list
-     (expose-review-safe-string stats)))))
-
-
-(defun expose-review-safe-diagnostics (diagnostics)
-  "Return display-safe DIAGNOSTICS."
-
-  (cond
-   ((null diagnostics)
-    nil)
-
-   ((stringp diagnostics)
-    diagnostics)
-
-   ((listp diagnostics)
-    (mapcar
-     #'expose-review-safe-string
-     diagnostics))
-
-   (t
-    (expose-review-safe-string diagnostics))))
 
 
 (defun expose-review-safe-document (document project-root)

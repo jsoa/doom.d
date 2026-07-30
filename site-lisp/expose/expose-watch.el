@@ -58,6 +58,11 @@ Set to nil to store full responses."
   :type 'number
   :group 'expose-watch)
 
+(defcustom expose-watch-provider-timeout-seconds 180
+  "Seconds to wait for an AI provider before failing an Expose Watch run."
+  :type 'integer
+  :group 'expose-watch)
+
 (defvar expose-provider-default)
 
 (defvar-local expose-watch-source-overlays nil
@@ -76,6 +81,9 @@ Expected values are `idle', `running', and `error'.")
 
 (defvar-local expose-watch-pending-hashes nil
   "Hunk hashes currently being reviewed for this buffer.")
+
+(defvar-local expose-watch-active-process nil
+  "Live provider process for the in-flight Expose Watch run in this buffer, if any.")
 
 (defvar expose-watch--restoring nil
   "Non-nil while restoring watch mode from stored state.")
@@ -1722,7 +1730,10 @@ Expose Watch only marks concrete comments in the source buffer."
                 (mapcar
                  (lambda (hunk)
                    (plist-get hunk :hash))
-                 hunks)))
+                 hunks))
+
+               (completed nil)
+               timeout-timer)
 
           (setq expose-watch-pending-hashes
                 (append
@@ -1738,74 +1749,129 @@ Expose Watch only marks concrete comments in the source buffer."
            file
            provider)
 
-          (expose-transport-send-document-async
-           provider
-           document
+          (setq timeout-timer
+                (run-at-time
+                 expose-watch-provider-timeout-seconds
+                 nil
+                 (lambda ()
+                   (unless completed
+                     (setq completed t)
 
-           (lambda (response-text)
+                     (when (buffer-live-p source-buffer)
+                       (with-current-buffer source-buffer
 
-             (when (buffer-live-p source-buffer)
+                         (when (and expose-watch-active-process
+                                    (process-live-p expose-watch-active-process))
 
-               (with-current-buffer source-buffer
+                           (expose-log
+                            "Watch"
+                            "Killing provider process for %s after timeout."
+                            file)
 
-                 (setq expose-watch-pending-hashes
-                       (seq-difference
-                        expose-watch-pending-hashes
-                        hashes
-                        #'string=))
+                           (delete-process expose-watch-active-process))
 
-                 (condition-case parse-error
+                         (setq expose-watch-active-process nil)
 
-                     (let ((items
-                            (expose-review-request-parse-items response-text)))
+                         (setq expose-watch-pending-hashes
+                               (seq-difference
+                                expose-watch-pending-hashes
+                                hashes
+                                #'string=))
 
-                       (dolist (hunk hunks)
-                         (expose-watch-record-hunk
-                          project-root
+                         (expose-watch-set-state 'error)
+
+                         (expose-log
+                          "Watch"
+                          "Watch review timed out after %d seconds for %s while using %s."
+                          expose-watch-provider-timeout-seconds
                           file
-                          hunk
-                          (expose-watch-items-for-hunk items hunk)
-                          response-text))
+                          provider)))))))
 
-                       (expose-watch-set-state 'idle)
-                       (expose-watch-source-refresh)
+          (setq expose-watch-active-process
+                (expose-transport-send-document-async
+                 provider
+                 document
 
-                       (expose-log
-                        "Watch"
-                        "Watch review completed for %s with %d item(s)."
-                        file
-                        (length items)))
+                 (lambda (response-text)
 
-                   (error
-                    (expose-watch-set-state 'error)
+                   (unless completed
+                     (setq completed t)
 
-                    (expose-log
-                     "Watch"
-                     "Watch review failed to parse response for %s: %s"
-                     file
-                     (error-message-string parse-error)))))))
+                     (when (timerp timeout-timer)
+                       (cancel-timer timeout-timer))
 
-           project-root
+                     (when (buffer-live-p source-buffer)
 
-           (lambda (error-data)
+                       (with-current-buffer source-buffer
 
-             (when (buffer-live-p source-buffer)
+                         (setq expose-watch-active-process nil)
 
-               (with-current-buffer source-buffer
+                         (setq expose-watch-pending-hashes
+                               (seq-difference
+                                expose-watch-pending-hashes
+                                hashes
+                                #'string=))
 
-                 (setq expose-watch-pending-hashes
-                       (seq-difference
-                        expose-watch-pending-hashes
-                        hashes
-                        #'string=))
+                         (condition-case parse-error
 
-                 (expose-watch-set-state 'error)
+                             (let ((items
+                                    (expose-review-request-parse-items response-text)))
 
-                 (expose-log
-                  "Watch"
-                  "Watch review failed for %s: %s"
-                  file
-                  (error-message-string error-data)))))))))))
+                               (dolist (hunk hunks)
+                                 (expose-watch-record-hunk
+                                  project-root
+                                  file
+                                  hunk
+                                  (expose-watch-items-for-hunk items hunk)
+                                  response-text))
+
+                               (expose-watch-set-state 'idle)
+                               (expose-watch-source-refresh)
+
+                               (expose-log
+                                "Watch"
+                                "Watch review completed for %s with %d item(s)."
+                                file
+                                (length items)))
+
+                           (error
+                            (expose-watch-set-state 'error)
+
+                            (expose-log
+                             "Watch"
+                             "Watch review failed to parse response for %s: %s"
+                             file
+                             (error-message-string parse-error))))))))
+
+                 project-root
+
+                 (lambda (error-data)
+
+                   (unless completed
+                     (setq completed t)
+
+                     (when (timerp timeout-timer)
+                       (cancel-timer timeout-timer))
+
+                     (when (buffer-live-p source-buffer)
+
+                       (with-current-buffer source-buffer
+
+                         (setq expose-watch-active-process nil)
+
+                         (setq expose-watch-pending-hashes
+                               (seq-difference
+                                expose-watch-pending-hashes
+                                hashes
+                                #'string=))
+
+                         (expose-watch-set-state 'error)
+
+                         (expose-log
+                          "Watch"
+                          "Watch review failed for %s: %s"
+                          file
+                          (error-message-string error-data)))))))))))))
 
 (defun expose-watch-after-save ()
   "Run Expose Watch after saving the current buffer."

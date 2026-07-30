@@ -708,6 +708,8 @@
     - Do not create findings outside the selected region unless the issue is caused
       directly by the selected region.
     - If a finding applies to the whole selected region, use line_start=%s and line_end=%s.
+    - Do not copy the JSON schema/example from this prompt.
+    - Never return placeholder values like 123, 126, \"Short title\", \"Review comment.\", or \"high|medium|low|info\".
 
     Return valid JSON only.
     Do not return Markdown.
@@ -1080,33 +1082,108 @@
 
     (push overlay expose-review-region-source-overlays)))
 
-(defun expose-review-region-source-add-item-overlay (item session)
-  "Add item overlay for ITEM in SESSION."
+(defun expose-review-region-normalize-line-number (value fallback)
+  "Return VALUE as a positive line number, or FALLBACK."
 
-  (let* ((line-start
-          (expose-review-region-item-line-start
-           item
-           (expose-review-region-session-line-start session)))
+  (let ((number
+         (cond
+          ((numberp value)
+           value)
+
+          ((stringp value)
+           (string-to-number value))
+
+          (t
+           nil))))
+
+    (if (and number
+             (> number 0))
+        number
+      fallback)))
+
+
+(defun expose-review-region-item-file-matches-session-p (item session)
+  "Return non-nil when ITEM belongs to SESSION's file."
+
+  (let ((item-file
+         (plist-get item :file))
+
+        (session-file
+         (plist-get session :file)))
+
+    (or
+     (not item-file)
+     (string-empty-p item-file)
+     (string= item-file session-file))))
+
+
+(defun expose-review-region-item-effective-line-range (item session)
+  "Return safe line range cons for ITEM in SESSION."
+
+  (let* ((region-start
+          (expose-review-region-session-line-start session))
+
+         (region-end
+          (expose-review-region-session-line-end session))
+
+         (line-start
+          (expose-review-region-normalize-line-number
+           (or
+            (plist-get item :line-start)
+            (plist-get item :line_start))
+           region-start))
 
          (line-end
-          (expose-review-region-item-line-end item line-start))
+          (expose-review-region-normalize-line-number
+           (or
+            (plist-get item :line-end)
+            (plist-get item :line_end))
+           line-start)))
 
-         (start
-          (expose-review-region-line-start-position line-start))
+    ;; Region Review should highlight inside the reviewed region only.
+    ;; This prevents a weird model line number from marking unrelated code.
+    (setq line-start
+          (max region-start
+               (min line-start region-end)))
 
-         (end
-          (expose-review-region-line-after-position line-end))
+    (setq line-end
+          (max line-start
+               (min line-end region-end)))
 
-         (overlay
-          (make-overlay start end nil t nil)))
+    (cons line-start line-end)))
 
-    (overlay-put overlay 'face 'expose-review-region-item-face)
-    (overlay-put overlay 'priority 90)
-    (overlay-put overlay 'help-echo "Expose Region Review item")
-    (overlay-put overlay 'expose-review-region-session session)
-    (overlay-put overlay 'expose-review-region-item item)
+(defun expose-review-region-source-add-item-overlay (item session)
+  "Add Watch-style source overlay for review ITEM in SESSION."
 
-    (push overlay expose-review-region-source-overlays)))
+  (when (expose-review-region-item-file-matches-session-p item session)
+
+    (let* ((line-range
+            (expose-review-region-item-effective-line-range item session))
+
+           (line-start
+            (car line-range))
+
+           (line-end
+            (cdr line-range))
+
+           (start
+            (expose-review-region-line-start-position line-start))
+
+           ;; Same idea as Watch: cover the full visual line/range.
+           (end
+            (expose-review-region-line-after-position line-end))
+
+           (overlay
+            (make-overlay start end nil t nil)))
+
+      (overlay-put overlay 'face 'expose-review-region-item-face)
+      (overlay-put overlay 'priority 95)
+      (overlay-put overlay 'evaporate nil)
+      (overlay-put overlay 'help-echo "Expose Region Review item")
+      (overlay-put overlay 'expose-review-region-session session)
+      (overlay-put overlay 'expose-review-region-item item)
+
+      (push overlay expose-review-region-source-overlays))))
 
 (defun expose-review-region-source-add-session-overlays (session)
   "Add source overlays for region review SESSION."

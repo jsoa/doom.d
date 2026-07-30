@@ -214,7 +214,7 @@ Use this exact top-level shape:
       \"anchor_text\": \"Small original code snippet from the affected area when possible.\",
       \"suggestion\": {
         \"kind\": \"none|text|patch\",
-        \"text\": \"Concrete sugguested fix or implementation direction.\"
+        \"text\": \"Concrete suggested fix or implementation direction.\"
         \"patch\": \"\"
       }
     }
@@ -562,67 +562,181 @@ Example patch suggestion:
      :patch-line-end
      (cdr-safe patch-range))))
 
+(defun expose-review-request-string-value (value)
+  "Return VALUE as a string for placeholder checks."
+
+  (cond
+   ((null value)
+    "")
+
+   ((stringp value)
+    value)
+
+   ((symbolp value)
+    (symbol-name value))
+
+   ((numberp value)
+    (number-to-string value))
+
+   (t
+    (format "%s" value))))
+
+
+(defun expose-review-request-string-contains-p (needle value)
+  "Return non-nil when VALUE contains NEEDLE."
+
+  (string-match-p
+   (regexp-quote needle)
+   (expose-review-request-string-value value)))
+
+
+(defun expose-review-request-placeholder-value-p (value placeholders)
+  "Return non-nil when VALUE equals one of PLACEHOLDERS."
+
+  (member
+   (string-trim
+    (expose-review-request-string-value value))
+   placeholders))
+
+
+(defun expose-review-request-template-placeholder-item-p (raw)
+  "Return non-nil when RAW is the schema/example item, not a real finding."
+
+  (let* ((severity
+          (expose-review-request-json-get raw :severity))
+
+         (category
+          (expose-review-request-json-get raw :category))
+
+         (title
+          (expose-review-request-json-get raw :title))
+
+         (comment
+          (expose-review-request-json-get raw :comment))
+
+         (anchor
+          (expose-review-request-json-get raw :anchor_text :anchor-text))
+
+         (line-start
+          (expose-review-request-json-get raw :line_start :line-start))
+
+         (line-end
+          (expose-review-request-json-get raw :line_end :line-end))
+
+         (suggestion
+          (expose-review-request-json-get raw :suggestion))
+
+         (suggestion-kind
+          (when (listp suggestion)
+            (expose-review-request-json-get suggestion :kind)))
+
+         (suggestion-text
+          (when (listp suggestion)
+            (expose-review-request-json-get suggestion :text))))
+
+    (or
+     ;; These pipe-delimited values are schema options, never real values.
+     (expose-review-request-string-contains-p "|" severity)
+     (expose-review-request-string-contains-p "|" category)
+     (expose-review-request-string-contains-p "|" suggestion-kind)
+
+     ;; Exact placeholder strings from the prompt examples.
+     (expose-review-request-placeholder-value-p
+      title
+      '("Short title"
+        "Short actionable title"))
+
+     (expose-review-request-placeholder-value-p
+      comment
+      '("Review comment."
+        "Clear review comment explaining the issue, why it matters, and what to change."))
+
+     (expose-review-request-placeholder-value-p
+      anchor
+      '("Relevant source line or phrase."
+        "Small original code snippet from the affected area when possible."))
+
+     (expose-review-request-placeholder-value-p
+      suggestion-text
+      '("Suggested fix or implementation direction."
+        "Concrete suggested fix or implementation direction."
+        "Concrete sugguested fix or implementation direction."))
+
+     ;; Region-review example line numbers.
+     (and
+      (equal
+       (expose-review-request-string-value line-start)
+       "123")
+      (equal
+       (expose-review-request-string-value line-end)
+       "126")
+      (expose-review-request-placeholder-value-p
+       title
+       '("Short title"))))))
+
 (defun expose-review-request-normalize-item (raw index)
   "Normalize RAW review item at INDEX."
 
-  (let* ((file
-          (expose-review-request-json-get raw :file))
+  (unless (expose-review-request-template-placeholder-item-p raw)
 
-         (title
-          (or
-           (expose-review-request-json-get raw :title)
-           "Untitled review item"))
+    (let* ((file
+            (expose-review-request-json-get raw :file))
 
-         (line-start
-          (expose-review-request-number
-           (expose-review-request-json-get raw :line_start :line-start)
-           1))
+           (title
+            (or
+             (expose-review-request-json-get raw :title)
+             "Untitled review item"))
 
-         (line-end
-          (expose-review-request-number
-           (expose-review-request-json-get raw :line_end :line-end)
-           line-start)))
+           (line-start
+            (expose-review-request-number
+             (expose-review-request-json-get raw :line_start :line-start)
+             1))
 
-    (when (and
-           (stringp file)
-           (not
-            (string-empty-p file)))
+           (line-end
+            (expose-review-request-number
+             (expose-review-request-json-get raw :line_end :line-end)
+             line-start)))
 
-      (list
-       :id
-       (or
-        (expose-review-request-json-get raw :id)
-        (format "R%d" index))
+      (when (and
+             (stringp file)
+             (not
+              (string-empty-p file)))
 
-       :severity
-       (expose-review-request-symbol
-        (expose-review-request-json-get raw :severity)
-        'medium)
+        (list
+         :id
+         (or
+          (expose-review-request-json-get raw :id)
+          (format "R%d" index))
 
-       :category
-       (expose-review-request-symbol
-        (expose-review-request-json-get raw :category)
-        'maintainability)
+         :severity
+         (expose-review-request-symbol
+          (expose-review-request-json-get raw :severity)
+          'medium)
 
-       :status 'pending
-       :file file
-       :line-start line-start
-       :line-end line-end
-       :title title
+         :category
+         (expose-review-request-symbol
+          (expose-review-request-json-get raw :category)
+          'maintainability)
 
-       :comment
-       (or
-        (expose-review-request-json-get raw :comment)
-        "")
+         :status 'pending
+         :file file
+         :line-start line-start
+         :line-end line-end
+         :title title
 
-       :anchor-text
-       (or
-        (expose-review-request-json-get raw :anchor_text :anchor-text)
-        "")
+         :comment
+         (or
+          (expose-review-request-json-get raw :comment)
+          "")
 
-       :suggestion
-       (expose-review-request-normalize-suggestion
-        (expose-review-request-json-get raw :suggestion))))))
+         :anchor-text
+         (or
+          (expose-review-request-json-get raw :anchor_text :anchor-text)
+          "")
+
+         :suggestion
+         (expose-review-request-normalize-suggestion
+          (expose-review-request-json-get raw :suggestion)))))))
 
 (defun expose-review-request-normalize-items (items)
   "Normalize raw review ITEMS."
@@ -634,17 +748,153 @@ Example patch suggestion:
    when item
    collect item))
 
+(defun expose-review-request-response-preview (response)
+  "Return a short preview of RESPONSE for parse errors."
+
+  (let ((text
+         (string-trim
+          (substring-no-properties
+           (or response "")))))
+
+    (if (> (length text) 800)
+        (concat
+         (substring text 0 800)
+         "\n\n[Expose response preview truncated.]")
+      text)))
+
+
+(defun expose-review-request-json-start-indices (text)
+  "Return possible JSON start positions in TEXT."
+
+  (let ((indices nil)
+        (index 0)
+        (length
+         (length text)))
+
+    (while (< index length)
+      (when (memq
+             (aref text index)
+             '(?\{ ?\[))
+        (push index indices))
+
+      (setq index
+            (1+ index)))
+
+    (nreverse indices)))
+
+
+(defun expose-review-request-json-object-p (value)
+  "Return non-nil when VALUE looks like a parsed JSON object plist."
+
+  (and
+   (consp value)
+   (keywordp
+    (car value))))
+
+
+(defun expose-review-request-review-item-p (value)
+  "Return non-nil when VALUE looks like a review item."
+
+  (and
+   (expose-review-request-json-object-p value)
+   (or
+    (plist-member value :file)
+    (plist-member value :comment)
+    (plist-member value :line_start)
+    (plist-member value :line-start))))
+
+
+(defun expose-review-request-review-json-p (value)
+  "Return non-nil when VALUE looks like an Expose review response."
+
+  (cond
+   ;; Preferred shape:
+   ;; {"summary": ..., "items": [...]}
+   ((and
+     (expose-review-request-json-object-p value)
+     (plist-member value :items))
+    t)
+
+   ;; Single item object.
+   ((expose-review-request-review-item-p value)
+    t)
+
+   ;; Empty item array.
+   ((null value)
+    t)
+
+   ;; Direct array of review items.
+   ((and
+     (listp value)
+     (expose-review-request-review-item-p
+      (car-safe value)))
+    t)
+
+   (t
+    nil)))
+
+
+(defun expose-review-request-parse-json-at (text start)
+  "Try to parse JSON from TEXT at START.
+
+Return a cons of raw JSON text and parsed value, or nil."
+
+  (condition-case nil
+      (let* ((json
+              (expose-review-request-extract-balanced-json
+               text
+               start))
+
+             (parsed
+              (json-parse-string
+               json
+               :object-type 'plist
+               :array-type 'list)))
+
+        (cons json parsed))
+
+    (error
+     nil)))
+
+
+(defun expose-review-request-parse-review-json (response)
+  "Parse the first review-shaped JSON value from RESPONSE."
+
+  (let* ((text
+          (expose-review-request-strip-json-fence response))
+
+         (starts
+          (expose-review-request-json-start-indices text))
+
+         result)
+
+    (catch 'done
+      (dolist (start starts)
+        (let ((candidate
+               (expose-review-request-parse-json-at text start)))
+
+          (when (and
+                 candidate
+                 (expose-review-request-review-json-p
+                  (cdr candidate)))
+            (setq result candidate)
+            (throw 'done result)))))
+
+    (unless result
+      (error
+       "No valid Expose review JSON found. Response preview:\n%s"
+       (expose-review-request-response-preview response)))
+
+    result))
+
 (defun expose-review-request-parse-items (response)
   "Parse review items from provider RESPONSE."
 
-  (let* ((json
-          (expose-review-request-extract-json response))
+  (let* ((candidate
+          (expose-review-request-parse-review-json response))
 
          (parsed
-          (json-parse-string
-           json
-           :object-type 'plist
-           :array-type 'list))
+          (cdr candidate))
 
          (items
           (cond
@@ -655,15 +905,13 @@ Example patch suggestion:
              (plist-member parsed :items))
             (plist-get parsed :items))
 
-           ;; Tolerate a single direct review item:
+           ;; Single direct review item:
            ;; {"id": "R1", "file": "...", ...}
-           ((and
-             (listp parsed)
-             (plist-member parsed :file))
+           ((expose-review-request-review-item-p parsed)
             (list parsed))
 
-           ;; Tolerate direct top-level array:
-           ;; [{"id": "R1", ...}, {"id": "R2", ...}]
+           ;; Direct top-level array:
+           ;; [{"id": "R1", ...}]
            ((listp parsed)
             parsed)
 

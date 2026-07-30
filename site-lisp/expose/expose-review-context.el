@@ -212,6 +212,7 @@ develop/main/master locally and remotely."
 (defcustom expose-review-context-metadata-files
   '("README.md"
     "AGENTS.md"
+    "CLAUDE.md"
     ".github/copilot-instructions.md"
     "pyproject.toml"
     "package.json")

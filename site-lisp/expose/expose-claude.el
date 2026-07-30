@@ -215,7 +215,10 @@ against your installed version."
 ;;; ---------------------------------------------------------------------------
 
 (defun expose-provider-claude-send-async (document callback)
-  "Send DOCUMENT to Claude Code CLI asynchronously and call CALLBACK."
+  "Send DOCUMENT to Claude Code CLI asynchronously and call CALLBACK.
+
+Returns the underlying process so callers can terminate it early (e.g. on a
+client-side timeout), or nil if the process could not be started."
 
   (expose-log
    "Claude"
@@ -288,13 +291,16 @@ against your installed version."
          document)
 
         (process-send-eof
-         process))
+         process)
+
+        process)
 
     (error
      (funcall
       callback
       (expose-provider-claude-render-error
        "Claude Code Error"
-       (error-message-string error))))))
+       (error-message-string error)))
+     nil)))
 
 (provide 'expose-claude)

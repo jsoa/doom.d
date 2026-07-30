@@ -103,7 +103,10 @@
         (delete-file output)))))
 
 (defun expose-provider-codex-send-async (document callback)
-  "Send DOCUMENT to Codex asynchronously, then call CALLBACK with a rendered view."
+  "Send DOCUMENT to Codex asynchronously, then call CALLBACK with a rendered view.
+
+Returns the underlying process so callers can terminate it early (e.g. on a
+client-side timeout)."
 
   (let ((output
          (make-temp-file "expose-codex-"))
@@ -147,7 +150,9 @@
      "Codex"
      "Sending EOF.")
 
-    (process-send-eof process)))
+    (process-send-eof process)
+
+    process))
 
 (defun expose-provider-codex-sentinel (process event output callback)
   "Handle Codex PROCESS EVENT, read OUTPUT, and call CALLBACK."

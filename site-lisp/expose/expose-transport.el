@@ -321,7 +321,13 @@ WORKING-DIRECTORY, when non-nil, is used as `default-directory' while
 starting the provider call.
 
 ERROR-CALLBACK, when non-nil, receives the raw Emacs error data if starting
-the provider call fails. If ERROR-CALLBACK is nil, errors are re-signaled."
+the provider call fails. If ERROR-CALLBACK is nil, errors are re-signaled.
+
+Returns the underlying provider process, or nil when the provider has no
+process to track (e.g. it failed to start, or the provider is synchronous
+under the hood like Clipboard). Callers that enforce their own timeout can
+use this to terminate the provider call early instead of merely giving up on
+it while it keeps running in the background."
 
   (condition-case error-data
 
@@ -348,6 +354,8 @@ the provider call fails. If ERROR-CALLBACK is nil, errors are re-signaled."
 
        (signal
         (car error-data)
-        (cdr error-data))))))
+        (cdr error-data)))
+
+     nil)))
 
 (provide 'expose-transport)

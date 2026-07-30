@@ -39,26 +39,76 @@
     (float-time)
     (expose-review-progress-started-at session))))
 
-(defun expose-review-progress-message (session)
-  "Return human-readable progress message for SESSION."
+(defconst expose-review-progress-spinner-frames
+  ["⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏"]
+  "Spinner animation frames shown next to Expose Review progress messages.")
 
-  (let ((elapsed
-         (expose-review-progress-elapsed-seconds session)))
+(defun expose-review-progress-spinner-frame (elapsed)
+  "Return the spinner frame for ELAPSED seconds."
+
+  (aref
+   expose-review-progress-spinner-frames
+   (mod elapsed (length expose-review-progress-spinner-frames))))
+
+(defun expose-review-progress-message (session)
+  "Return human-readable, animated progress message for SESSION."
+
+  (let* ((elapsed
+          (expose-review-progress-elapsed-seconds session))
+
+         (spinner
+          (expose-review-progress-spinner-frame elapsed)))
 
     (pcase (plist-get session :state)
       ('preparing
-       (format "Preparing review context... %ds elapsed" elapsed))
+       (format "%s Preparing review context... %ds elapsed" spinner elapsed))
 
       ('sending
-       (format "Waiting for AI provider response... %ds elapsed" elapsed))
+       (format "%s Waiting for AI provider response... %ds elapsed" spinner elapsed))
 
       (_
        nil))))
 
-(defun expose-review-touch-progress (&rest _args)
-  "Temporarily disabled while stabilizing Full Review dashboard refresh."
+(defun expose-review-touch-progress (original-session)
+  "Update progress metadata for ORIGINAL-SESSION while it is still active."
 
-  nil)
+  (let ((latest-session
+         (expose-review-latest-session-for original-session)))
+
+    (when (and
+           latest-session
+           (expose-review-session-still-active-p
+            original-session
+            latest-session)
+           (memq
+            (plist-get latest-session :state)
+            '(preparing sending running)))
+
+      (let ((message
+             (expose-review-progress-message latest-session)))
+
+        (when message
+          (setq latest-session
+                (plist-put latest-session :progress-message message))
+
+          (setq latest-session
+                (plist-put latest-session :updated-at
+                           (expose-review-context-now)))
+
+          (expose-review-store-save-session latest-session)
+          (expose-review-buffer-refresh-open latest-session)
+
+          (expose-log
+           "Review"
+           "%s"
+           message)))
+
+      ;; Schedule the next heartbeat only if the same session is still active.
+      (run-at-time
+       expose-review-progress-interval-seconds
+       nil
+       #'expose-review-touch-progress
+       original-session))))
 
 
 (defcustom expose-review-max-request-bytes 180000
@@ -519,7 +569,8 @@
 
              (completed nil)
 
-             timeout-timer)
+             timeout-timer
+             provider-process)
 
         (setq latest-session
               (plist-put latest-session :state 'sending))
@@ -586,6 +637,17 @@
                    (unless completed
                      (setq completed t)
 
+                     (when (and provider-process
+                                (processp provider-process)
+                                (process-live-p provider-process))
+
+                       (expose-log
+                        "Review"
+                        "Killing provider process for %s after timeout."
+                        (plist-get latest-session :id))
+
+                       (delete-process provider-process))
+
                      (expose-review-handle-error
                       latest-session
                       (format
@@ -594,33 +656,34 @@
                        provider
                        (length safe-document)))))))
 
-          (expose-transport-send-document-async
-           provider
-           safe-document
+          (setq provider-process
+                (expose-transport-send-document-async
+                 provider
+                 safe-document
 
-           (lambda (response-text)
-             (unless completed
-               (setq completed t)
+                 (lambda (response-text)
+                   (unless completed
+                     (setq completed t)
 
-               (when (timerp timeout-timer)
-                 (cancel-timer timeout-timer))
+                     (when (timerp timeout-timer)
+                       (cancel-timer timeout-timer))
 
-               (expose-review-handle-response
-                latest-session
-                response-text)))
+                     (expose-review-handle-response
+                      latest-session
+                      response-text)))
 
-           project-root
+                 project-root
 
-           (lambda (error-data)
-             (unless completed
-               (setq completed t)
+                 (lambda (error-data)
+                   (unless completed
+                     (setq completed t)
 
-               (when (timerp timeout-timer)
-                 (cancel-timer timeout-timer))
+                     (when (timerp timeout-timer)
+                       (cancel-timer timeout-timer))
 
-               (expose-review-handle-error
-                latest-session
-                (error-message-string error-data))))))))))
+                     (expose-review-handle-error
+                      latest-session
+                      (error-message-string error-data)))))))))))
 
 (defun expose-review-handle-response (original-session response)
   "Handle provider RESPONSE for ORIGINAL-SESSION."

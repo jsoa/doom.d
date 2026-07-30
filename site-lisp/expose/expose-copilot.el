@@ -204,7 +204,10 @@ work-specific Copilot CLI flags."
 ;;; ---------------------------------------------------------------------------
 
 (defun expose-provider-copilot-send-async (document callback)
-  "Send DOCUMENT to GitHub Copilot CLI asynchronously and call CALLBACK."
+  "Send DOCUMENT to GitHub Copilot CLI asynchronously and call CALLBACK.
+
+Returns the underlying process so callers can terminate it early (e.g. on a
+client-side timeout), or nil if the process could not be started."
 
   (expose-log
    "Copilot"
@@ -277,13 +280,16 @@ work-specific Copilot CLI flags."
          document)
 
         (process-send-eof
-         process))
+         process)
+
+        process)
 
     (error
      (funcall
       callback
       (expose-provider-copilot-render-error
        "GitHub Copilot Error"
-       (error-message-string error))))))
+       (error-message-string error)))
+     nil)))
 
 (provide 'expose-copilot)

@@ -27,6 +27,18 @@
   :type 'integer
   :group 'expose-review-region)
 
+(defcustom expose-review-region-stale-active-seconds 3600
+  "Seconds after which a still-\"running\" Expose region review is orphaned.
+
+A review normally reaches a terminal state (ready/failed) well within
+`expose-review-region-provider-timeout-seconds'. If it is still \"running\"
+far longer than that -- typically because Emacs or the provider process was
+killed mid-review, leaving nothing left to complete it or time it out --
+treat it as abandoned so it does not block new reviews on the same location
+or accumulate in the active directory forever."
+  :type 'integer
+  :group 'expose-review-region)
+
 (defvar expose-provider-default)
 
 (defvar expose-review-region-active-processes
@@ -305,22 +317,75 @@ to serialize it.")
   (expose-review-region-read-file
    (expose-review-region-active-path project-root id)))
 
+(defun expose-review-region-parse-timestamp (value)
+  "Return VALUE (an Expose timestamp string) as float seconds, or nil."
+
+  (when (stringp value)
+    (ignore-errors
+      (float-time
+       (date-to-time value)))))
+
+(defun expose-review-region-session-orphaned-p (session)
+  "Return non-nil when SESSION looks abandoned rather than genuinely running.
+
+See `expose-review-region-stale-active-seconds'."
+
+  (and
+   (eq (plist-get session :state) 'running)
+
+   (let ((updated
+          (expose-review-region-parse-timestamp
+           (or
+            (plist-get session :updated-at)
+            (plist-get session :created-at)))))
+
+     (and updated
+          (> (- (float-time) updated)
+             expose-review-region-stale-active-seconds)))))
+
 (defun expose-review-region-active-sessions (project-root)
-  "Return all active region review sessions for PROJECT-ROOT."
+  "Return all active region review sessions for PROJECT-ROOT.
+
+Sessions stuck in a non-terminal state far longer than a review should ever
+take are archived as failed and excluded from the result here, instead of
+permanently blocking new reviews on the same location or accumulating in
+the active directory forever. See
+`expose-review-region-session-orphaned-p'."
 
   (let ((dir
          (expose-review-region-active-dir project-root)))
 
     (when (file-directory-p dir)
 
-      (delq
-       nil
-       (mapcar
-        #'expose-review-region-read-file
-        (directory-files
-         dir
-         t
-         "\\.eld\\'"))))))
+      (let ((sessions
+             (delq
+              nil
+              (mapcar
+               #'expose-review-region-read-file
+               (directory-files
+                dir
+                t
+                "\\.eld\\'")))))
+
+        (seq-remove
+         (lambda (session)
+           (when (expose-review-region-session-orphaned-p session)
+
+             (expose-log
+              "ReviewRegion"
+              "Archiving orphaned region review %s (stuck running since %s)."
+              (plist-get session :id)
+              (plist-get session :updated-at))
+
+             (expose-review-region-archive-session
+              (plist-put
+               session
+               :error
+               "Abandoned: Emacs or the provider process was killed before this review completed.")
+              'failed)
+
+             t))
+         sessions)))))
 
 (defun expose-review-region-line-after-position (line)
   "Return buffer position at beginning of the line after LINE."

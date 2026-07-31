@@ -25,6 +25,11 @@
   :type 'integer
   :group 'expose-continue)
 
+(defcustom expose-continue-provider-timeout-seconds 180
+  "Seconds to wait for an AI provider before failing an Expose continuation."
+  :type 'integer
+  :group 'expose-continue)
+
 (defvar expose-provider-default)
 
 (defvar-local expose-continue-overlay nil
@@ -360,7 +365,11 @@
           (expose-continue-provider))
 
          (document
-          (expose-continue-request)))
+          (expose-continue-request))
+
+         (completed nil)
+         timeout-timer
+         provider-process)
 
     (setq expose-continue-anchor
           (copy-marker
@@ -391,33 +400,72 @@
      project-root
      (length document))
 
-    (expose-transport-send-document-async
-     provider
-     document
+    (setq timeout-timer
+          (run-at-time
+           expose-continue-provider-timeout-seconds
+           nil
+           (lambda ()
+             (unless completed
+               (setq completed t)
 
-     (lambda (response-text)
-       (when (buffer-live-p source-buffer)
-         (with-current-buffer source-buffer
-           (when (and
-                  (markerp expose-continue-anchor)
-                  (marker-position expose-continue-anchor))
+               (when (and provider-process
+                          (processp provider-process)
+                          (process-live-p provider-process))
 
-             (save-excursion
-               (goto-char
-                (marker-position expose-continue-anchor))
+                 (expose-log
+                  "Continue"
+                  "Killing provider process after timeout.")
 
-               (expose-continue-show-ghost response-text))))))
+                 (delete-process provider-process))
 
-     project-root
+               (when (buffer-live-p source-buffer)
+                 (with-current-buffer source-buffer
+                   (expose-continue-clear)))
 
-     (lambda (error-data)
-       (when (buffer-live-p source-buffer)
-         (with-current-buffer source-buffer
-           (expose-continue-clear)))
+               (message
+                "Expose continuation timed out after %d seconds while using %s."
+                expose-continue-provider-timeout-seconds
+                provider)))))
 
-       (message
-        "Expose continuation failed: %s"
-        (error-message-string error-data))))
-    ))
+    (setq provider-process
+          (expose-transport-send-document-async
+           provider
+           document
+
+           (lambda (response-text)
+             (unless completed
+               (setq completed t)
+
+               (when (timerp timeout-timer)
+                 (cancel-timer timeout-timer))
+
+               (when (buffer-live-p source-buffer)
+                 (with-current-buffer source-buffer
+                   (when (and
+                          (markerp expose-continue-anchor)
+                          (marker-position expose-continue-anchor))
+
+                     (save-excursion
+                       (goto-char
+                        (marker-position expose-continue-anchor))
+
+                       (expose-continue-show-ghost response-text)))))))
+
+           project-root
+
+           (lambda (error-data)
+             (unless completed
+               (setq completed t)
+
+               (when (timerp timeout-timer)
+                 (cancel-timer timeout-timer))
+
+               (when (buffer-live-p source-buffer)
+                 (with-current-buffer source-buffer
+                   (expose-continue-clear)))
+
+               (message
+                "Expose continuation failed: %s"
+                (error-message-string error-data))))))))
 
 (provide 'expose-continue)

@@ -4,7 +4,15 @@
 ;; =========================
 ;; Core / Utilities
 ;; =========================
-(defvar-local jsoa/diag-token nil)
+(defvar-local jsoa/dashboard-render-token nil
+  "Token identifying the current dashboard render.
+
+Every async section (diagnostics, TODOs) captures this value when it starts
+and compares against it before writing results back. If the dashboard gets
+re-rendered (project switch, manual refresh) while an async scan from a
+previous render is still in flight, the token comparison fails and that
+scan's result is discarded instead of being written into now-stale buffer
+positions.")
 
 (defun jsoa/sh (cmd &optional dir)
   "Run shell CMD in DIR and return trimmed output."
@@ -79,6 +87,37 @@
 
     (seq-take (nreverse results) limit)))
 
+(defun jsoa/git-status-lines (root)
+  "Return `git status --porcelain' output for ROOT as a list of lines.
+
+Computed once per dashboard render and shared between
+`jsoa/project-info-section' and `jsoa/git-summary-section', which
+previously each fetched this same data independently."
+  (let ((default-directory root))
+    (split-string
+     (shell-command-to-string "git status --porcelain")
+     "\n" t)))
+
+(defun jsoa/git-ahead-behind (root)
+  "Return (AHEAD . BEHIND) commit counts for ROOT's upstream branch.
+
+Uses a single `git rev-list --left-right --count' call instead of two
+separate `git rev-list --count' calls."
+  (let ((default-directory root))
+    (ignore-errors
+      (let* ((output
+              (string-trim
+               (shell-command-to-string
+                "git rev-list --left-right --count @{u}...HEAD 2>/dev/null")))
+             (parts (split-string output "[ \t]+" t)))
+
+        (when (= (length parts) 2)
+          ;; `--left-right --count LEFT...RIGHT' prints "LEFT-only RIGHT-only",
+          ;; and LEFT here is @{u} (behind) and RIGHT is HEAD (ahead).
+          (cons
+           (string-to-number (nth 1 parts))
+           (string-to-number (nth 0 parts))))))))
+
 
 ;; =========================
 ;; LOC / Analysis
@@ -93,11 +132,23 @@
    ((file-exists-p (expand-file-name "requirements.txt" root)) 'python)
    (t 'generic)))
 
-(defun jsoa/render-loc-section (root)
-  "Render vertical LOC breakdown with bars."
-  (let ((data (jsoa/project-loc-by-extension root)))
-    (when data
-      (jsoa/start-section "Lines of Code")
+(defun jsoa/render-loc-breakdown-block (root data start end)
+  "Render the LOC bar breakdown for DATA between START and END.
+
+Re-applies the dashboard's left padding to the freshly-inserted content
+via `indent-rigidly': this section is filled in asynchronously, after the
+one-time whole-buffer indent in `jsoa/render-project-dashboard' has already
+run, so without this the bars would render flush against the left margin
+instead of aligned with the rest of the dashboard."
+
+  (let ((content-start start))
+
+    (delete-region start end)
+    (goto-char start)
+
+    (if (not data)
+
+        (insert "No data.\n\n")
 
       (let* ((prepared (jsoa/prepare-loc-breakdown data))
              (total (apply #'+ (mapcar #'cdr prepared)))
@@ -238,17 +289,12 @@
              )
            ))
 
-        (insert "\n")))))
+        (insert "\n")))
 
-(defun jsoa/project-loc-by-extension (root)
-  "Fast LOC breakdown by file extension."
-  (let ((default-directory root)
-        (table (make-hash-table :test 'equal)))
+    (indent-rigidly content-start (point) (jsoa/dashboard-left-padding))))
 
-    (dolist (line
-             (split-string
-              (shell-command-to-string
-               "rg --no-heading --line-number --color never \
+(defconst jsoa/loc-rg-command
+  "rg --no-heading --line-number --color never \
 -g '!node_modules' \
 -g '!dist' \
 -g '!build' \
@@ -258,9 +304,20 @@
 -g '!*.lock' \
 -g '!.angular/**' \
 -g '!.vscode/**' \
-'^' 2>/dev/null")
-              "\n" t))
+'^' 2>/dev/null"
+  "Shell command used to gather per-line-extension LOC counts.
 
+Matches every line of every non-ignored file just to count them by
+extension, so it scans the whole project and can be slow on anything
+non-trivial -- run asynchronously by `jsoa/render-loc-section' rather than
+blocking on `shell-command-to-string'.")
+
+(defun jsoa/parse-loc-output (output)
+  "Parse `jsoa/loc-rg-command' OUTPUT into an extension->line-count alist."
+
+  (let ((table (make-hash-table :test 'equal)))
+
+    (dolist (line (split-string output "\n" t))
       ;; line format: file:line
       (when (string-match "^\\([^:]+\\):" line)
         (let* ((file (match-string 1 line))
@@ -270,12 +327,62 @@
           (unless (member ext '("lock" "map" "log" "tmp" "cache"))
             (puthash ext (1+ (gethash ext table 0)) table)))))
 
-    ;; convert to alist
     (let (result)
       (maphash (lambda (k v)
                  (push (cons (upcase k) v) result))
                table)
       result)))
+
+(defun jsoa/project-loc-by-extension (root)
+  "Fast LOC breakdown by file extension (synchronous).
+
+Used only by the on-demand \"OTHER\" search action; the main dashboard
+render uses the async path in `jsoa/render-loc-section' instead."
+
+  (let ((default-directory root))
+    (jsoa/parse-loc-output
+     (shell-command-to-string jsoa/loc-rg-command))))
+
+(defun jsoa/render-loc-section (root)
+  "Render vertical LOC breakdown with bars (async)."
+
+  (jsoa/start-section "Lines of Code")
+
+  (let* ((dashboard-buf (current-buffer))
+         (token jsoa/dashboard-render-token)
+         (default-directory root)
+         (start (point-marker))
+         end)
+
+    (insert "Scanning...\n\n")
+    (setq end (point-marker))
+
+    (make-process
+     :name "jsoa-loc"
+     :buffer (generate-new-buffer " *jsoa-loc*")
+     :command (list shell-file-name shell-command-switch jsoa/loc-rg-command)
+     :noquery t
+     :sentinel
+     (lambda (p _event)
+       (when (memq (process-status p) '(exit signal))
+         (let ((output
+                (with-current-buffer (process-buffer p)
+                  (buffer-string))))
+           (kill-buffer (process-buffer p))
+
+           (when (and (buffer-live-p dashboard-buf)
+                      (with-current-buffer dashboard-buf
+                        (eq token jsoa/dashboard-render-token)))
+
+             (with-current-buffer dashboard-buf
+               (let ((inhibit-read-only t))
+                 (jsoa/render-loc-breakdown-block
+                  root
+                  (jsoa/parse-loc-output output)
+                  start
+                  end))))))))
+
+    t))
 
 (defun jsoa/prepare-loc-breakdown (data)
   "Sort, take top entries, and collapse the rest into OTHER."
@@ -568,7 +675,7 @@ Returns:
 
 (defun jsoa/render-python-diagnostics-block (root diagnostics pad start end)
   "Render Pyright diagnostics section in dashboard."
-  (let ((content-start (point)))
+  (let ((content-start start))
     (delete-region start end)
 
     (cond
@@ -656,7 +763,7 @@ Returns:
     (nreverse results)))
 
 (defun jsoa/render-ts-diagnostics-block (root diagnostics pad start end)
-  (let ((content-start (point)))
+  (let ((content-start start))
     (delete-region start end)
 
     (let ((errors (length diagnostics)))
@@ -878,11 +985,9 @@ Returns:
     (jsoa/start-section "Diagnostics")
 
     (let* ((dashboard-buf (current-buffer))
-           (token (gensym "ts-diag-"))
+           (token jsoa/dashboard-render-token)
            (start (point-marker))
            end)
-
-      (setq-local jsoa/diag-token token)
 
       (insert "Scanning...\n\n")
       (setq end (point-marker))
@@ -910,7 +1015,7 @@ Returns:
 
              (when (and (buffer-live-p dashboard-buf)
                         (with-current-buffer dashboard-buf
-                          (eq token jsoa/diag-token)))
+                          (eq token jsoa/dashboard-render-token)))
 
                (with-current-buffer dashboard-buf
                  (let ((inhibit-read-only t)
@@ -929,7 +1034,8 @@ Returns:
   (when (eq (jsoa/project-type root) 'python)
     (jsoa/start-section "Diagnostics")
 
-    (let ((buf (current-buffer))
+    (let ((dashboard-buf (current-buffer))
+          (token jsoa/dashboard-render-token)
           (pad (jsoa/dashboard-left-padding))
           (start (point-marker))
           end)
@@ -949,8 +1055,11 @@ Returns:
                            (buffer-string))))
              (kill-buffer (process-buffer proc))
 
-             (when (buffer-live-p buf)
-               (with-current-buffer buf
+             (when (and (buffer-live-p dashboard-buf)
+                        (with-current-buffer dashboard-buf
+                          (eq token jsoa/dashboard-render-token)))
+
+               (with-current-buffer dashboard-buf
                  (let ((inhibit-read-only t))
                    (save-excursion
                      (goto-char start)
@@ -962,8 +1071,12 @@ Returns:
        ))
     t))
 
-(defun jsoa/project-info-section (root)
-  "Render enhanced project info for ROOT."
+(defun jsoa/project-info-section (root status-lines ahead-behind)
+  "Render enhanced project info for ROOT.
+
+STATUS-LINES is the result of `jsoa/git-status-lines' and AHEAD-BEHIND the
+result of `jsoa/git-ahead-behind', both computed once by the caller and
+shared with `jsoa/git-summary-section' instead of being re-fetched here."
   (let* ((name (file-name-nondirectory (directory-file-name root)))
          (default-directory root)
 
@@ -982,23 +1095,9 @@ Returns:
                     (shell-command-to-string
                      "git rev-parse --abbrev-ref HEAD"))))
 
-         (ahead (ignore-errors
-                  (string-to-number
-                   (string-trim
-                    (shell-command-to-string
-                     "git rev-list --count @{u}..HEAD 2>/dev/null")))))
-
-         (behind (ignore-errors
-                   (string-to-number
-                    (string-trim
-                     (shell-command-to-string
-                      "git rev-list --count HEAD..@{u} 2>/dev/null")))))
-
-         (changes (length
-                   (split-string
-                    (shell-command-to-string
-                     "git status --porcelain")
-                    "\n" t)))
+         (ahead (car ahead-behind))
+         (behind (cdr ahead-behind))
+         (changes (length status-lines))
 
          ;; --- Last commit ---
          (last-commit (ignore-errors
@@ -1162,15 +1261,15 @@ Returns:
 
     (+ start-index (length actions))))
 
-(defun jsoa/git-summary-section (root)
+(defun jsoa/git-summary-section (root status-lines)
+  "Render unstaged changes and recent commits for ROOT.
+
+STATUS-LINES is `jsoa/git-status-lines' output, computed once by the
+caller and shared with `jsoa/project-info-section' instead of being
+re-fetched here."
   (let ((default-directory root))
     (when (file-directory-p (expand-file-name ".git" root))
-      (let* ((status-lines
-              (split-string
-               (shell-command-to-string "git status --porcelain=v1")
-               "\n" t))
-
-             (unstaged
+      (let* ((unstaged
               (seq-filter
                (lambda (l)
                  (and (>= (length l) 2)
@@ -1242,14 +1341,29 @@ Returns:
           (insert "\n")
           )))))
 
-(defun jsoa/todos-section (root)
-  "Render grouped TODO section for ROOT."
-  (let ((default-directory root))
-    (let* ((output
-            (shell-command-to-string
-             "rg --no-heading --line-number --color never \
--e 'TODO:' -e 'FIXME:' -e 'HACK:' -e 'NOTE:'"))
-           (lines (split-string output "\n" t)))
+(defconst jsoa/todos-rg-command
+  "rg --no-heading --line-number --color never \
+-e 'TODO:' -e 'FIXME:' -e 'HACK:' -e 'NOTE:'"
+  "Shell command used to gather TODO/FIXME/HACK/NOTE markers.
+
+Scans the whole project, so it is run asynchronously by
+`jsoa/todos-section' rather than blocking on `shell-command-to-string'.")
+
+(defun jsoa/render-todos-block (root output start end)
+  "Render the grouped TODO breakdown for OUTPUT between START and END.
+
+Re-applies the dashboard's left padding to the freshly-inserted content
+via `indent-rigidly': this section is filled in asynchronously, after the
+one-time whole-buffer indent in `jsoa/render-project-dashboard' has already
+run, so without this the TODO list would render flush against the left
+margin instead of aligned with the rest of the dashboard."
+
+  (let ((content-start start))
+
+    (delete-region start end)
+    (goto-char start)
+
+    (let ((lines (split-string output "\n" t)))
 
       (if (null lines)
           (insert (propertize "No TODOs found 🎉\n\n" 'face 'success))
@@ -1257,103 +1371,139 @@ Returns:
         ;; =========================
         ;; Parse + Group
         ;; =========================
-        (let ((groups (make-hash-table :test 'equal)))
+      (let ((groups (make-hash-table :test 'equal)))
 
-          (dolist (line lines)
-            (when (string-match "^\\([^:]+\\):\\([0-9]+\\):\\(.*\\)$" line)
-              (let* ((file (match-string 1 line))
-                     (linenum (string-to-number (match-string 2 line)))
-                     (text (string-trim (match-string 3 line))))
+        (dolist (line lines)
+          (when (string-match "^\\([^:]+\\):\\([0-9]+\\):\\(.*\\)$" line)
+            (let* ((file (match-string 1 line))
+                   (linenum (string-to-number (match-string 2 line)))
+                   (text (string-trim (match-string 3 line))))
 
-                (when (string-match "\\(TODO\\|FIXME\\|HACK\\|NOTE\\):\\s-*\\(.*\\)" text)
-                  (let* ((key (match-string 1 text))
-                         (msg (match-string 2 text)))
-                    (push (list file linenum key msg)
-                          (gethash key groups))))))
-            )
+              (when (string-match "\\(TODO\\|FIXME\\|HACK\\|NOTE\\):\\s-*\\(.*\\)" text)
+                (let* ((key (match-string 1 text))
+                       (msg (match-string 2 text)))
+                  (push (list file linenum key msg)
+                        (gethash key groups))))))
+          )
+
+        ;; =========================
+        ;; Config
+        ;; =========================
+        (let ((order '("FIXME" "TODO" "HACK" "NOTE"))
+              (faces '(("FIXME" . error)
+                       ("TODO"  . font-lock-warning-face)
+                       ("HACK"  . font-lock-constant-face)
+                       ("NOTE"  . shadow))))
 
           ;; =========================
-          ;; Config
+          ;; Render Groups
           ;; =========================
-          (let ((order '("FIXME" "TODO" "HACK" "NOTE"))
-                (faces '(("FIXME" . error)
-                         ("TODO"  . font-lock-warning-face)
-                         ("HACK"  . font-lock-constant-face)
-                         ("NOTE"  . shadow))))
+          (dolist (type order)
+            (let ((items (reverse (gethash type groups))))
+              (when items
 
-            (jsoa/start-section
-             (format "TODOs (%d)" (length lines)))
+                ;; Header
+                (let* ((icon (jsoa/todo-icon type))
+                       (count (length items))
+                       (face (cdr (assoc type faces))))
+                  (when icon
+                    (insert (propertize icon 'face face))
+                    (insert " "))
+                  (insert
+                   (propertize
+                    (format "%s (%d)\n" type count)
+                    'face face)))
 
-            ;; =========================
-            ;; Render Groups
-            ;; =========================
-            (dolist (type order)
-              (let ((items (reverse (gethash type groups))))
-                (when items
+                ;; Alignment prep
+                (let* ((labels
+                        (mapcar (lambda (it)
+                                  (format "%s:%d"
+                                          (jsoa/short-path (nth 0 it) root)
+                                          (nth 1 it)))
+                                items))
+                       (max-label (apply #'max (mapcar #'string-width labels)))
+                       (msg-width
+                        (max 20 (- jsoa/dashboard-width max-label 6))))
 
-                  ;; Header
-                  (let* ((icon (jsoa/todo-icon type))
-                         (count (length items))
-                         (face (cdr (assoc type faces))))
-                    (when icon
-                      (insert (propertize icon 'face face))
-                      (insert " "))
-                    (insert
-                     (propertize
-                      (format "%s (%d)\n" type count)
-                      'face face)))
+                  ;; Rows
+                  (cl-loop
+                   for (file line key msg) in items
+                   for label in labels
+                   do
+                   (let ((start (point))
+                         (msg (truncate-string-to-width msg msg-width nil nil t)))
 
-                  ;; Alignment prep
-                  (let* ((labels
-                          (mapcar (lambda (it)
-                                    (format "%s:%d"
-                                            (jsoa/short-path (nth 0 it) root)
-                                            (nth 1 it)))
-                                  items))
-                         (max-label (apply #'max (mapcar #'string-width labels)))
-                         (msg-width
-                          (max 20 (- jsoa/dashboard-width max-label 6))))
+                     ;; file:line button
+                     (insert label)
+                     (make-text-button
+                      start (point)
+                      'action (lambda (_)
+                                (jsoa/open-file-other-window file root line))
+                      'follow-link t
+                      'face 'link)
 
-                    ;; Rows
-                    (cl-loop
-                     for (file line key msg) in items
-                     for label in labels
-                     do
-                     (let ((start (point))
-                           (msg (truncate-string-to-width msg msg-width nil nil t)))
+                     ;; padding
+                     (insert (make-string
+                              (max 0 (- max-label (string-width label)))
+                              ?\s))
 
-                       ;; file:line button
-                       (insert label)
-                       (make-text-button
-                        start (point)
-                        'action (lambda (_)
-                                  (jsoa/open-file-other-window file root line))
-                        'follow-link t
-                        'face 'link)
+                     ;; message (dimmed slightly)
+                     (insert "  ")
+                     (let ((msg-start (point)))
+                       (insert
+                        (propertize
+                         (concat key ": ")
+                         'face (cdr (assoc type faces))))  ;; colored keyword
 
-                       ;; padding
-                       (insert (make-string
-                                (max 0 (- max-label (string-width label)))
-                                ?\s))
+                       (insert
+                        (propertize
+                         msg
+                         'face 'shadow))
+                       )
 
-                       ;; message (dimmed slightly)
-                       (insert "  ")
-                       (let ((msg-start (point)))
-                         (insert
-                          (propertize
-                           (concat key ": ")
-                           'face (cdr (assoc type faces))))  ;; colored keyword
+                     (insert "\n")))
+                  )
 
-                         (insert
-                          (propertize
-                           msg
-                           'face 'shadow))
-                         )
+                (insert "\n"))))))))
 
-                       (insert "\n")))
-                    )
+    (indent-rigidly content-start (point) (jsoa/dashboard-left-padding))))
 
-                  (insert "\n"))))))))))
+(defun jsoa/todos-section (root)
+  "Render grouped TODO section for ROOT (async)."
+
+  (jsoa/start-section "TODOs")
+
+  (let* ((dashboard-buf (current-buffer))
+         (token jsoa/dashboard-render-token)
+         (default-directory root)
+         (start (point-marker))
+         end)
+
+    (insert "Scanning...\n\n")
+    (setq end (point-marker))
+
+    (make-process
+     :name "jsoa-todos"
+     :buffer (generate-new-buffer " *jsoa-todos*")
+     :command (list shell-file-name shell-command-switch jsoa/todos-rg-command)
+     :noquery t
+     :sentinel
+     (lambda (p _event)
+       (when (memq (process-status p) '(exit signal))
+         (let ((output
+                (with-current-buffer (process-buffer p)
+                  (buffer-string))))
+           (kill-buffer (process-buffer p))
+
+           (when (and (buffer-live-p dashboard-buf)
+                      (with-current-buffer dashboard-buf
+                        (eq token jsoa/dashboard-render-token)))
+
+             (with-current-buffer dashboard-buf
+               (let ((inhibit-read-only t))
+                 (jsoa/render-todos-block root output start end))))))))
+
+    t))
 
 ;; =========================
 ;; Render Pipeline
@@ -1365,37 +1515,47 @@ Returns:
         (idx 1))
 
     (setq jsoa/dashboard-actions-map nil)
+
+    ;; Every async section (diagnostics, LOC, TODOs) captures this value and
+    ;; checks it before writing its result back, so a scan left over from a
+    ;; previous render of this same buffer becomes a safe no-op instead of
+    ;; writing into stale buffer positions.
+    (setq-local jsoa/dashboard-render-token (gensym "dash-"))
+
     (erase-buffer)
 
-    (jsoa/project-info-section root)
+    (let ((status-lines (jsoa/git-status-lines root))
+          (ahead-behind (jsoa/git-ahead-behind root)))
 
-    (jsoa/dashboard-separator)
+      (jsoa/project-info-section root status-lines ahead-behind)
 
-    (setq idx (jsoa/dashboard-actions-section root idx))
-
-    (jsoa/dashboard-separator)
-
-    (setq idx (jsoa/git-recent-files-section root idx))
-
-    (cond
-     ((eq (jsoa/project-type root) 'python)
       (jsoa/dashboard-separator)
-      (jsoa/python-diagnostics-section root))
 
-     ((memq (jsoa/project-type root) '(angular node))
+      (setq idx (jsoa/dashboard-actions-section root idx))
+
       (jsoa/dashboard-separator)
-      (jsoa/ts-diagnostics-section root)))
 
-    (jsoa/dashboard-separator)
-    (jsoa/render-loc-section root)
+      (setq idx (jsoa/git-recent-files-section root idx))
 
-    (jsoa/dashboard-separator)
+      (cond
+       ((eq (jsoa/project-type root) 'python)
+        (jsoa/dashboard-separator)
+        (jsoa/python-diagnostics-section root))
 
-    (jsoa/git-summary-section root)
+       ((memq (jsoa/project-type root) '(angular node))
+        (jsoa/dashboard-separator)
+        (jsoa/ts-diagnostics-section root)))
 
-    (jsoa/dashboard-separator)
+      (jsoa/dashboard-separator)
+      (jsoa/render-loc-section root)
 
-    (jsoa/todos-section root)
+      (jsoa/dashboard-separator)
+
+      (jsoa/git-summary-section root status-lines)
+
+      (jsoa/dashboard-separator)
+
+      (jsoa/todos-section root))
 
     ;; Center everything once
     (indent-rigidly (point-min) (point)

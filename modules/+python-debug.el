@@ -20,7 +20,7 @@ For pyenv or direnv projects, this will normally remain `python'."
   :type 'string
   :group 'js/python-debug)
 
-(defcustom js/python-debug-server-address "127.0.0.1:8000"
+(defcustom js/python-debug-server-address "127.0.0.1:8086"
   "Address passed to Django's runserver command."
   :type 'string
   :group 'js/python-debug)
@@ -280,11 +280,11 @@ Attach to an existing debugpy server when
   "Disconnect CONN without terminating its debuggee."
   (when (and conn (jsonrpc-running-p conn))
     (dape--with-request
-     (dape-request conn
-                   :disconnect
-                   '(:restart :json-false
-                     :terminateDebuggee :json-false))
-     (dape--shutdown conn))))
+        (dape-request conn
+                      :disconnect
+                      '(:restart :json-false
+                        :terminateDebuggee :json-false))
+      (dape--shutdown conn))))
 
 (defun js/python-debug-stop ()
   "Stop the current Dape session.

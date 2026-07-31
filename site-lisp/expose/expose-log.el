@@ -9,6 +9,16 @@
   :type 'boolean
   :group 'expose-log)
 
+(defcustom expose-log-max-size 2000000
+  "Maximum size in characters of the Expose log buffer.
+
+Once exceeded, the oldest log lines are trimmed. Kept generous by default
+since this buffer is the main way to see what Expose actually did (provider
+requests, timeouts, failures) across a long-running session. Set to nil to
+disable trimming entirely."
+  :type '(choice integer (const :tag "No limit" nil))
+  :group 'expose-log)
+
 (defconst expose-log-buffer-name
   "*EXPOSE Log*")
 
@@ -20,9 +30,36 @@
 
     (with-current-buffer buffer
       (unless (derived-mode-p 'special-mode)
-        (special-mode)))
+        (special-mode)
+
+        ;; This buffer is append-only log output; nobody undoes it, so
+        ;; tracking undo history for it is pure waste that would otherwise
+        ;; grow right alongside the text itself.
+        (setq buffer-undo-list t)))
 
     buffer))
+
+(defun expose-log-trim-buffer ()
+  "Trim the current Expose log buffer to `expose-log-max-size'.
+
+Trims down to 80% of the limit rather than exactly the limit, so trimming
+does not have to run again on almost every subsequent log call."
+
+  (when (and expose-log-max-size
+             (> (buffer-size) expose-log-max-size))
+
+    (save-excursion
+      (goto-char
+       (max
+        (point-min)
+        (-
+         (point-max)
+         (truncate
+          (* expose-log-max-size 0.8)))))
+
+      (beginning-of-line)
+
+      (delete-region (point-min) (point)))))
 
 (defun expose-log (component fmt &rest args)
   "Append a log message for COMPONENT using FMT and ARGS."
@@ -46,7 +83,9 @@
         (insert
          (apply #'format fmt args))
 
-        (insert "\n")))))
+        (insert "\n")
+
+        (expose-log-trim-buffer)))))
 
 (defun expose-log-open ()
   "Open the EXPOSE log buffer."

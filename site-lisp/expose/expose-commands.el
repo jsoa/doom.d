@@ -36,6 +36,87 @@
    default-directory))
 
 
+(defun expose-commands-relative-file (project-root)
+  "Return current buffer file relative to PROJECT-ROOT, or the buffer name."
+
+  (if buffer-file-name
+
+      (file-relative-name
+       buffer-file-name
+       project-root)
+
+    (buffer-name)))
+
+
+(defun expose-commands-line-blank-p ()
+  "Return non-nil when the current line is blank."
+
+  (string-empty-p
+   (string-trim
+    (buffer-substring-no-properties
+     (line-beginning-position)
+     (line-end-position)))))
+
+
+(defun expose-commands-target-line-text (target-position)
+  "Return source line text at TARGET-POSITION."
+
+  (save-excursion
+    (goto-char target-position)
+
+    (string-trim
+     (buffer-substring-no-properties
+      (line-beginning-position)
+      (line-end-position)))))
+
+
+(defun expose-commands-target-line-number (target-position)
+  "Return line number for TARGET-POSITION."
+
+  (line-number-at-pos target-position))
+
+
+(defun expose-commands-context-around (target-position context-lines)
+  "Return CONTEXT-LINES of source around TARGET-POSITION."
+
+  (save-excursion
+    (goto-char target-position)
+
+    (let* ((target-line
+            (line-number-at-pos target-position))
+
+           (start-line
+            (max
+             1
+             (- target-line
+                context-lines)))
+
+           (end-line
+            (min
+             (line-number-at-pos
+              (point-max))
+             (+ target-line
+                context-lines)))
+
+           start
+           end)
+
+      (goto-char (point-min))
+      (forward-line
+       (1- start-line))
+      (setq start
+            (point))
+
+      (goto-char (point-min))
+      (forward-line end-line)
+      (setq end
+            (point))
+
+      (buffer-substring-no-properties
+       start
+       end))))
+
+
 (defun expose-commands-view-body-text (view)
   "Return display body text from VIEW."
 
@@ -145,6 +226,82 @@ LABEL is used for user-facing status messages."
     (set-marker marker nil)))
 
 ;;; ---------------------------------------------------------------------------
+;;; Timeout-aware transport
+;;; ---------------------------------------------------------------------------
+
+(defcustom expose-commands-provider-timeout-seconds 180
+  "Seconds to wait for an AI provider before failing an Expose command."
+  :type 'integer
+  :group 'expose)
+
+(defun expose-commands-send-document-async
+    (label provider document project-root success-callback error-callback)
+  "Send DOCUMENT to PROVIDER for LABEL with a client-side timeout.
+
+Calls SUCCESS-CALLBACK with response text on success, or ERROR-CALLBACK with
+a human-readable message string on failure or timeout.
+
+If the provider does not respond within
+`expose-commands-provider-timeout-seconds', the underlying provider process
+is terminated instead of being left to run in the background indefinitely."
+
+  (let ((completed nil)
+        timeout-timer
+        provider-process)
+
+    (setq timeout-timer
+          (run-at-time
+           expose-commands-provider-timeout-seconds
+           nil
+           (lambda ()
+             (unless completed
+               (setq completed t)
+
+               (when (and provider-process
+                          (processp provider-process)
+                          (process-live-p provider-process))
+
+                 (expose-log
+                  "Command"
+                  "Killing provider process for %s after timeout."
+                  label)
+
+                 (delete-process provider-process))
+
+               (funcall
+                error-callback
+                (format
+                 "AI provider timed out after %d seconds while using %s."
+                 expose-commands-provider-timeout-seconds
+                 provider))))))
+
+    (setq provider-process
+          (expose-transport-send-document-async
+           provider
+           document
+
+           (lambda (response-text)
+             (unless completed
+               (setq completed t)
+
+               (when (timerp timeout-timer)
+                 (cancel-timer timeout-timer))
+
+               (funcall success-callback response-text)))
+
+           project-root
+
+           (lambda (error-data)
+             (unless completed
+               (setq completed t)
+
+               (when (timerp timeout-timer)
+                 (cancel-timer timeout-timer))
+
+               (funcall error-callback
+                        (error-message-string error-data))))))))
+
+;;; ---------------------------------------------------------------------------
 ;;; Code Comment
 ;;; ---------------------------------------------------------------------------
 
@@ -152,41 +309,6 @@ LABEL is used for user-facing status messages."
   "Number of lines of context to send for generated code comments."
   :type 'integer
   :group 'expose)
-
-(defun expose-code-comment-project-root ()
-  "Return current project root or `default-directory'."
-
-  (or
-   (when-let ((project
-               (project-current nil)))
-
-     (file-name-as-directory
-      (project-root project)))
-
-   default-directory))
-
-
-(defun expose-code-comment-relative-file ()
-  "Return current buffer file relative to project root."
-
-  (if buffer-file-name
-
-      (file-relative-name
-       buffer-file-name
-       (expose-code-comment-project-root))
-
-    (buffer-name)))
-
-
-(defun expose-code-comment-line-blank-p ()
-  "Return non-nil when current line is blank."
-
-  (string-empty-p
-   (string-trim
-    (buffer-substring-no-properties
-     (line-beginning-position)
-     (line-end-position)))))
-
 
 (defun expose-code-comment-target-position ()
   "Return position of code to comment.
@@ -197,91 +319,34 @@ the current line."
   (save-excursion
     (beginning-of-line)
 
-    (when (expose-code-comment-line-blank-p)
+    (when (expose-commands-line-blank-p)
 
       (while (and
               (not
                (eobp))
-              (expose-code-comment-line-blank-p))
+              (expose-commands-line-blank-p))
 
         (forward-line 1)))
 
     (point)))
 
 
-(defun expose-code-comment-context (target-position)
-  "Return source context around TARGET-POSITION."
-
-  (save-excursion
-    (goto-char target-position)
-
-    (let* ((target-line
-            (line-number-at-pos target-position))
-
-           (start-line
-            (max
-             1
-             (- target-line
-                expose-code-comment-context-lines)))
-
-           (end-line
-            (min
-             (line-number-at-pos
-              (point-max))
-             (+ target-line
-                expose-code-comment-context-lines)))
-
-           start
-           end)
-
-      (goto-char (point-min))
-      (forward-line
-       (1- start-line))
-      (setq start
-            (point))
-
-      (goto-char (point-min))
-      (forward-line end-line)
-      (setq end
-            (point))
-
-      (buffer-substring-no-properties
-       start
-       end))))
-
-
-(defun expose-code-comment-target-line-text (target-position)
-  "Return source line text at TARGET-POSITION."
-
-  (save-excursion
-    (goto-char target-position)
-
-    (string-trim
-     (buffer-substring-no-properties
-      (line-beginning-position)
-      (line-end-position)))))
-
-
-(defun expose-code-comment-target-line-number (target-position)
-  "Return line number for TARGET-POSITION."
-
-  (line-number-at-pos target-position))
-
-
-(defun expose-code-comment-request (target-position)
-  "Build AI request for a code comment at TARGET-POSITION."
+(defun expose-code-comment-request (target-position project-root)
+  "Build AI request for a code comment at TARGET-POSITION in PROJECT-ROOT."
 
   (let* ((file
-          (expose-code-comment-relative-file))
+          (expose-commands-relative-file project-root))
 
          (line-number
-          (expose-code-comment-target-line-number target-position))
+          (expose-commands-target-line-number target-position))
 
          (target-line
-          (expose-code-comment-target-line-text target-position))
+          (expose-commands-target-line-text target-position))
 
          (context
-          (expose-code-comment-context target-position)))
+          (expose-commands-context-around
+           target-position
+           expose-code-comment-context-lines)))
 
     (format
      "<expose-code-comment-request>
@@ -435,98 +500,6 @@ TARGET-POSITION is used to copy indentation."
   :type 'integer
   :group 'expose)
 
-(defun expose-docstring-project-root ()
-  "Return current project root or `default-directory'."
-
-  (or
-   (when-let ((project
-               (project-current nil)))
-
-     (file-name-as-directory
-      (project-root project)))
-
-   default-directory))
-
-
-(defun expose-docstring-relative-file ()
-  "Return current buffer file relative to project root."
-
-  (if buffer-file-name
-
-      (file-relative-name
-       buffer-file-name
-       (expose-docstring-project-root))
-
-    (buffer-name)))
-
-(defun expose-docstring-context (target-position)
-  "Return source context around TARGET-POSITION."
-
-  (save-excursion
-    (goto-char target-position)
-
-    (let* ((target-line
-            (line-number-at-pos target-position))
-
-           (start-line
-            (max
-             1
-             (- target-line
-                expose-docstring-context-lines)))
-
-           (end-line
-            (min
-             (line-number-at-pos
-              (point-max))
-             (+ target-line
-                expose-docstring-context-lines)))
-
-           start
-           end)
-
-      (goto-char (point-min))
-      (forward-line
-       (1- start-line))
-      (setq start
-            (point))
-
-      (goto-char (point-min))
-      (forward-line end-line)
-      (setq end
-            (point))
-
-      (buffer-substring-no-properties
-       start
-       end))))
-
-
-(defun expose-docstring-target-line-text (target-position)
-  "Return source line text at TARGET-POSITION."
-
-  (save-excursion
-    (goto-char target-position)
-
-    (string-trim
-     (buffer-substring-no-properties
-      (line-beginning-position)
-      (line-end-position)))))
-
-
-(defun expose-docstring-target-line-number (target-position)
-  "Return line number for TARGET-POSITION."
-
-  (line-number-at-pos target-position))
-
-(defun expose-docstring-line-blank-p ()
-  "Return non-nil when current line is blank."
-
-  (string-empty-p
-   (string-trim
-    (buffer-substring-no-properties
-     (line-beginning-position)
-     (line-end-position)))))
-
-
 (defun expose-docstring-target-position ()
   "Return position whose surrounding code should be documented.
 
@@ -536,12 +509,12 @@ Otherwise use the current line."
   (save-excursion
     (beginning-of-line)
 
-    (when (expose-docstring-line-blank-p)
+    (when (expose-commands-line-blank-p)
 
       (while (and
               (not
                (eobp))
-              (expose-docstring-line-blank-p))
+              (expose-commands-line-blank-p))
 
         (forward-line 1)))
 
@@ -555,7 +528,7 @@ Otherwise use the current line."
 If point is on a blank line, insert at point's line. If point is on code,
 insert under TARGET-POSITION."
 
-  (if (expose-docstring-line-blank-p)
+  (if (expose-commands-line-blank-p)
 
       (line-beginning-position)
 
@@ -564,20 +537,22 @@ insert under TARGET-POSITION."
       (forward-line 1)
       (line-beginning-position))))
 
-(defun expose-docstring-request (target-position)
-  "Build AI request for a docstring at TARGET-POSITION."
+(defun expose-docstring-request (target-position project-root)
+  "Build AI request for a docstring at TARGET-POSITION in PROJECT-ROOT."
 
   (let* ((file
-          (expose-docstring-relative-file))
+          (expose-commands-relative-file project-root))
 
          (line-number
-          (expose-docstring-target-line-number target-position))
+          (expose-commands-target-line-number target-position))
 
          (target-line
-          (expose-docstring-target-line-text target-position))
+          (expose-commands-target-line-text target-position))
 
          (context
-          (expose-docstring-context target-position)))
+          (expose-commands-context-around
+           target-position
+           expose-docstring-context-lines)))
 
     (format
      "<expose-docstring-request>
@@ -639,16 +614,6 @@ insert under TARGET-POSITION."
     (string-trim text)))
 
 
-(defun expose-docstring-current-line-blank-p ()
-  "Return non-nil when the current line is blank."
-
-  (string-empty-p
-   (string-trim
-    (buffer-substring-no-properties
-     (line-beginning-position)
-     (line-end-position)))))
-
-
 (defun expose-docstring-existing-line-indent-string ()
   "Return indentation string from the current line without modifying it."
 
@@ -698,7 +663,7 @@ indentation should be without deleting any real code."
   (save-excursion
     (goto-char position)
 
-    (if (expose-docstring-current-line-blank-p)
+    (if (expose-commands-line-blank-p)
 
         (expose-docstring-blank-line-indent-string)
 
@@ -887,7 +852,7 @@ TARGET-POSITION is cleared after insertion."
           (current-buffer))
 
          (project-root
-          (expose-code-comment-project-root))
+          (expose-commands-project-root-or-default))
 
          (target-position
           (copy-marker
@@ -903,19 +868,21 @@ TARGET-POSITION is cleared after insertion."
           expose-provider-default)
 
          (document
-          (expose-code-comment-request target-position)))
+          (expose-code-comment-request target-position project-root)))
 
     (message "Expose code comment: generating...")
 
     (expose-log
      "Commands"
      "Generating code comment for %s using %s."
-     (expose-code-comment-relative-file)
+     (expose-commands-relative-file project-root)
      provider)
 
-    (expose-transport-send-document-async
+    (expose-commands-send-document-async
+     "code comment"
      provider
      document
+     project-root
 
      (lambda (response-text)
 
@@ -925,15 +892,13 @@ TARGET-POSITION is cleared after insertion."
         target-position
         response-text))
 
-     project-root
-
-     (lambda (error-data)
+     (lambda (error-message)
        (set-marker insert-marker nil)
        (set-marker target-position nil)
 
        (message
         "Expose code comment failed: %s"
-        (error-message-string error-data))))))
+        error-message)))))
 
 ;;;###autoload
 (defun expose-run-docstring ()
@@ -948,7 +913,7 @@ TARGET-POSITION is cleared after insertion."
           (current-buffer))
 
          (project-root
-          (expose-docstring-project-root))
+          (expose-commands-project-root-or-default))
 
          (target-position
           (copy-marker
@@ -964,19 +929,21 @@ TARGET-POSITION is cleared after insertion."
           expose-provider-default)
 
          (document
-          (expose-docstring-request target-position)))
+          (expose-docstring-request target-position project-root)))
 
     (message "Expose docstring: generating...")
 
     (expose-log
      "Commands"
      "Generating docstring for %s using %s."
-     (expose-docstring-relative-file)
+     (expose-commands-relative-file project-root)
      provider)
 
-    (expose-transport-send-document-async
+    (expose-commands-send-document-async
+     "docstring"
      provider
      document
+     project-root
 
      (lambda (response-text)
 
@@ -986,15 +953,13 @@ TARGET-POSITION is cleared after insertion."
         target-position
         response-text))
 
-     project-root
-
-     (lambda (error-data)
+     (lambda (error-message)
        (set-marker insert-marker nil)
        (set-marker target-position nil)
 
        (message
         "Expose docstring failed: %s"
-        (error-message-string error-data))))))
+        error-message)))))
 
 (defun expose-run-summary ()
   "Run the registered Expose summary action."
@@ -1120,9 +1085,12 @@ TARGET-POSITION is cleared after insertion."
    type
    expose-provider-default)
 
-  (expose-transport-send-async
-   type
+  (expose-commands-send-document-async
+   (symbol-name type)
    expose-provider-default
+   (expose-document-build type)
+   nil
+
    (lambda (response)
 
      (expose-log
@@ -1138,7 +1106,19 @@ TARGET-POSITION is cleared after insertion."
      (expose-log
       "Command"
       "Async action %s completed."
-      type))))
+      type))
+
+   (lambda (error-message)
+
+     (expose-log
+      "Command"
+      "Async action %s failed: %s"
+      type
+      error-message)
+
+     (funcall
+      callback
+      (expose-action-view title error-message)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Action Commands

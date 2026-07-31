@@ -274,20 +274,6 @@ characters."
       document))))
 
 
-(defun expose-transport-send-async (type provider callback)
-  "Build request document for TYPE and send it to PROVIDER asynchronously.
-
-CALLBACK receives normalized provider response text."
-
-  (let ((document
-         (expose-document-build type)))
-
-    (expose-transport-send-document-async
-     provider
-     document
-     callback
-     default-directory)))
-
 ;;; ---------------------------------------------------------------------------
 ;;; Raw Document Transport
 ;;; ---------------------------------------------------------------------------

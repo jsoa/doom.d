@@ -99,8 +99,12 @@ but not restarting Emacs.")
 
         (if expose-history-entries
 
+            ;; `expose-history-entries' is already newest-first, so entries
+            ;; render in that same order: opening the history buffer should
+            ;; show the most recent popup at the top, not require scrolling
+            ;; to the bottom to find it.
             (dolist (entry
-                     (reverse expose-history-entries))
+                     expose-history-entries)
               (unless (= (point-min)
                          (point-max))
                 (insert "\n\n"))

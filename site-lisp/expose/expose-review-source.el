@@ -252,15 +252,77 @@ Use `right-fringe' to avoid colliding with Git gutter/fringe indicators."
      (expand-file-name
       (project-root project)))))
 
-(defun expose-review-source-current-branch (project-root)
-  "Return current branch for PROJECT-ROOT."
+(defun expose-review-source-git-dir (project-root)
+  "Return the resolved .git directory for PROJECT-ROOT, or nil.
 
-  (string-trim
-   (expose-review-context-call-git
-    project-root
-    "rev-parse"
-    "--abbrev-ref"
-    "HEAD")))
+Handles both a plain repository (.git is a directory) and a worktree or
+submodule (.git is a file pointing elsewhere), without spawning a git
+process."
+
+  (let ((dotgit
+         (expand-file-name ".git" project-root)))
+
+    (cond
+     ((file-directory-p dotgit)
+      dotgit)
+
+     ((file-readable-p dotgit)
+      (with-temp-buffer
+        (insert-file-contents dotgit)
+
+        (let ((content
+               (string-trim (buffer-string))))
+
+          (when (string-match "\\`gitdir: \\(.+\\)\\'" content)
+
+            (let ((gitdir
+                   (match-string 1 content)))
+
+              (if (file-name-absolute-p gitdir)
+                  gitdir
+                (expand-file-name gitdir project-root))))))))))
+
+(defun expose-review-source-current-branch (project-root)
+  "Return current branch for PROJECT-ROOT.
+
+This is looked up on every `find-file' via
+`expose-review-source-global-mode', so it reads git's HEAD file directly
+instead of spawning `git rev-parse' -- always fresh (unlike the git-path
+caches elsewhere in Expose, the branch can legitimately change mid-session
+via an external checkout, so this must never return stale data), just
+without the subprocess cost on the common path. Falls back to the
+subprocess-based lookup if the HEAD file cannot be read or parsed."
+
+  (or
+   (when-let* ((git-dir
+                (expose-review-source-git-dir project-root))
+
+               (head-file
+                (expand-file-name "HEAD" git-dir))
+
+               (readable
+                (file-readable-p head-file)))
+
+     (with-temp-buffer
+       (insert-file-contents head-file)
+
+       (let ((content
+              (string-trim (buffer-string))))
+
+         (cond
+          ((string-match "\\`ref: refs/heads/\\(.+\\)\\'" content)
+           (match-string 1 content))
+
+          ;; Detached HEAD: `git rev-parse --abbrev-ref HEAD' reports "HEAD".
+          ((string-match-p "\\`[0-9a-fA-F]\\{7,40\\}\\'" content)
+           "HEAD")))))
+
+   (string-trim
+    (expose-review-context-call-git
+     project-root
+     "rev-parse"
+     "--abbrev-ref"
+     "HEAD"))))
 
 (defun expose-review-source-active-session ()
   "Return active review session for the current buffer, or nil."

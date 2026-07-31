@@ -520,8 +520,12 @@ because those are code, not embedded secrets."
 
   (let ((case-fold-search t)
         (regexp
+         ;; The trailing ",?" tolerates a JSON-style trailing comma after a
+         ;; quoted value (e.g. "db_password": "x",) -- without it, any key
+         ;; that isn't the last one in a JSON object fails to match at all,
+         ;; since the line doesn't end right after the closing quote.
          (format
-          "^\\([[:space:]]*\\(?:export[[:space:]]+\\)?[\"']?[A-Za-z0-9_.-]*%s[A-Za-z0-9_.-]*[\"']?[[:space:]]*[:=][[:space:]]*['\"]?\\)\\([^'\"#[:space:]<>]+\\)\\(['\"]?[[:space:]]*\\(?:#.*\\)?\\)$"
+          "^\\([[:space:]]*\\(?:export[[:space:]]+\\)?[\"']?[A-Za-z0-9_.-]*%s[A-Za-z0-9_.-]*[\"']?[[:space:]]*[:=][[:space:]]*['\"]?\\)\\([^'\"#[:space:]<>]+\\)\\(['\"]?,?[[:space:]]*\\(?:#.*\\)?\\)$"
           expose-redact-assignment-key-regexp)))
 
     (if (not

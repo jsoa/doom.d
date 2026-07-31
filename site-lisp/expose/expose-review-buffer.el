@@ -835,7 +835,14 @@
     (nreverse lines)))
 
 (defun expose-review-buffer-item-file-path (item)
-  "Return absolute file path for ITEM."
+  "Return absolute file path for ITEM, or nil if it escapes the project.
+
+ITEM's :file value comes directly from the AI provider's response and is
+never validated on the way in, so this resolves it defensively: a path that
+escapes PROJECT-ROOT (e.g. via \"../\" traversal, or an absolute path,
+whether from a hallucinated response or prompt injection in reviewed code)
+is rejected here rather than being handed to `find-file' or
+`insert-file-contents'."
 
   (when-let* ((session
                expose-review-buffer-session)
@@ -844,9 +851,13 @@
                (plist-get session :project-root))
 
               (file
-               (plist-get item :file)))
+               (plist-get item :file))
 
-    (expand-file-name file project-root)))
+              (resolved
+               (expand-file-name file project-root)))
+
+    (when (file-in-directory-p resolved project-root)
+      resolved)))
 
 (defun expose-review-buffer-search-file-line-content (path content)
   "Return line number where CONTENT appears in PATH."
@@ -1356,22 +1367,18 @@
     (unless item
       (user-error "No review item on this line"))
 
-    (let* ((session
-            expose-review-buffer-session)
-
-           (project-root
-            (plist-get session :project-root))
-
-           (file
-            (plist-get item :file))
-
-           (line
+    (let* ((line
             (or
              (plist-get item :line-start)
              1))
 
            (path
-            (expand-file-name file project-root)))
+            (expose-review-buffer-item-file-path item)))
+
+      (unless path
+        (user-error
+         "Review item file is missing or outside the project: %s"
+         (plist-get item :file)))
 
       (unless (file-exists-p path)
         (user-error "File does not exist: %s" path))

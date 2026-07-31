@@ -185,11 +185,11 @@ Use `right-fringe' to avoid colliding with Git gutter/fringe indicators."
              (not
               (string-empty-p
                (string-trim
-                (format "%s" value))))))
+                (format "%s" value)))))
 
-  (expose-review-source-insert-label label)
-  (expose-review-source-insert-filled-text value)
-  (insert "\n"))
+    (expose-review-source-insert-label label)
+    (expose-review-source-insert-filled-text value)
+    (insert "\n")))
 
 (defun expose-review-source-fontify-diff (text)
   "Return TEXT fontified as a unified diff."
@@ -338,28 +338,6 @@ Use `right-fringe' to avoid colliding with Git gutter/fringe indicators."
    (t
     fallback)))
 
-(defun expose-review-source-item-raw-line-start (item)
-  "Return ITEM's model-provided start line."
-
-  (max
-   1
-   (expose-review-source-number
-    (or
-     (plist-get item :line-start)
-     (plist-get item :line_start))
-    1)))
-
-(defun expose-review-source-item-raw-line-end (item)
-  "Return ITEM's model-provided end line."
-
-  (max
-   (expose-review-source-item-raw-line-start item)
-   (expose-review-source-number
-    (or
-     (plist-get item :line-end)
-     (plist-get item :line_end))
-    (expose-review-source-item-raw-line-start item))))
-
 (defun expose-review-source-item-line-start (item)
   "Return review comment start line for ITEM."
 
@@ -503,12 +481,12 @@ Return a cons cell of match beginning and end, or nil."
           (max
            1
            (-
-            (expose-review-source-item-raw-line-start item)
+            (expose-review-source-item-line-start item)
             25)))
 
          (line-end
           (+
-           (expose-review-source-item-raw-line-end item)
+           (expose-review-source-item-line-end item)
            25))
 
          (start
@@ -572,68 +550,6 @@ Return a cons cell of match beginning and end, or nil."
        (apply #'min found-lines)
        (apply #'max found-lines)))))
 
-(defun expose-review-source-patch-new-range (patch)
-  "Return new-file line range from unified PATCH hunk metadata.
-
-The result is a cons cell like (START . END), or nil when PATCH does
-not contain numeric unified-diff hunk metadata."
-
-  (when (and
-         (stringp patch)
-         (not
-          (string-empty-p patch)))
-
-    (catch 'range
-      (dolist (line
-               (split-string patch "\n" t))
-
-        ;; Examples:
-        ;; @@ -112,3 +121,3 @@
-        ;; @@ -112 +121 @@
-        (when (string-match
-               "^@@[[:space:]]+-[0-9]+\\(?:,[0-9]+\\)?[[:space:]]+\\+\\([0-9]+\\)\\(?:,\\([0-9]+\\)\\)?[[:space:]]+@@"
-               line)
-
-          (let* ((start
-                  (string-to-number
-                   (match-string 1 line)))
-
-                 (raw-length
-                  (match-string 2 line))
-
-                 (length
-                  (if raw-length
-                      (string-to-number raw-length)
-                    1))
-
-                 (end
-                  (if (> length 0)
-                      (+ start
-                         (1- length))
-                    start)))
-
-            (throw 'range
-                   (cons start end))))))))
-
-(defun expose-review-source-suggestion-stored-patch-range (item)
-  "Return stored patch target range for ITEM."
-
-  (let* ((suggestion
-          (plist-get item :suggestion))
-
-         (line-start
-          (plist-get suggestion :patch-line-start))
-
-         (line-end
-          (plist-get suggestion :patch-line-end)))
-
-    (when (and line-start
-               line-end
-               (> line-start 0)
-               (> line-end 0))
-
-      (cons line-start line-end))))
-
 (defun expose-review-source-item-comment-line-range (item)
   "Return resolved review comment line range for ITEM.
 
@@ -644,8 +560,8 @@ line range is only a fallback."
    (expose-review-source-item-anchor-line-range item)
 
    (cons
-    (expose-review-source-item-raw-line-start item)
-    (expose-review-source-item-raw-line-end item))))
+    (expose-review-source-item-line-start item)
+    (expose-review-source-item-line-end item))))
 
 (defun expose-review-source-clear-overlays ()
   "Delete all Expose Review source overlays in the current buffer."

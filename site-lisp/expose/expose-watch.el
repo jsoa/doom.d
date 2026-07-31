@@ -459,22 +459,40 @@ Return nil when git fails."
         (when (= status 0)
           (buffer-string))))))
 
+(defvar expose-watch--git-path-cache
+  (make-hash-table :test 'equal)
+  "Cache of (PROJECT-ROOT . PATH) to resolved `git rev-parse --git-path'.
+
+This resolution is stable for the life of the Emacs session, but it is
+looked up on every `find-file' via `expose-watch-global-mode', so caching
+it avoids spawning a git process on every single file open in every
+project, most of which have never used Expose Watch at all.")
+
 (defun expose-watch-git-path (project-root path)
   "Return git-private PATH under PROJECT-ROOT."
 
-  (let ((result
-         (expose-watch-call-git
-          project-root
-          "rev-parse"
-          "--git-path"
-          path)))
+  (let ((cache-key
+         (cons project-root path)))
 
-    (unless result
-      (user-error "Not inside a Git repository"))
+    (or
+     (gethash cache-key expose-watch--git-path-cache)
 
-    (expand-file-name
-     (string-trim result)
-     project-root)))
+     (let ((result
+            (expose-watch-call-git
+             project-root
+             "rev-parse"
+             "--git-path"
+             path)))
+
+       (unless result
+         (user-error "Not inside a Git repository"))
+
+       (puthash
+        cache-key
+        (expand-file-name
+         (string-trim result)
+         project-root)
+        expose-watch--git-path-cache)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Storage

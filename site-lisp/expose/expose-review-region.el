@@ -210,29 +210,44 @@ to serialize it.")
 
     (user-error "Expose region review requires a project")))
 
+(defvar expose-review-region--store-root-cache
+  (make-hash-table :test 'equal)
+  "Cache of PROJECT-ROOT to resolved region-review store root.
+
+This resolution is stable for the life of the Emacs session, but it is
+looked up on every `find-file' via `expose-review-region-source-global-mode',
+so caching it avoids spawning a git process on every single file open in
+every project, most of which have never used Expose Region Review at all.")
+
 (defun expose-review-region-store-root (project-root)
   "Return region review store root for PROJECT-ROOT."
 
-  (let ((default-directory project-root))
+  (or
+   (gethash project-root expose-review-region--store-root-cache)
 
-    (with-temp-buffer
-      (let ((status
-             (call-process
-              "git"
-              nil
-              t
-              nil
-              "rev-parse"
-              "--git-path"
-              "expose/region-reviews")))
+   (let ((default-directory project-root))
 
-        (unless (= status 0)
-          (user-error "Expose region review requires a git repository"))
+     (with-temp-buffer
+       (let ((status
+              (call-process
+               "git"
+               nil
+               t
+               nil
+               "rev-parse"
+               "--git-path"
+               "expose/region-reviews")))
 
-        (expand-file-name
-         (string-trim
-          (buffer-string))
-         project-root)))))
+         (unless (= status 0)
+           (user-error "Expose region review requires a git repository"))
+
+         (puthash
+          project-root
+          (expand-file-name
+           (string-trim
+            (buffer-string))
+           project-root)
+          expose-review-region--store-root-cache))))))
 
 (defun expose-review-region-active-dir (project-root)
   "Return active region review directory for PROJECT-ROOT."

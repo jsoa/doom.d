@@ -4,6 +4,7 @@
 (require 'projectile)
 (require 'thingatpt)
 (require 'treesit)
+(require 'expose-redact)
 
 ;;; ---------------------------------------------------------------------------
 ;;; Tree-sitter Primitives
@@ -436,15 +437,20 @@
 
     (with-temp-buffer
 
-      (let ((default-directory root)
-            (status
-             (apply
-              #'call-process
-              "git"
-              nil
-              t
-              nil
-              args)))
+      ;; This must be `let*': with plain `let', `status' would be computed
+      ;; using the OLD `default-directory' from the enclosing scope, since
+      ;; sibling bindings in a `let' all see the pre-`let' environment. That
+      ;; would run `call-process' in whatever directory happened to be
+      ;; current when this function was called instead of ROOT.
+      (let* ((default-directory root)
+             (status
+              (apply
+               #'call-process
+               "git"
+               nil
+               t
+               nil
+               args)))
 
         (when (= status 0)
           (string-trim
@@ -463,16 +469,50 @@
 
       text)))
 
+(defun expose-context-git-status-line-paths (line)
+  "Return file paths referenced by porcelain `git status --short' LINE."
+
+  (when (string-match "\\`..[[:space:]]+\\(.*\\)\\'" line)
+    ;; Renames are rendered as "old-path -> new-path".
+    (split-string (match-string 1 line) " -> " t)))
+
+(defun expose-context-git-status-line-excluded-p (line root)
+  "Return non-nil when git status LINE references a path excluded under ROOT."
+
+  (seq-some
+   (lambda (path)
+     (expose-redact-excluded-path-p path root))
+   (expose-context-git-status-line-paths line)))
+
+(defun expose-context-filter-git-status (status root)
+  "Return STATUS with lines referencing excluded paths under ROOT removed.
+
+`git status --short' output is plain filename/status lines, not a unified
+diff or an XML-attribute-shaped path, so it is invisible to the redaction
+that strips excluded paths out of diff/XML content elsewhere. Filtering it
+here keeps excluded paths from being named at all, matching how they are
+handled everywhere else."
+
+  (when status
+    (string-join
+     (seq-remove
+      (lambda (line)
+        (expose-context-git-status-line-excluded-p line root))
+      (split-string status "\n"))
+     "\n")))
+
 (defun expose-context-git-status ()
   "Return git status for the current project."
 
   (when-let ((root
               (expose-context-git-root)))
 
-    (expose-context-call-git
-     root
-     "status"
-     "--short")))
+    (expose-context-filter-git-status
+     (expose-context-call-git
+      root
+      "status"
+      "--short")
+     root)))
 
 (defun expose-context-git-diff ()
   "Return git diff for current changes in the project."

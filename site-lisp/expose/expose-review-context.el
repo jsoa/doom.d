@@ -5,6 +5,7 @@
 (require 'seq)
 (require 'subr-x)
 (require 'expose-log)
+(require 'expose-redact)
 (require 'expose-review-store)
 (require 'json)
 
@@ -51,19 +52,6 @@ the branch whose merge-base with HEAD is newest."
     (error nil)))
 
 
-(defun expose-review-context-git-ref-exists-p (project-root ref)
-  "Return non-nil if git REF exists in PROJECT-ROOT."
-
-  (not
-   (null
-    (expose-review-context-git-string
-     project-root
-     "rev-parse"
-     "--verify"
-     "--quiet"
-     ref))))
-
-
 (defun expose-review-context-normalize-base-branch (branch)
   "Return display-friendly branch name for BRANCH."
 
@@ -103,13 +91,13 @@ the branch whose merge-base with HEAD is newest."
             (remote-ref
              (format "origin/%s" branch)))
 
-        (when (expose-review-context-git-ref-exists-p
+        (when (expose-review-context-ref-exists-p
                project-root
                local-ref)
 
           (push local-ref refs))
 
-        (when (expose-review-context-git-ref-exists-p
+        (when (expose-review-context-ref-exists-p
                project-root
                remote-ref)
 
@@ -970,34 +958,45 @@ Return a plist containing :status, :stdout, and :stderr."
       "--name-only")))))
 
 (defun expose-review-context-read-changed-file (project-root relative-path max-length)
-  "Read RELATIVE-PATH from PROJECT-ROOT as tracked changed file context."
+  "Read RELATIVE-PATH from PROJECT-ROOT as tracked changed file context.
 
-  (let ((path
-         (expand-file-name relative-path project-root)))
+Returns nil, and logs the exclusion, when RELATIVE-PATH matches
+`expose-redact-excluded-path-regexps' -- such files must never be read into
+a review request in the first place, since nothing downstream recognizes
+this content's rendered shape well enough to strip it back out."
 
-    (when (and
-           (file-readable-p path)
-           (file-regular-p path)
-           (expose-review-context-reviewable-file-p relative-path)
-           (not
-            (expose-review-context-file-binary-p path)))
+  (if (expose-redact-excluded-path-p relative-path project-root)
 
-      (let* ((size
-              (expose-review-context-file-size path))
+      (progn
+        (expose-redact-log-excluded-path relative-path project-root)
+        nil)
 
-             (content
-              (expose-review-context-read-limited-file
-               path
-               max-length))
+    (let ((path
+           (expand-file-name relative-path project-root)))
 
-             (truncated
-              (> size max-length)))
+      (when (and
+             (file-readable-p path)
+             (file-regular-p path)
+             (expose-review-context-reviewable-file-p relative-path)
+             (not
+              (expose-review-context-file-binary-p path)))
 
-        (list
-         :file relative-path
-         :size size
-         :truncated truncated
-         :content content)))))
+        (let* ((size
+                (expose-review-context-file-size path))
+
+               (content
+                (expose-review-context-read-limited-file
+                 path
+                 max-length))
+
+               (truncated
+                (> size max-length)))
+
+          (list
+           :file relative-path
+           :size size
+           :truncated truncated
+           :content content))))))
 
 (defun expose-review-context-changed-file-contents (project-root base-branch)
   "Return bounded tracked changed file contents for PROJECT-ROOT."
@@ -1101,33 +1100,42 @@ Return a plist containing :status, :stdout, and :stderr."
     (buffer-string)))
 
 (defun expose-review-context-read-untracked-file (project-root relative-path max-length)
-  "Read RELATIVE-PATH from PROJECT-ROOT as untracked review context."
+  "Read RELATIVE-PATH from PROJECT-ROOT as untracked review context.
 
-  (let ((path
-         (expand-file-name relative-path project-root)))
+Returns nil, and logs the exclusion, when RELATIVE-PATH matches
+`expose-redact-excluded-path-regexps'."
 
-    (when (and
-           (file-readable-p path)
-           (file-regular-p path)
-           (not
-            (expose-review-context-file-binary-p path)))
+  (if (expose-redact-excluded-path-p relative-path project-root)
 
-      (let* ((size
-              (expose-review-context-file-size path))
+      (progn
+        (expose-redact-log-excluded-path relative-path project-root)
+        nil)
 
-             (content
-              (expose-review-context-read-limited-file
-               path
-               max-length))
+    (let ((path
+           (expand-file-name relative-path project-root)))
 
-             (truncated
-              (> size max-length)))
+      (when (and
+             (file-readable-p path)
+             (file-regular-p path)
+             (not
+              (expose-review-context-file-binary-p path)))
 
-        (list
-         :file relative-path
-         :size size
-         :truncated truncated
-         :content content)))))
+        (let* ((size
+                (expose-review-context-file-size path))
+
+               (content
+                (expose-review-context-read-limited-file
+                 path
+                 max-length))
+
+               (truncated
+                (> size max-length)))
+
+          (list
+           :file relative-path
+           :size size
+           :truncated truncated
+           :content content))))))
 
 (defun expose-review-context-untracked-file-contents (project-root)
   "Return bounded untracked file contents for PROJECT-ROOT."

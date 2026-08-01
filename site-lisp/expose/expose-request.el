@@ -8,13 +8,25 @@
   :type 'string
   :group 'expose)
 
+(defcustom expose-request-raw-output-instruction
+  "Return only the raw, ready-to-insert text. Do not return Markdown. Do not add a heading or title. Do not wrap the response in code fences. Do not explain your reasoning or add commentary."
+  "Instruction appended to Expose requests whose result is inserted directly
+into a buffer (e.g. a commit message) rather than displayed as Markdown in a
+popup."
+  :type 'string
+  :group 'expose)
+
 ;;; ---------------------------------------------------------------------------
 ;;; Request
 ;;; ---------------------------------------------------------------------------
 
 
-(defun expose-request-create (type document-format instruction context)
-  "Return a request object."
+(defun expose-request-create (type document-format instruction context &optional raw)
+  "Return a request object.
+
+When RAW is non-nil, append `expose-request-raw-output-instruction' instead
+of `expose-request-output-instruction', for requests whose result is
+inserted directly into a buffer rather than displayed as Markdown."
 
   (list
    :type type
@@ -23,7 +35,9 @@
    (string-join
     (list
      instruction
-     expose-request-output-instruction)
+     (if raw
+         expose-request-raw-output-instruction
+       expose-request-output-instruction))
     "\n\n")
    :context context))
 
@@ -473,7 +487,9 @@
     :language
     :file
     :focus
-    :scope)))
+    :scope)
+
+   t))
 
 (defun expose-request-changelog (context)
   "Build a changelog request."

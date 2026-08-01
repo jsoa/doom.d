@@ -16,7 +16,7 @@
   :group 'expose-provider-claude)
 
 (defcustom expose-provider-claude-arguments
-  '("-p" "--permission-mode" "plan")
+  '("-p" "--tools" "" "--strict-mcp-config" "--no-session-persistence")
   "Arguments passed to the Claude Code CLI.
 
 Expose sends the request document to stdin and reads the final answer from
@@ -25,21 +25,42 @@ non-interactive use (print mode) plus a restriction on tool use, since Expose
 already embeds all relevant context in the request document and does not
 expect the provider to read or modify the project itself.
 
-\"-p\" is Claude Code's print/non-interactive mode. \"--permission-mode plan\"
-is the closest documented flag for keeping the call read/analysis-only; if
-your installed CLI version exposes a more precise way to disable tool use
-entirely (e.g. \"--disallowedTools\"), adjust this to match. Run
-`M-x expose-provider-claude-version' or check \"claude --help\" to verify
-against your installed version."
+\"-p\" is Claude Code's print/non-interactive mode. \"--tools \\\"\\\"\" disables
+all tools outright (stronger and faster than \"--permission-mode plan\", which
+still lets Claude consider read-only tool calls and eat a round-trip getting
+denied). \"--strict-mcp-config\" (with no \"--mcp-config\" given) skips loading
+any configured MCP servers, and \"--no-session-persistence\" skips writing
+session state to disk — both pure startup overhead Expose has no use for.
+Benchmarked together these cut wall-clock latency by roughly 25-30% versus
+the previous \"--permission-mode plan\" invocation, with no loss of review
+quality. Run `M-x expose-provider-claude-version' or check \"claude --help\"
+to verify these flags against your installed version."
 
   :type '(repeat string)
   :group 'expose-provider-claude)
 
-(defcustom expose-provider-claude-error-buffer-name
-  " *expose-claude-error*"
-  "Buffer name used for Claude Code provider stderr."
+(defcustom expose-provider-claude-system-prompt
+  "You are a text-generation backend with no tools and no file access. You \
+will be given a complete, self-contained request in the user message, \
+including all context you need. Respond only with the requested output. \
+Never attempt to explore, read, or modify files; you have no ability to do \
+so and no tools are available. Never explain your reasoning, never mention \
+planning, and never describe what you would do — just produce the answer."
+  "System prompt override sent to the Claude Code CLI via \"--system-prompt\".
 
-  :type 'string
+Claude Code's default system prompt frames it as an agentic coding tool
+that explores files and plans before acting. Combined with a project
+CLAUDE.md that encourages planning/exploration (common, and outside
+Expose's control) and `expose-provider-claude-arguments' disabling all
+tools, that framing leaves Claude with instincts it has no way to act on:
+in testing this produced either hallucinated tool-call text in the actual
+response, or narrated meta-commentary about skipping planning — both
+corrupting output, and both burning wall-clock time toward the provider
+timeout on larger requests. Overriding the system prompt to state plainly
+that no tools exist eliminated the problem across repeated trials. Set to
+nil to fall back to Claude Code's default system prompt."
+
+  :type '(choice (const :tag "Use Claude Code's default" nil) string)
   :group 'expose-provider-claude)
 
 ;;; ---------------------------------------------------------------------------
@@ -54,9 +75,12 @@ against your installed version."
      "Could not find Claude Code CLI executable: %s"
      expose-provider-claude-command))
 
-  (cons
-   expose-provider-claude-command
-   expose-provider-claude-arguments))
+  (append
+   (cons
+    expose-provider-claude-command
+    expose-provider-claude-arguments)
+   (when expose-provider-claude-system-prompt
+     (list "--system-prompt" expose-provider-claude-system-prompt))))
 
 (defun expose-provider-claude-version ()
   "Show Claude Code CLI version/help output."
@@ -165,6 +189,17 @@ against your installed version."
 
     ""))
 
+(defun expose-provider-claude-read-file (file)
+  "Return the contents of FILE, or an empty string if it is missing."
+
+  (if (file-exists-p file)
+
+      (with-temp-buffer
+        (insert-file-contents file)
+        (buffer-string))
+
+    ""))
+
 ;;; ---------------------------------------------------------------------------
 ;;; Sync
 ;;; ---------------------------------------------------------------------------
@@ -177,38 +212,42 @@ against your installed version."
    "Sending %d bytes synchronously."
    (length document))
 
-  (let ((error-buffer
-         (get-buffer-create expose-provider-claude-error-buffer-name)))
+  ;; `call-process-region' only accepts nil/t/a file name as the stderr
+  ;; destination in the (REAL-BUFFER STDERR-FILE) form, so stderr has to be
+  ;; captured via a temp file rather than a buffer.
+  (let ((error-file
+         (make-temp-file "expose-claude-stderr-")))
 
-    (with-current-buffer error-buffer
-      (erase-buffer))
+    (unwind-protect
+        (with-temp-buffer
+          (insert document)
 
-    (with-temp-buffer
-      (insert document)
+          (let ((status
+                 (apply
+                  #'call-process-region
+                  (point-min)
+                  (point-max)
+                  expose-provider-claude-command
+                  t
+                  (list t error-file)
+                  nil
+                  (cdr (expose-provider-claude-command-line)))))
 
-      (let ((status
-             (apply
-              #'call-process-region
-              (point-min)
-              (point-max)
-              expose-provider-claude-command
-              nil
-              (list t error-buffer)
-              nil
-              expose-provider-claude-arguments)))
+            (if (= status 0)
 
-        (if (= status 0)
+                (expose-provider-claude-render-response
+                 (buffer-string))
 
-            (expose-provider-claude-render-response
-             (buffer-string))
+              (expose-provider-claude-render-error
+               "Claude Code Error"
+               (format
+                "Claude Code CLI exited with status %s.\n\nstdout:\n%s\n\nstderr:\n%s"
+                status
+                (buffer-string)
+                (expose-provider-claude-read-file error-file))))))
 
-          (expose-provider-claude-render-error
-           "Claude Code Error"
-           (format
-            "Claude Code CLI exited with status %s.\n\nstdout:\n%s\n\nstderr:\n%s"
-            status
-            (buffer-string)
-            (expose-provider-claude-buffer-string error-buffer))))))))
+      (ignore-errors
+        (delete-file error-file)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Async

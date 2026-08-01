@@ -210,7 +210,7 @@ Use this exact top-level shape:
       \"line_start\": 10,
       \"line_end\": 20,
       \"title\": \"Short actionable title\",
-      \"comment\": \"Clear review comment explaining the issue, why it matters, and what to change.\",
+      \"comment\": \"Clear review comment explaining the issue, why it matters, and what to change. 1-2 sentences.\",
       \"anchor_text\": \"Small original code snippet from the affected area when possible.\",
       \"suggestion\": {
         \"kind\": \"none|text|patch\",
@@ -229,9 +229,10 @@ Severity guidance:
 
 Rules:
 - Use stable IDs R1, R2, R3, etc.
-- Prefer 5 to 15 meaningful findings when issues exist.
+- Prefer 3 to 8 of the most important, highest-impact findings when issues exist. Prioritize high/medium severity over low/info; skip minor findings rather than padding toward a higher count.
 - It is okay to return fewer findings if the change set is small or clean.
 - Do not create filler findings.
+- Keep each comment to 1-2 sentences.
 - Line numbers should point to the new/current file when possible.
 - Use file paths relative to the project root.
 - If there are no useful findings, return {\"summary\":{\"reviewed\":[],\"not_reviewed\":[]},\"items\":[]}.

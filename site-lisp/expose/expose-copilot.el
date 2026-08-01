@@ -15,20 +15,18 @@
   :type 'string
   :group 'expose-provider-copilot)
 
-(defcustom expose-provider-copilot-arguments nil
+(defcustom expose-provider-copilot-arguments '("--silent")
   "Arguments passed to GitHub Copilot CLI.
 
-Expose sends the request document to stdin. Keep this nil unless you need
-work-specific Copilot CLI flags."
+Expose sends the request document to stdin.
+
+\"--silent\" (\"Output only the agent response (no stats), useful for
+scripting\") suppresses the trailing Changes/AI Credits/Tokens/Resume stats
+block the Copilot CLI otherwise appends to every response, which Expose has
+no use for and which would otherwise leak into rendered popups and any
+directly-inserted text (e.g. commit messages)."
 
   :type '(repeat string)
-  :group 'expose-provider-copilot)
-
-(defcustom expose-provider-copilot-error-buffer-name
-  " *expose-copilot-error*"
-  "Buffer name used for GitHub Copilot provider stderr."
-
-  :type 'string
   :group 'expose-provider-copilot)
 
 ;;; ---------------------------------------------------------------------------
@@ -154,6 +152,17 @@ work-specific Copilot CLI flags."
 
     ""))
 
+(defun expose-provider-copilot-read-file (file)
+  "Return the contents of FILE, or an empty string if it is missing."
+
+  (if (file-exists-p file)
+
+      (with-temp-buffer
+        (insert-file-contents file)
+        (buffer-string))
+
+    ""))
+
 ;;; ---------------------------------------------------------------------------
 ;;; Sync
 ;;; ---------------------------------------------------------------------------
@@ -166,38 +175,42 @@ work-specific Copilot CLI flags."
    "Sending %d bytes synchronously."
    (length document))
 
-  (let ((error-buffer
-         (get-buffer-create expose-provider-copilot-error-buffer-name)))
+  ;; `call-process-region' only accepts nil/t/a file name as the stderr
+  ;; destination in the (REAL-BUFFER STDERR-FILE) form, so stderr has to be
+  ;; captured via a temp file rather than a buffer.
+  (let ((error-file
+         (make-temp-file "expose-copilot-stderr-")))
 
-    (with-current-buffer error-buffer
-      (erase-buffer))
+    (unwind-protect
+        (with-temp-buffer
+          (insert document)
 
-    (with-temp-buffer
-      (insert document)
+          (let ((status
+                 (apply
+                  #'call-process-region
+                  (point-min)
+                  (point-max)
+                  expose-provider-copilot-command
+                  t
+                  (list t error-file)
+                  nil
+                  expose-provider-copilot-arguments)))
 
-      (let ((status
-             (apply
-              #'call-process-region
-              (point-min)
-              (point-max)
-              expose-provider-copilot-command
-              nil
-              (list t error-buffer)
-              nil
-              expose-provider-copilot-arguments)))
+            (if (= status 0)
 
-        (if (= status 0)
+                (expose-provider-copilot-render-response
+                 (buffer-string))
 
-            (expose-provider-copilot-render-response
-             (buffer-string))
+              (expose-provider-copilot-render-error
+               "GitHub Copilot Error"
+               (format
+                "GitHub Copilot CLI exited with status %s.\n\nstdout:\n%s\n\nstderr:\n%s"
+                status
+                (buffer-string)
+                (expose-provider-copilot-read-file error-file))))))
 
-          (expose-provider-copilot-render-error
-           "GitHub Copilot Error"
-           (format
-            "GitHub Copilot CLI exited with status %s.\n\nstdout:\n%s\n\nstderr:\n%s"
-            status
-            (buffer-string)
-            (expose-provider-copilot-buffer-string error-buffer))))))))
+      (ignore-errors
+        (delete-file error-file)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Async

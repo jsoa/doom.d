@@ -4,11 +4,21 @@
 ;; Magit
 ;;
 
+(defvar jsoa/git-commit-auto-generate-message t
+  "When non-nil, `jsoa/git-commit-setup' also triggers Expose's commit
+message generation right after inserting the branch prefix, instead of
+requiring `expose-run-commit-message' (SPC c h g) to be run by hand.")
+
 ;; Insert a commit message prefix, i.e. [ticket number]
 ;; If a branch name starts with "NAME-NUMBER", get it and supply
 ;; a commit prefix of [NAME-NUMBER] otherwise insert [-]
 (defun jsoa/git-commit-setup ()
-  "Insert commit prefix [ABC-123]-style from current branch name, else [-]."
+  "Insert commit prefix [ABC-123]-style from current branch name, else [-].
+
+When `jsoa/git-commit-auto-generate-message' is non-nil, also runs
+`expose-run-commit-message' immediately after, which inserts its
+AI-generated commit message asynchronously starting at point -- right
+after the prefix just inserted."
   (let ((branch-name (or (magit-get-current-branch) "")))
     (save-match-data
       ;; Capture KEY-NUM where KEY is uppercase letters and NUM is digits.
@@ -22,7 +32,11 @@
       ;; - some/thing/else/ABC-123
       (if (string-match "\\(?:^\\|/\\)\\([A-Z]+-[0-9]+\\)\\(?:\\b\\|[_-]\\|/\\|$\\)" branch-name)
           (insert (format "[%s] " (match-string 1 branch-name)))
-        (insert "[-] ")))))
+        (insert "[-] "))))
+
+  (when (and jsoa/git-commit-auto-generate-message
+             (fboundp 'expose-run-commit-message))
+    (expose-run-commit-message)))
 
 ;; Custom commit message prefix when commiting
 (add-hook! 'git-commit-setup-hook 'jsoa/git-commit-setup)

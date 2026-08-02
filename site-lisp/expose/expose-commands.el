@@ -225,6 +225,87 @@ LABEL is used for user-facing status messages."
   (when (markerp marker)
     (set-marker marker nil)))
 
+(defun expose-commands-replace-region-at-markers (buffer start end text label)
+  "Replace the region between START and END in BUFFER with TEXT.
+
+START and END bound a temporary placeholder (e.g. \"Loading...\")
+inserted synchronously so there's visible feedback while an async
+request is in flight; this swaps it for the real result (or an error
+message, since callers route both through the same code path) once it
+arrives. LABEL is used for user-facing status messages."
+
+  (if (not
+       (and
+        (buffer-live-p buffer)
+        (markerp start)
+        (marker-position start)
+        (markerp end)
+        (marker-position end)))
+
+      (message
+       "Expose %s result ignored because the original buffer is gone."
+       label)
+
+    (with-current-buffer buffer
+
+      (condition-case error-data
+
+          (let* ((cleaned
+                  (expose-commands-clean-insert-text text))
+
+                 ;; If point is still where the placeholder ends, move it
+                 ;; after the replacement text. If the user moved while
+                 ;; waiting, restore their point via a marker instead of
+                 ;; yanking it to the insertion site -- a marker (unlike a
+                 ;; plain saved position) correctly tracks through the
+                 ;; delete/insert below regardless of exactly where it
+                 ;; sat relative to the replaced region.
+                 (move-point
+                  (= (point)
+                     (marker-position end)))
+
+                 (saved-point
+                  (copy-marker (point))))
+
+            (delete-region
+             (marker-position start)
+             (marker-position end))
+
+            (goto-char
+             (marker-position start))
+
+            (if (string-empty-p cleaned)
+
+                (message
+                 "Expose %s returned an empty response."
+                 label)
+
+              (insert cleaned)
+
+              (unless (string-suffix-p "\n" cleaned)
+                (insert "\n"))
+
+              (message
+               "Expose %s inserted."
+               label))
+
+            (unless move-point
+              (goto-char (marker-position saved-point)))
+
+            (set-marker saved-point nil))
+
+        (error
+         (message
+          "Expose failed to insert %s: %s"
+          label
+          (error-message-string error-data))))))
+
+  (when (markerp start)
+    (set-marker start nil))
+
+  (when (markerp end)
+    (set-marker end nil)))
+
 ;;; ---------------------------------------------------------------------------
 ;;; Timeout-aware transport
 ;;; ---------------------------------------------------------------------------
@@ -1012,18 +1093,26 @@ TARGET-POSITION is cleared after insertion."
 
 ;;;###autoload
 (defun expose-run-commit-message ()
-  "Generate a commit message and insert it at point."
+  "Generate a commit message and insert it at point.
+
+Inserts a temporary \"Loading commit message...\" placeholder at point
+first, like the same pattern used elsewhere in Expose for other
+async scans (see the project dashboard), so it's visible that
+something is happening rather than leaving point sitting there with
+no feedback until the response arrives -- then replaces the
+placeholder with the generated result (or an error message)."
 
   (interactive)
 
   (let* ((source-buffer
           (current-buffer))
 
-         ;; Insert at the point where the command was invoked, like
-         ;; `expose-continue-at-point'.
-         (anchor
-          (copy-marker
-           (point)))
+         ;; Bounds the "Loading..." placeholder, like `expose-continue-at-point'
+         ;; anchors at the point where the command was invoked.
+         (start
+          (point-marker))
+
+         end
 
          (project-root
           (expose-commands-project-root-or-default)))
@@ -1035,6 +1124,11 @@ TARGET-POSITION is cleared after insertion."
 
     (message "Expose commit message: generating...")
 
+    (insert "Loading commit message...")
+
+    (setq end
+          (point-marker))
+
     (condition-case error-data
 
         (let ((default-directory
@@ -1045,14 +1139,16 @@ TARGET-POSITION is cleared after insertion."
            "Commit Message"
 
            (lambda (view)
-             (expose-commands-insert-text-at-marker
+             (expose-commands-replace-region-at-markers
               source-buffer
-              anchor
+              start
+              end
               (expose-commands-view-body-text view)
               "commit message"))))
 
       (error
-       (set-marker anchor nil)
+       (set-marker start nil)
+       (set-marker end nil)
 
        (message
         "Expose commit message failed: %s"

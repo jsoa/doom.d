@@ -1,4 +1,4 @@
-;;; modes/+large-file.el -*- lexical-binding: t; -*-
+;;; modules/+large-file.el -*- lexical-binding: t; -*-
 
 (setq jsoa/large-file-size (* 2 1024 1024)) ;; 2MB
 

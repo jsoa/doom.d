@@ -3,38 +3,38 @@
 (require 'gud)
 (require 'project)
 
-(defgroup js/python-pdb nil
+(defgroup jsoa/python-pdb nil
   "Python PDB integration."
   :group 'tools)
 
-(defcustom js/python-pdb-python-command nil
+(defcustom jsoa/python-pdb-python-command nil
   "Explicit Python executable used by PDB.
 
 When nil, resolve Python from the current environment."
   :type '(choice (const :tag "Current environment" nil)
                  string)
-  :group 'js/python-pdb)
+  :group 'jsoa/python-pdb)
 
-(defcustom js/python-pdb-django-command
+(defcustom jsoa/python-pdb-django-command
   '("manage.py" "runserver" "--noreload")
   "Arguments used to start Django under PDB."
   :type '(repeat string)
-  :group 'js/python-pdb)
+  :group 'jsoa/python-pdb)
 
-(defun js/python-pdb--project-root ()
+(defun jsoa/python-pdb--project-root ()
   "Return the current project root."
   (if-let ((project (project-current)))
       (project-root project)
     default-directory))
 
-(defun js/python-pdb--python ()
+(defun jsoa/python-pdb--python ()
   "Return the Python executable to use."
-  (or js/python-pdb-python-command
+  (or jsoa/python-pdb-python-command
       (executable-find "python")
       (executable-find "python3")
       (user-error "Could not find a Python executable")))
 
-(defun js/python-pdb--python-version ()
+(defun jsoa/python-pdb--python-version ()
   "Return the configured Python version as a list.
 
 For example, Python 3.13.4 returns `(3 13 4)`."
@@ -43,7 +43,7 @@ For example, Python 3.13.4 returns `(3 13 4)`."
            (shell-command-to-string
             (format "%s --version 2>&1"
                     (shell-quote-argument
-                     (js/python-pdb--python))))))
+                     (jsoa/python-pdb--python))))))
          (version
           (and (string-match
                 "Python \\([0-9]+\\)\\.\\([0-9]+\\)\\(?:\\.\\([0-9]+\\)\\)?"
@@ -57,25 +57,25 @@ For example, Python 3.13.4 returns `(3 13 4)`."
         (user-error "Could not determine Python version from: %s"
                     output))))
 
-(defun js/python-pdb--supports-attach-p ()
+(defun jsoa/python-pdb--supports-attach-p ()
   "Return non-nil when the configured Python supports PID attachment."
   (version-list-<= '(3 14 0)
-                   (js/python-pdb--python-version)))
+                   (jsoa/python-pdb--python-version)))
 
-(defun js/python-pdb--shell-command (arguments)
+(defun jsoa/python-pdb--shell-command (arguments)
   "Build a shell command from Python ARGUMENTS."
   (mapconcat #'shell-quote-argument
-             (cons (js/python-pdb--python) arguments)
+             (cons (jsoa/python-pdb--python) arguments)
              " "))
 
-(defun js/python-pdb--start (arguments)
+(defun jsoa/python-pdb--start (arguments)
   "Start PDB with Python ARGUMENTS."
-  (let ((default-directory (js/python-pdb--project-root)))
+  (let ((default-directory (jsoa/python-pdb--project-root)))
     (pdb
-     (js/python-pdb--shell-command
+     (jsoa/python-pdb--shell-command
       (append '("-m" "pdb") arguments)))))
 
-(defun js/python-pdb--buffer ()
+(defun jsoa/python-pdb--buffer ()
   "Return the current live GUD PDB buffer."
   (cond
    ((and gud-comint-buffer
@@ -84,7 +84,7 @@ For example, Python 3.13.4 returns `(3 13 4)`."
    ((get-buffer "*gud-pdb*"))
    (t nil)))
 
-(defun js/python-pdb--require-session ()
+(defun jsoa/python-pdb--require-session ()
   "Return the active PDB buffer or signal an error."
   (let ((buffer
          (cond
@@ -98,13 +98,13 @@ For example, Python 3.13.4 returns `(3 13 4)`."
       (user-error "No active PDB session"))
     buffer))
 
-(defun js/python-pdb--send-command (command)
+(defun jsoa/python-pdb--send-command (command)
   "Send COMMAND directly to the active PDB process."
-  (let* ((buffer (js/python-pdb--require-session))
+  (let* ((buffer (jsoa/python-pdb--require-session))
          (process (get-buffer-process buffer)))
     (comint-send-string process (concat command "\n"))))
 
-(defun js/python-pdb--expression-at-point ()
+(defun jsoa/python-pdb--expression-at-point ()
   "Return the active region or Python expression at point."
   (let ((expression
          (cond
@@ -129,117 +129,117 @@ For example, Python 3.13.4 returns `(3 13 4)`."
     expression))
 
 ;;;###autoload
-(defun js/python-pdb-file ()
+(defun jsoa/python-pdb-file ()
   "Start PDB on the current buffer's file."
   (interactive)
   (unless buffer-file-name
     (user-error "Current buffer is not visiting a file"))
-  (js/python-pdb--start
+  (jsoa/python-pdb--start
    (list (expand-file-name buffer-file-name))))
 
 ;;;###autoload
-(defun js/python-pdb-django ()
+(defun jsoa/python-pdb-django ()
   "Start PDB wrapping the Django dev server.
 
-Uses `js/python-pdb-django-command'."
+Uses `jsoa/python-pdb-django-command'."
   (interactive)
-  (js/python-pdb--start js/python-pdb-django-command))
+  (jsoa/python-pdb--start jsoa/python-pdb-django-command))
 
 ;;;###autoload
-(defun js/python-pdb-attach (pid)
+(defun jsoa/python-pdb-attach (pid)
   "Attach PDB to the running process PID.
 
 Requires Python 3.14 or newer."
   (interactive
    (list (read-number "PID to attach to: ")))
-  (unless (js/python-pdb--supports-attach-p)
+  (unless (jsoa/python-pdb--supports-attach-p)
     (user-error "PDB attach requires Python 3.14 or newer"))
-  (js/python-pdb--start
+  (jsoa/python-pdb--start
    (list "-p" (number-to-string pid))))
 
 ;;;###autoload
-(defun js/python-pdb-command (command)
+(defun jsoa/python-pdb-command (command)
   "Send an arbitrary COMMAND to the active PDB session."
   (interactive
    (list (read-string "PDB command: ")))
-  (js/python-pdb--send-command command))
+  (jsoa/python-pdb--send-command command))
 
 ;;;###autoload
-(defun js/python-pdb-stop ()
+(defun jsoa/python-pdb-stop ()
   "Stop the active PDB session."
   (interactive)
-  (js/python-pdb--send-command "quit"))
+  (jsoa/python-pdb--send-command "quit"))
 
 ;;;###autoload
-(defun js/python-pdb-break ()
+(defun jsoa/python-pdb-break ()
   "Set a PDB breakpoint at the current source line."
   (interactive)
   (unless buffer-file-name
     (user-error "Current buffer is not visiting a file"))
-  (js/python-pdb--send-command
+  (jsoa/python-pdb--send-command
    (format "break %s:%d"
            (expand-file-name buffer-file-name)
            (line-number-at-pos))))
 
 ;;;###autoload
-(defun js/python-pdb-next ()
+(defun jsoa/python-pdb-next ()
   "Execute the next source line."
   (interactive)
-  (js/python-pdb--send-command "next"))
+  (jsoa/python-pdb--send-command "next"))
 
 ;;;###autoload
-(defun js/python-pdb-step ()
+(defun jsoa/python-pdb-step ()
   "Step into the next function call."
   (interactive)
-  (js/python-pdb--send-command "step"))
+  (jsoa/python-pdb--send-command "step"))
 
 ;;;###autoload
-(defun js/python-pdb-continue ()
+(defun jsoa/python-pdb-continue ()
   "Continue execution."
   (interactive)
-  (js/python-pdb--send-command "continue"))
+  (jsoa/python-pdb--send-command "continue"))
 
 ;;;###autoload
-(defun js/python-pdb-finish ()
+(defun jsoa/python-pdb-finish ()
   "Continue until the current function returns."
   (interactive)
-  (js/python-pdb--send-command "return"))
+  (jsoa/python-pdb--send-command "return"))
 
 ;;;###autoload
-(defun js/python-pdb-up ()
+(defun jsoa/python-pdb-up ()
   "Move to the next outer stack frame."
   (interactive)
-  (js/python-pdb--send-command "up"))
+  (jsoa/python-pdb--send-command "up"))
 
 ;;;###autoload
-(defun js/python-pdb-down ()
+(defun jsoa/python-pdb-down ()
   "Move to the next inner stack frame."
   (interactive)
-  (js/python-pdb--send-command "down"))
+  (jsoa/python-pdb--send-command "down"))
 
 ;;;###autoload
-(defun js/python-pdb-print (expression)
+(defun jsoa/python-pdb-print (expression)
   "Evaluate EXPRESSION in the current PDB stack frame."
   (interactive
-   (list (js/python-pdb--expression-at-point)))
-  (js/python-pdb--send-command
+   (list (jsoa/python-pdb--expression-at-point)))
+  (jsoa/python-pdb--send-command
    (concat "p " expression)))
 
 (map! :leader
       (:prefix-map ("d" . "debug")
        (:prefix ("P" . "pdb")
-        :desc "PDB current file" "p" #'js/python-pdb-file
-        :desc "PDB Django"     "d" #'js/python-pdb-django
-        :desc "PDB attach"     "a" #'js/python-pdb-attach
-        :desc "PDB command"    "x" #'js/python-pdb-command
-        :desc "PDB stop"       "q" #'js/python-pdb-stop
-        :desc "Breakpoint"     "b" #'js/python-pdb-break
-        :desc "Next"           "n" #'js/python-pdb-next
-        :desc "Step"           "s" #'js/python-pdb-step
-        :desc "Continue"       "c" #'js/python-pdb-continue
-        :desc "Finish"         "r" #'js/python-pdb-finish
-        :desc "Stack up"       "u" #'js/python-pdb-up
-        :desc "Stack down"     "D" #'js/python-pdb-down
-        :desc "Evaluate"       "e" #'js/python-pdb-print)))
+        :desc "PDB current file" "p" #'jsoa/python-pdb-file
+        :desc "PDB Django"     "d" #'jsoa/python-pdb-django
+        :desc "PDB attach"     "a" #'jsoa/python-pdb-attach
+        :desc "PDB command"    "x" #'jsoa/python-pdb-command
+        :desc "PDB stop"       "q" #'jsoa/python-pdb-stop
+        :desc "Breakpoint"     "b" #'jsoa/python-pdb-break
+        :desc "Next"           "n" #'jsoa/python-pdb-next
+        :desc "Step"           "s" #'jsoa/python-pdb-step
+        :desc "Continue"       "c" #'jsoa/python-pdb-continue
+        :desc "Finish"         "r" #'jsoa/python-pdb-finish
+        :desc "Stack up"       "u" #'jsoa/python-pdb-up
+        :desc "Stack down"     "D" #'jsoa/python-pdb-down
+        :desc "Evaluate"       "e" #'jsoa/python-pdb-print)))
 
 (provide '+python-pdb)

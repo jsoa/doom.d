@@ -1,4 +1,4 @@
-;;; ~/.doom.d/modes/typescript.el -*- lexical-binding: t; -*-
+;;; modules/+typescript.el -*- lexical-binding: t; -*-
 
 
 ;;

@@ -1,4 +1,4 @@
-;;; ~/.doom.d/modes/ediff-mode.el -*- lexical-binding: t; -*-
+;;; modules/+ediff.el -*- lexical-binding: t; -*-
 
 ;;
 ;; EDiff

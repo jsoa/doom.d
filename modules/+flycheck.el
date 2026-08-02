@@ -1,4 +1,4 @@
-;;; modes/+flycheck.el -*- lexical-binding: t; -*-
+;;; modules/+flycheck.el -*- lexical-binding: t; -*-
 
 (after! flycheck
   ;; Check on save and when Flycheck turns on, but not constantly while typing.

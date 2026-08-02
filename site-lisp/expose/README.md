@@ -1,5 +1,7 @@
 # Expose
 
+[![expose tests](https://github.com/jsoa/doom.d/actions/workflows/expose-tests.yml/badge.svg)](https://github.com/jsoa/doom.d/actions/workflows/expose-tests.yml)
+
 Expose is a Doom Emacs helper package for showing code context, running focused AI-assisted code actions, and maintaining lightweight AI review state directly inside source buffers.
 
 It combines hover documentation, diagnostics, semantic code context, Git diff context, provider-backed AI actions, review sessions, region reviews, background watch comments, inline continuation, popup history, and archive viewers behind a single leader-key interface.
@@ -172,6 +174,14 @@ Watch mode-line icon:
 ```
 
 `nerd-icons` is optional. If available, Watch uses a Nerd Font eye icon in the mode line.
+
+Watch inline card width:
+
+```elisp
+(setq expose-watch-card-width 60)
+```
+
+The maximum width, in columns, of the inline Watch summary card. The card hugs its own content (severity/title, and the `EXPOSE C-<tab>` hint) rather than padding out empty space -- this only caps it for unusually long titles.
 
 ## Default Keybindings
 
@@ -426,21 +436,28 @@ save file
   -> skips hunks already reviewed by hash
   -> reviews only new/changed hunks
   -> stores comments
-  -> shows right-fringe markers only
-  -> hover shows the watch comment
+  -> underlines the flagged code
+  -> shows an inline summary card below it
 ```
+
+Each Watch comment shows up directly in the source buffer, GitHub-PR-review style:
+
+- The flagged code gets a squiggly underline (doom-one magenta, `expose-watch-item-face`), trimmed to the real code on each line -- indentation, trailing whitespace, and blank lines in a multi-line range are not underlined.
+- Directly below the flagged code, an always-visible, fixed-width bordered card shows a one-line summary (severity + title) and a dimmer hint line reading `EXPOSE C-<tab>`.
+- `C-<tab>` (or a click), anywhere on the flagged line or the card, opens the full comment -- severity, category, title, comment, suggestion, and patch -- in Expose's normal shared popup, with all of its usual behavior: auto-hides on unrelated commands, `C-j`/`C-k` scrolling, copy, open-in-buffer.
+- The card's colors track the real popup's own colors live (background and mode-line-style hint bar), so it looks consistent even across theme switches, instead of a hardcoded guess.
+- Right-fringe markers are optional and off by default (`expose-watch-show-fringe-markers`).
 
 Watch mode is designed to stay out of the way:
 
 - It does not block editing.
 - It does not open loading popups.
-- It does not highlight entire source lines.
-- It marks only concrete comments in the right fringe.
-- It uses invisible overlays only for hover detection.
+- It does not highlight entire source lines -- only the actual flagged code.
+- The inline card never expands or resizes; opening the full comment always uses the shared popup instead.
 - It keeps historical comments in the Watch list.
 - It only shows source markers for hunks that still exist in the current working-tree diff.
 
-This means if you remove or rewrite code that produced a Watch comment, the old comment stays available historically in `*EXPOSE Watch*`, but the source fringe marker and hover disappear after save.
+This means if you remove or rewrite code that produced a Watch comment, the old comment stays available historically in `*EXPOSE Watch*`, but the underline and inline card disappear after save.
 
 ### Watch Mode Line
 
@@ -559,6 +576,19 @@ Expose stores persistent review/watch state inside the Git repository:
 ```
 
 Files are written as Lisp data using `prin1`/`read`, not loaded as code.
+
+## Testing
+
+```sh
+cd site-lisp/expose
+emacs -Q --batch -l test/run-tests.el
+```
+
+The suite covers redaction, XML rendering, review-request parsing, transport, commands, and Watch (project auto-arm state, active-entry filtering). It runs against real, disposable temp Git repos where relevant rather than mocking Git away.
+
+Rendering/UI code -- the popup, hover, and Watch's inline card (overlays, faces, the shared-popup integration) -- needs a real display and a real `posframe` frame, so it's deliberately not covered by this suite; those paths are instead verified manually and with ad hoc scripts that stub `posframe-show`/`posframe-hide` in batch mode.
+
+CI runs the suite on Emacs 29.4 and `snapshot` via `.github/workflows/expose-tests.yml`.
 
 ## Troubleshooting
 

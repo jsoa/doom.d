@@ -13,6 +13,7 @@
 (require 'expose-redact)
 (require 'nerd-icons nil t)
 
+
 (defgroup expose-watch nil
   "Background watch reviews for changed hunks."
   :group 'expose)
@@ -53,13 +54,18 @@ Set to nil to store full responses."
   :type 'string
   :group 'expose-watch)
 
-(defcustom expose-watch-hover-delay 0.25
-  "Delay before showing Expose Watch hover."
-  :type 'number
-  :group 'expose-watch)
-
 (defcustom expose-watch-provider-timeout-seconds 180
   "Seconds to wait for an AI provider before failing an Expose Watch run."
+  :type 'integer
+  :group 'expose-watch)
+
+(defcustom expose-watch-card-width 60
+  "Maximum width, in columns, of the inline Expose Watch comment card.
+
+The card is only ever as wide as its longer line (summary or hint)
+actually needs -- it hugs its content rather than padding out empty
+space to a fixed size -- but never wider than this, so an unusually
+long title gets truncated instead of stretching the card out."
   :type 'integer
   :group 'expose-watch)
 
@@ -67,9 +73,6 @@ Set to nil to store full responses."
 
 (defvar-local expose-watch-source-overlays nil
   "Source overlays for Expose Watch comments in the current buffer.")
-
-(defvar-local expose-watch-hover-timer nil
-  "Idle timer for Expose Watch hovers.")
 
 (defvar-local expose-watch-state 'idle
   "Current Expose Watch state for this buffer.
@@ -94,6 +97,12 @@ Expected values are `idle', `running', and `error'.")
 (defvar-local expose-watch-list-project-root nil
   "Project root displayed by the current Expose Watch list buffer.")
 
+(defconst expose-watch-active-buffer-name
+  "*EXPOSE Watch Active*")
+
+(defvar-local expose-watch-active-project-root nil
+  "Project root displayed by the current Expose Watch active-items buffer.")
+
 ;;; ---------------------------------------------------------------------------
 ;;; Faces / Fringe
 ;;; ---------------------------------------------------------------------------
@@ -104,11 +113,66 @@ Expected values are `idle', `running', and `error'.")
   :group 'expose-watch)
 
 (defface expose-watch-item-face
-  '((t (:underline (:color "#51afef" :style line))))
+  '((t (:underline (:color "#c678dd" :style wave) :extend nil)))
   "Face for concrete Expose Watch comment lines.
 
-Underlined in doom-one's blue rather than filled with a background, so
-it reads as \"annotated\" without competing with syntax highlighting."
+A squiggly underline in doom-one's magenta, rather than filled with a
+background, so it reads as \"annotated\" without competing with syntax
+highlighting, and stands out more than a plain line underline would.
+`:extend nil' keeps the underline from bleeding across the blank tail
+of each line -- the source overlay this face is applied to spans full
+lines (including each trailing newline) to cover multi-line items, and
+without this the underline would stretch to the window's right edge on
+every line instead of stopping at the actual code."
+  :group 'expose-watch)
+
+(defface expose-watch-card-face
+  '((t (:background "#262b33" :overline "#666666")))
+  "Background/top-border face for the inline Expose Watch card's summary line.
+
+Layered on top of the card's own severity/title colors via
+`add-face-text-property' (not a plain :inherit) so both apply. Its
+`:background' is overwritten at render time by
+`expose-watch-card-sync-faces' to match the real Expose popup's own
+body background exactly (whatever the current theme, and `solaire-mode'
+if active, render that as) rather than staying a hardcoded guess.
+
+`:overline' (not `:box'): a dedicated top/bottom border ROW (a separate
+line of `-'/`+' characters) is itself extra line-height, which is
+exactly what read as unwanted padding around the card. `:overline'
+draws the top border directly on this line's own text instead of
+needing a line for it; `:underline' on `expose-watch-card-hint-line-face'
+below does the same for the bottom border. Manual `|' characters (see
+`expose-watch-card-content-row') provide the left/right edges, so the
+full card is still bordered on all four sides -- just without a line
+between the two rows, and without either border needing a row of its
+own."
+  :group 'expose-watch)
+
+(defface expose-watch-card-hint-line-face
+  '((t (:background "#1c1f26" :underline (:color "#666666" :style line))))
+  "Background/bottom-border face for the Expose Watch card's hint line.
+
+Its `:background' is overwritten at render time by
+`expose-watch-card-sync-faces' to match `mode-line-inactive' --
+mirroring how the real Expose popup's own bottom bar
+(`:respect-mode-line t') renders, since posframes essentially never
+have real input focus, so it's always the *inactive* mode-line face
+that ends up showing there, not `mode-line'.
+
+`:underline' with `:style line' (a straight rule, not the wavy style
+`expose-watch-item-face' uses to mark flagged code) draws the card's
+bottom border directly on this line -- see
+`expose-watch-card-face's docstring for why that's preferable to a
+separate border row."
+  :group 'expose-watch)
+
+(defface expose-watch-card-border-face
+  '((t (:foreground "#666666")))
+  "Foreground face for the inline Expose Watch card's border characters.
+
+Same border color the real Expose popup itself uses (see
+`expose-popup-show-buffer's `:border-color \"#666666\"')."
   :group 'expose-watch)
 
 (defface expose-watch-fringe-face
@@ -1047,6 +1111,16 @@ single save, instead of one load/save per hunk."
           (1- line)))
     (point)))
 
+(defun expose-watch-line-end-position (line)
+  "Return buffer position at end of LINE, before its newline."
+
+  (save-excursion
+    (goto-char (point-min))
+    (forward-line
+     (max 0
+          (1- line)))
+    (line-end-position)))
+
 (defun expose-watch-line-after-position (line)
   "Return buffer position at beginning of the line after LINE."
 
@@ -1055,6 +1129,33 @@ single save, instead of one load/save per hunk."
     (forward-line
      (max 0 line))
     (point)))
+
+(defun expose-watch-line-content-bounds (line)
+  "Return (START . END) bounding LINE's non-blank content, or nil if blank.
+
+START skips leading indentation; END stops before trailing whitespace.
+Used to keep source overlays hugging real code instead of underlining
+indentation or trailing blank space."
+
+  (save-excursion
+    (goto-char (point-min))
+    (forward-line
+     (max 0
+          (1- line)))
+
+    (let ((eol
+           (line-end-position)))
+
+      (skip-chars-forward " \t" eol)
+
+      (unless (= (point) eol)
+
+        (let ((start
+               (point)))
+
+          (goto-char eol)
+          (skip-chars-backward " \t" start)
+          (cons start (point)))))))
 
 (defun expose-watch-numbered-text (text start-line)
   "Return TEXT with line numbers starting at START-LINE."
@@ -1296,13 +1397,6 @@ single save, instead of one load/save per hunk."
     '(:line-end :line_end))
    (expose-watch-item-line-start item fallback)))
 
-(defun expose-watch-item-file (item fallback)
-  "Return ITEM file or FALLBACK."
-
-  (or
-   (plist-get item :file)
-   fallback))
-
 (defun expose-watch-item-overlaps-hunk-p (item hunk)
   "Return non-nil when ITEM overlaps HUNK."
 
@@ -1380,6 +1474,52 @@ lines after the changed code was edited again or removed."
                (expose-watch-file-state session file)))
 
     (plist-get state :reviewed-hunks)))
+
+(defun expose-watch-file-active-hunk-entries (project-root file state)
+  "Return STATE's reviewed hunk entries for FILE that still match the live diff.
+
+Same staleness filter as `expose-watch-current-buffer-active-hunk-entries',
+parameterized on PROJECT-ROOT/FILE/STATE instead of the current buffer, so
+it can be applied to files that aren't currently open."
+
+  (let ((current-hashes
+         (expose-watch-current-hunk-hashes project-root file)))
+
+    (seq-filter
+     (lambda (entry)
+       (member
+        (plist-get entry :hash)
+        current-hashes))
+     (plist-get state :reviewed-hunks))))
+
+(defun expose-watch-project-active-entries (project-root)
+  "Return a flat list of (:file :item) plists for PROJECT-ROOT's active items.
+
+Only includes items belonging to enabled files whose reviewed hunk still
+matches that file's live working-tree diff -- files don't need an open
+buffer for this, since staleness is determined by re-running `git diff'."
+
+  (let ((session
+         (expose-watch-load-session project-root))
+        entries)
+
+    (dolist (state (plist-get session :files))
+      (when (plist-get state :enabled)
+        (let ((file
+               (plist-get state :file)))
+
+          (dolist (hunk
+                   (expose-watch-file-active-hunk-entries
+                    project-root file state))
+
+            (dolist (item
+                     (plist-get hunk :items))
+
+              (push
+               (list :file file :item item)
+               entries))))))
+
+    (nreverse entries)))
 
 (defun expose-watch-current-buffer-items ()
   "Return all Expose Watch items for current buffer."
@@ -1493,34 +1633,425 @@ Expose Watch only marks concrete comments in the source buffer."
 
     (push overlay expose-watch-source-overlays)))
 
-(defun expose-watch-source-add-item-overlay (item file)
-  "Add visible source overlay and optional right-fringe marker for ITEM in FILE."
+;;; ---------------------------------------------------------------------------
+;;; Inline comment cards
+;;;
+;;; Each item gets a small, always-visible, fixed-width two-line card
+;;; rendered under (not in) the commented code via an overlay
+;;; `after-string': a severity/title summary line, and a dimmer hint line
+;;; below it explaining how to see the full comment. The card itself
+;;; never expands -- C-<tab> (or a click) opens the full comment in
+;;; Expose's normal shared popup instead, the same one used for hover,
+;;; review comments, etc., with all its existing behavior (auto-hides on
+;;; unrelated commands, C-j/C-k scrolling, copy, open-in-buffer) for free.
+;;; ---------------------------------------------------------------------------
+
+(defun expose-watch-card-collapsed-text (item)
+  "Return the always-visible inline one-line summary for ITEM.
+
+The leading chevron is a static affordance marking the line as
+expandable (into the shared Expose popup, via C-<tab> or a click) --
+it does not track any open/closed state of its own, since the card
+itself never expands."
+
+  (let* ((severity
+          (expose-watch-string
+           (or
+            (plist-get item :severity)
+            "info")))
+
+         (title
+          (expose-watch-string
+           (or
+            (plist-get item :title)
+            "Watch comment"))))
+
+    (concat
+     (propertize
+      "▸ "
+      'face
+      'expose-watch-list-meta-face)
+     (propertize
+      (format "[%s] " (upcase severity))
+      'face
+      (expose-watch-severity-face severity))
+     (propertize title 'face 'expose-watch-list-meta-face))))
+
+(defun expose-watch-card-hint-text ()
+  "Return the Expose Watch card's second-line hint.
+
+Styled like the shared Expose popup's own bottom mode-line bar
+(`expose-popup-mode-line-info'): \"EXPOSE\" in the same buffer-id face,
+and the shortcut in the same blue keyword face used there for the
+Expose leader prefix (\"SPC c h\")."
+
+  (concat
+   (propertize "EXPOSE" 'face 'mode-line-buffer-id)
+   " "
+   (propertize "C-<tab>" 'face 'font-lock-keyword-face)))
+
+(defun expose-watch-card-pad (text width)
+  "Pad or truncate TEXT to WIDTH columns."
+
+  (truncate-string-to-width text width 0 ?\s t))
+
+(defun expose-watch-card-fit-width (&rest texts)
+  "Return the column width an Expose Watch card containing TEXTS should use.
+
+The longest of TEXTS, capped at `expose-watch-card-width' -- the card
+hugs its content (so there's no dead space between text and border)
+rather than always padding out to a fixed size."
+
+  (min expose-watch-card-width
+       (apply #'max (mapcar #'length texts))))
+
+(defun expose-watch-card-ensure-popup-buffer ()
+  "Return the shared Expose popup buffer, creating/mode-enabling it if needed.
+
+Only used to read its actual rendered background color (see
+`expose-watch-card-sync-faces') -- never shown or otherwise touched --
+so the inline card's summary-line background matches the real popup's
+body exactly, under whatever theme (and `solaire-mode', if active) is
+currently active, rather than a hardcoded guess."
+
+  (let ((buffer
+         (get-buffer-create expose-popup-buffer-name)))
+
+    (with-current-buffer buffer
+      (unless (derived-mode-p 'expose-popup-mode)
+        (expose-popup-mode)))
+
+    buffer))
+
+(defun expose-watch-card-resolve-face-background (face)
+  "Return FACE's effective background color in the current buffer.
+
+Unlike plain `face-attribute', this also resolves a buffer-local
+`face-remapping-alist' entry for FACE, if one exists. Remapping FACE
+this way -- not a theme's face spec for it -- is exactly how e.g.
+`solaire-mode' gives \"unreal\" buffers (which the real Expose popup's
+own buffer, a `special-mode' buffer with no file, qualifies as) a
+different background than a plain theme lookup would find."
+
+  (let ((remap
+         (cdr
+          (assq face face-remapping-alist))))
+
+    (or
+     (cl-loop
+      for spec in remap
+      thereis
+      (cond
+       ((facep spec)
+        (face-attribute spec :background nil t))
+
+       ((and (listp spec)
+             (plist-member spec :background))
+        (plist-get spec :background))))
+
+     (face-attribute face :background nil t))))
+
+(defun expose-watch-card-sync-faces ()
+  "Sync the Watch card's background faces to the real Expose popup's colors.
+
+`expose-watch-card-face' (summary line) mirrors the popup body's own
+`default' background; `expose-watch-card-hint-line-face' (hint line)
+mirrors `mode-line-inactive', since posframes essentially never have
+real input focus, so the popup's own `:respect-mode-line t' bar always
+renders with the inactive mode-line face. Both are read fresh each time
+rather than cached, so a theme switch is picked up automatically."
+
+  (with-current-buffer (expose-watch-card-ensure-popup-buffer)
+
+    (set-face-attribute
+     'expose-watch-card-face nil
+     :background
+     (expose-watch-card-resolve-face-background 'default))
+
+    (set-face-attribute
+     'expose-watch-card-hint-line-face nil
+     :background
+     (expose-watch-card-resolve-face-background 'mode-line-inactive))))
+
+(defun expose-watch-card-content-row (text left right)
+  "Return TEXT framed with LEFT and RIGHT border characters (strings).
+
+Plain ASCII `|'. Two Unicode corner-glyph attempts were tried and
+rejected: thin box-drawing corners (`┌'/`┐'/`└'/`┘') rendered visibly
+shorter than a full-height `|', breaking the connection to the
+`:overline'/`:underline' rule above/below them; block-element quadrant
+corners (`▛'/`▜'/`▙'/`▟') rendered fine but weren't wanted after all.
+Plain `|' is the one that reliably looked right."
+
+  (concat
+   (propertize left 'face 'expose-watch-card-border-face)
+   text
+   (propertize right 'face 'expose-watch-card-border-face)))
+
+(defun expose-watch-card-popup-body (item)
+  "Return full detail text for ITEM, for the Expose popup."
+
+  (let* ((severity
+          (expose-watch-string
+           (or
+            (plist-get item :severity)
+            "info")))
+
+         (category
+          (expose-watch-string
+           (or
+            (plist-get item :category)
+            "")))
+
+         (title
+          (expose-watch-string
+           (or
+            (plist-get item :title)
+            "Watch comment")))
+
+         (comment
+          (expose-watch-string
+           (or
+            (plist-get item :comment)
+            "")))
+
+         (suggestion-text
+          (expose-watch-suggestion-text item))
+
+         (patch
+          (expose-watch-suggestion-patch item)))
+
+    (with-temp-buffer
+      (insert
+       (propertize
+        (format "[%s]" (upcase severity))
+        'face
+        (expose-watch-severity-face severity)))
+
+      (unless (expose-watch-blank-p category)
+        (insert
+         (propertize
+          (format " %s" category)
+          'face
+          'shadow)))
+
+      (insert "\n")
+      (insert (propertize title 'face 'bold))
+      (insert "\n\n")
+
+      (unless (expose-watch-blank-p comment)
+        (insert comment)
+        (insert "\n\n"))
+
+      (unless (expose-watch-blank-p suggestion-text)
+        (insert
+         (propertize "Suggestion\n" 'face 'font-lock-keyword-face))
+        (insert suggestion-text)
+        (insert "\n\n"))
+
+      (unless (expose-watch-blank-p patch)
+        (insert
+         (propertize "Patch\n" 'face 'font-lock-keyword-face))
+        (insert patch)
+        (insert "\n"))
+
+      (string-trim (buffer-string)))))
+
+(defun expose-watch-source-show-card-at-point ()
+  "Show the full Expose Watch comment for the item at point.
+
+Displays it in Expose's normal shared popup (`expose-popup-show-view')
+-- the same one used for hover and other Review comments -- rather than
+a bespoke window of its own, so it gets that popup's existing, already
+correct behavior (auto-hides on unrelated commands, C-j/C-k scrolling,
+copy, open-in-buffer) for free."
+
+  (interactive)
+
+  (if-let ((overlay
+            (cl-loop
+             for ov in (overlays-at (point))
+             when (overlay-get ov 'expose-watch-item)
+             return ov)))
+
+      (expose-popup-show-view
+       (expose-popup-view-create
+        "Expose Watch"
+        (expose-watch-card-popup-body
+         (overlay-get overlay 'expose-watch-item))))
+
+    (user-error "No Expose Watch item here")))
+
+(defvar expose-watch-source-item-map
+  (let ((map
+         (make-sparse-keymap)))
+
+    (define-key map (kbd "C-<tab>") #'expose-watch-source-show-card-at-point)
+    (define-key map (kbd "<mouse-1>") #'expose-watch-source-show-card-at-point)
+
+    map)
+  "Keymap active when point is on an Expose Watch source item.
+
+Set as the overlay `keymap' property, so it only intercepts keys while
+point is actually within an item's overlay -- everywhere else in the
+buffer, C-<tab> (and everything else) behaves completely normally. This
+takes effect regardless of Evil state, since a `keymap' overlay
+property is consulted ahead of Evil's own state keymaps.
+
+Neither RET nor plain TAB: RET risks hijacking a genuine newline if
+you're editing the exact flagged span (e.g. splitting that line), and
+plain TAB is corfu's own primary accept/complete key -- with
+`corfu-auto' enabled, a completion popup can be showing and claiming
+TAB before it ever reaches this overlay's keymap. C-<tab> isn't claimed
+by either.")
+
+(defun expose-watch-source-add-item-card (item file hunk-hash line-end)
+  "Add the always-visible two-line summary card for ITEM after LINE-END.
+
+FILE and HUNK-HASH identify ITEM's hunk. The card is a bordered box
+sized to hug its own content up to `expose-watch-card-width', framing
+two rows: a severity/title summary row, and a darker hint row below it
+explaining how to see the full comment. The border is drawn on the
+rows' own faces (`:overline'/`:underline'; see `expose-watch-card-face')
+plus manual `|' side bars -- not a separate top/bottom border row of
+characters, which is itself extra line-height. The card itself never
+expands or resizes."
+
+  (expose-watch-card-sync-faces)
+
+  (let* ((position
+          (expose-watch-line-end-position line-end))
+
+         (overlay
+          (make-overlay position position nil nil nil))
+
+         (raw-summary
+          (expose-watch-card-collapsed-text item))
+
+         (raw-hint
+          (expose-watch-card-hint-text))
+
+         (width
+          (expose-watch-card-fit-width raw-summary raw-hint))
+
+         (summary-line
+          (expose-watch-card-pad raw-summary width))
+
+         (hint-line
+          (expose-watch-card-pad raw-hint width)))
+
+    (add-face-text-property 0 (length summary-line) 'expose-watch-card-face nil summary-line)
+    (add-face-text-property 0 (length hint-line) 'expose-watch-card-hint-line-face nil hint-line)
+
+    (overlay-put
+     overlay
+     'after-string
+     (concat
+      "\n" (expose-watch-card-content-row summary-line "|" "|")
+      "\n" (expose-watch-card-content-row hint-line "|" "|")))
+
+    (overlay-put overlay 'priority 49)
+    (overlay-put overlay 'evaporate nil)
+    (overlay-put overlay 'help-echo "C-<tab> (or click) shows the full comment")
+    (overlay-put overlay 'expose-watch-item item)
+    (overlay-put overlay 'expose-watch-file file)
+    (overlay-put overlay 'expose-watch-hunk-hash hunk-hash)
+    (overlay-put overlay 'expose-watch-card t)
+    (overlay-put overlay 'keymap expose-watch-source-item-map)
+
+    (push overlay expose-watch-source-overlays)))
+
+(defun expose-watch-source-add-item-overlay (item file hunk-hash)
+  "Add visible source overlay(s), inline card, and fringe marker for ITEM.
+
+FILE and HUNK-HASH identify ITEM's hunk. Two kinds of overlay per line
+in ITEM's range: a full-line \"interactive\" overlay (indentation,
+trailing whitespace, and all) carrying the toggle keymap, so C-<tab>
+works no matter where on the line point is -- and, only on non-blank
+lines, a second overlay trimmed to that line's actual content, carrying
+just the underline face, so the *visible* marker still only covers real
+code. Plus one collapsible inline card after the item's last line (see
+`expose-watch-source-add-item-card').
+
+Walks the range with a single forward pass (one `goto-char' to
+LINE-START, then `forward-line' between each line) rather than calling
+something like `expose-watch-line-content-bounds' per line, which would
+independently re-seek from `point-min' every time -- fine for a single
+lookup, but quadratic here across a multi-line range."
 
   (let* ((line-start
           (expose-watch-item-line-start item))
 
          (line-end
-          (expose-watch-item-line-end item line-start))
+          (expose-watch-item-line-end item line-start)))
 
-         (start
-          (expose-watch-line-start-position line-start))
+    (save-excursion
+      (goto-char (point-min))
+      (forward-line
+       (max 0
+            (1- line-start)))
 
-         (end
-          (expose-watch-line-after-position line-end))
+      (cl-loop
+       for line from line-start to line-end
+       do
+       (let* ((bol
+               (point))
 
-         (overlay
-          (make-overlay start end nil t nil)))
+              (eol
+               (line-end-position))
 
-    ;; Full-line marker is the primary Watch indicator. This avoids relying
-    ;; on the right fringe, which may already be used by diagnostics or Git.
-    (overlay-put overlay 'face 'expose-watch-item-face)
-    (overlay-put overlay 'priority 48)
-    (overlay-put overlay 'evaporate nil)
-    (overlay-put overlay 'help-echo "Expose Watch comment")
-    (overlay-put overlay 'expose-watch-item item)
-    (overlay-put overlay 'expose-watch-file file)
+              ;; Covers the whole line -- including leading indentation and
+              ;; any trailing whitespace, not just the trimmed code the
+              ;; underline decorates -- so C-<tab> triggers no matter where
+              ;; on the line point happens to be. Extends through the line's
+              ;; own trailing newline (when there is one) for the same
+              ;; reason the blank-line case below needs real width: a
+              ;; zero-width overlay's `keymap' isn't consulted for keyboard
+              ;; commands, only real characters make that work.
+              (interactive-overlay
+               (make-overlay
+                bol
+                (min (1+ eol) (point-max))
+                nil t nil)))
 
-    (push overlay expose-watch-source-overlays)
+         (overlay-put interactive-overlay 'evaporate nil)
+         (overlay-put interactive-overlay 'expose-watch-item item)
+         (overlay-put interactive-overlay 'expose-watch-file file)
+         (overlay-put interactive-overlay 'expose-watch-hunk-hash hunk-hash)
+         (overlay-put interactive-overlay 'keymap expose-watch-source-item-map)
+
+         (push interactive-overlay expose-watch-source-overlays)
+
+         (skip-chars-forward " \t" eol)
+
+         (unless (= (point) eol)
+
+           (let* ((start
+                   (point))
+
+                  (end
+                   (progn
+                     (goto-char eol)
+                     (skip-chars-backward " \t" start)
+                     (point)))
+
+                  (overlay
+                   (make-overlay start end nil t nil)))
+
+             ;; Per-line marker is the primary Watch indicator. This avoids
+             ;; relying on the right fringe, which may already be used by
+             ;; diagnostics or Git.
+             (overlay-put overlay 'face 'expose-watch-item-face)
+             (overlay-put overlay 'priority 48)
+             (overlay-put overlay 'evaporate nil)
+             (overlay-put overlay 'help-echo "Expose Watch comment (C-<tab> toggles detail)")
+
+             (push overlay expose-watch-source-overlays)))
+
+         (goto-char eol)
+         (forward-line 1))))
+
+    (expose-watch-source-add-item-card item file hunk-hash line-end)
 
     (when expose-watch-show-fringe-markers
       (expose-watch-source-add-fringe-overlay item file))))
@@ -1548,7 +2079,8 @@ Expose Watch only marks concrete comments in the source buffer."
 
           (expose-watch-source-add-item-overlay
            item
-           file)
+           file
+           (plist-get hunk :hash))
 
           (setq expose-watch-visible-item-count
                 (1+ expose-watch-visible-item-count))))))
@@ -1566,196 +2098,6 @@ Expose Watch only marks concrete comments in the source buffer."
       (with-current-buffer buffer
         (when (bound-and-true-p expose-watch-mode)
           (expose-watch-source-refresh))))))
-
-(defun expose-watch-item-at-point ()
-  "Return Expose Watch item at point, or nil."
-
-  (cl-loop
-   for overlay in (overlays-at (point))
-   for item = (overlay-get overlay 'expose-watch-item)
-   when item
-   return item))
-
-(defun expose-watch-hover-body (item)
-  "Return hover body for ITEM."
-
-  (let* ((severity
-          (expose-watch-string
-           (or
-            (plist-get item :severity)
-            "info")))
-
-         (category
-          (expose-watch-string
-           (or
-            (plist-get item :category)
-            "")))
-
-         (title
-          (expose-watch-string
-           (or
-            (plist-get item :title)
-            "Watch comment")))
-
-         (comment
-          (expose-watch-string
-           (or
-            (plist-get item :comment)
-            "")))
-
-         (anchor
-          (expose-watch-string
-           (or
-            (plist-get item :anchor-text)
-            (plist-get item :anchor_text)
-            "")))
-
-         (file
-          (expose-watch-item-file
-           item
-           (or
-            (expose-watch-current-buffer-file)
-            "")))
-
-         (line-start
-          (expose-watch-item-line-start item))
-
-         (line-end
-          (expose-watch-item-line-end item))
-
-         (suggestion
-          (expose-watch-suggestion-text item))
-
-         (patch
-          (expose-watch-suggestion-patch item))
-
-         (severity-face
-          (expose-watch-severity-face severity)))
-
-    (with-temp-buffer
-      (insert
-       (propertize
-        (format "[%s]" (upcase severity))
-        'face
-        severity-face))
-
-      (unless (expose-watch-blank-p category)
-        (insert
-         (propertize
-          (format " %s" category)
-          'face
-          'shadow)))
-
-      (insert "\n")
-
-      (insert
-       (propertize
-        (expose-watch-format-location
-         file
-         line-start
-         line-end)
-        'face
-        'font-lock-constant-face))
-
-      (insert "\n\n")
-
-      (insert
-       (propertize title 'face 'bold))
-
-      (insert "\n\n")
-
-      (unless (expose-watch-blank-p comment)
-        (insert comment)
-        (insert "\n\n"))
-
-      (unless (expose-watch-blank-p anchor)
-        (insert
-         (propertize
-          "Anchor\n"
-          'face
-          'font-lock-keyword-face))
-        (insert anchor)
-        (insert "\n\n"))
-
-      (unless (expose-watch-blank-p suggestion)
-        (insert
-         (propertize
-          "Suggestion\n"
-          'face
-          'font-lock-keyword-face))
-        (insert suggestion)
-        (insert "\n\n"))
-
-      (unless (expose-watch-blank-p patch)
-        (insert
-         (propertize
-          "Patch\n"
-          'face
-          'font-lock-keyword-face))
-        (insert patch)
-        (insert "\n"))
-
-      (buffer-string))))
-
-(defun expose-watch-show-hover (buffer position)
-  "Show Expose Watch hover for BUFFER at POSITION."
-
-  (when (buffer-live-p buffer)
-
-    (with-current-buffer buffer
-
-      (when (and
-             expose-watch-mode
-             (= position
-                (point)))
-
-        (when-let ((item
-                    (expose-watch-item-at-point)))
-
-          (expose-popup-show-view
-           (list
-            :title "Expose Watch"
-            :body (expose-watch-hover-body item)
-            :history nil)))))))
-
-(defun expose-watch-schedule-hover ()
-  "Schedule Expose Watch hover."
-
-  (when expose-watch-hover-timer
-    (cancel-timer expose-watch-hover-timer)
-    (setq expose-watch-hover-timer nil))
-
-  (setq expose-watch-hover-timer
-        (run-with-idle-timer
-         expose-watch-hover-delay
-         nil
-         #'expose-watch-show-hover
-         (current-buffer)
-         (point))))
-
-(defun expose-watch-cancel-hover ()
-  "Cancel pending Expose Watch hover."
-
-  (when expose-watch-hover-timer
-    (cancel-timer expose-watch-hover-timer)
-    (setq expose-watch-hover-timer nil)))
-
-(defun expose-watch-post-command ()
-  "Schedule Expose Watch hover when point is on a watch comment."
-
-  (cond
-   ((and
-     (symbolp this-command)
-     (fboundp 'expose-popup-command-p)
-     (expose-popup-command-p this-command))
-
-    (expose-watch-cancel-hover))
-
-   ((expose-watch-item-at-point)
-    (expose-watch-schedule-hover))
-
-   (t
-    (expose-watch-cancel-hover))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Review current changed hunks
@@ -2249,6 +2591,392 @@ Expose Watch only marks concrete comments in the source buffer."
     (switch-to-buffer buffer)))
 
 ;;; ---------------------------------------------------------------------------
+;;; Active items buffer
+;;;
+;;; Unlike the list buffer above (a full history, including comments for
+;;; hunks that no longer match the current diff), this only shows items
+;;; that are still live right now -- the same view across every watched
+;;; file in the project instead of just the one you happen to have open.
+;;; ---------------------------------------------------------------------------
+
+(defun expose-watch-active-item-file-path (project-root file)
+  "Return absolute path for FILE under PROJECT-ROOT, or nil if it escapes it.
+
+FILE comes from Watch's own stored state, which is always written by
+`expose-watch-buffer-file' as a path relative to PROJECT-ROOT -- but this
+resolves it defensively anyway, the same way
+`expose-review-buffer-item-file-path' does, since it ultimately still
+traces back to an AI-provided `:file' value."
+
+  (let ((resolved
+         (expand-file-name file project-root)))
+
+    (when (file-in-directory-p resolved project-root)
+      resolved)))
+
+(defun expose-watch-active-insert-item (file item)
+  "Insert active-items entry for ITEM in FILE.
+
+Tags the whole block with an `expose-watch-active-item' text property so
+navigation/jump commands work from anywhere inside it."
+
+  (let* ((block-start
+          (point))
+
+         (severity
+          (expose-watch-string
+           (or
+            (plist-get item :severity)
+            "info")))
+
+         (category
+          (expose-watch-string
+           (or
+            (plist-get item :category)
+            "")))
+
+         (title
+          (expose-watch-string
+           (or
+            (plist-get item :title)
+            "Watch comment")))
+
+         (comment
+          (expose-watch-string
+           (or
+            (plist-get item :comment)
+            "")))
+
+         (line-start
+          (expose-watch-item-line-start item))
+
+         (line-end
+          (expose-watch-item-line-end item))
+
+         (face
+          (expose-watch-severity-face severity)))
+
+    (insert
+     (propertize
+      (expose-watch-format-location file line-start line-end)
+      'face 'link
+      'help-echo "RET jumps to this line"))
+
+    (insert "\n")
+
+    (insert
+     (propertize
+      (format "[%s] " (upcase severity))
+      'face
+      face))
+
+    (insert
+     (propertize
+      title
+      'face
+      'expose-watch-list-title-face))
+
+    (unless (expose-watch-blank-p category)
+      (insert
+       (propertize
+        (format " (%s)" category)
+        'face
+        'expose-watch-list-meta-face)))
+
+    (insert "\n")
+
+    (unless (expose-watch-blank-p comment)
+      (dolist (line
+               (split-string comment "\n"))
+
+        (insert "  ")
+        (insert line)
+        (insert "\n")))
+
+    (insert "\n")
+
+    (add-text-properties
+     block-start
+     (point)
+     (list
+      'expose-watch-active-item
+      (list :file file :item item)))))
+
+(defun expose-watch-active-render ()
+  "Render the current Expose Watch active-items buffer."
+
+  (let* ((inhibit-read-only t)
+
+         (project-root
+          expose-watch-active-project-root)
+
+         (default-directory
+          project-root)
+
+         (entries
+          (expose-watch-project-active-entries project-root)))
+
+    (erase-buffer)
+
+    (insert
+     (propertize
+      "Expose Watch — Active Items\n"
+      'face
+      'expose-watch-list-title-face))
+
+    (insert "\n")
+
+    (expose-watch-list-insert-label
+     "Project:"
+     (abbreviate-file-name project-root))
+
+    (insert
+     "TAB/S-TAB moves between items. RET jumps to the source line. g refreshes. q quits.\n\n")
+
+    (if entries
+
+        (dolist (entry entries)
+          (expose-watch-active-insert-item
+           (plist-get entry :file)
+           (plist-get entry :item)))
+
+      (insert "No active watch items right now.\n"))
+
+    (goto-char (point-min))))
+
+(defun expose-watch-active-current-item ()
+  "Return active-items entry at point."
+
+  (or
+   (get-text-property
+    (point)
+    'expose-watch-active-item)
+
+   (get-text-property
+    (line-beginning-position)
+    'expose-watch-active-item)
+
+   (get-text-property
+    (max
+     (point-min)
+     (1- (line-end-position)))
+    'expose-watch-active-item)))
+
+(defun expose-watch-active-next-item-position ()
+  "Return position of the next active item after point."
+
+  (let ((current
+         (expose-watch-active-current-item))
+
+        (position
+         (point))
+
+        found)
+
+    (while (and
+            (not found)
+            (< position
+               (point-max)))
+
+      (setq position
+            (next-single-property-change
+             position
+             'expose-watch-active-item
+             nil
+             (point-max)))
+
+      (let ((item
+             (get-text-property
+              position
+              'expose-watch-active-item)))
+
+        (when (and item
+                   (not
+                    (eq item current)))
+          (setq found position))))
+
+    found))
+
+(defun expose-watch-active-previous-item-position ()
+  "Return position of the previous active item before point."
+
+  (let ((current
+         (expose-watch-active-current-item))
+
+        (position
+         (point))
+
+        found)
+
+    (while (and
+            (not found)
+            (> position
+               (point-min)))
+
+      (setq position
+            (previous-single-property-change
+             position
+             'expose-watch-active-item
+             nil
+             (point-min)))
+
+      ;; Step back into the previous property range.
+      (let* ((probe
+              (max
+               (point-min)
+               (1- position)))
+
+             (item
+              (get-text-property
+               probe
+               'expose-watch-active-item)))
+
+        (when (and item
+                   (not
+                    (eq item current)))
+          (setq found probe))))
+
+    found))
+
+(defun expose-watch-active-next-item ()
+  "Move to next active Expose Watch item."
+
+  (interactive)
+
+  (if-let ((position
+            (expose-watch-active-next-item-position)))
+
+      (progn
+        (goto-char position)
+        (beginning-of-line))
+
+    (message "No next active item")))
+
+(defun expose-watch-active-previous-item ()
+  "Move to previous active Expose Watch item."
+
+  (interactive)
+
+  (if-let ((position
+            (expose-watch-active-previous-item-position)))
+
+      (progn
+        (goto-char position)
+        (beginning-of-line))
+
+    (message "No previous active item")))
+
+(defun expose-watch-active-open-item ()
+  "Open the active Expose Watch item at point."
+
+  (interactive)
+
+  (let ((entry
+         (expose-watch-active-current-item)))
+
+    (unless entry
+      (user-error "No active watch item on this line"))
+
+    (let* ((item
+            (plist-get entry :item))
+
+           (line
+            (or
+             (plist-get item :line-start)
+             1))
+
+           (path
+            (expose-watch-active-item-file-path
+             expose-watch-active-project-root
+             (plist-get entry :file))))
+
+      (unless path
+        (user-error
+         "Watch item file is missing or outside the project: %s"
+         (plist-get entry :file)))
+
+      (unless (file-exists-p path)
+        (user-error "File does not exist: %s" path))
+
+      (find-file path)
+      (goto-char (point-min))
+      (forward-line
+       (max 0
+            (1- line)))
+      (recenter))))
+
+(defun expose-watch-active-reload ()
+  "Reload the current Expose Watch active-items buffer from disk."
+
+  (interactive)
+
+  (unless expose-watch-active-project-root
+    (user-error "No Expose Watch project in this buffer"))
+
+  (expose-watch-active-render))
+
+(defvar expose-watch-active-mode-map
+  (let ((map
+         (make-sparse-keymap)))
+
+    (set-keymap-parent map special-mode-map)
+
+    (define-key map (kbd "TAB") #'expose-watch-active-next-item)
+    (define-key map (kbd "<backtab>") #'expose-watch-active-previous-item)
+    (define-key map (kbd "RET") #'expose-watch-active-open-item)
+    (define-key map (kbd "g") #'expose-watch-active-reload)
+    (define-key map (kbd "q") #'quit-window)
+
+    map)
+  "Keymap for `expose-watch-active-mode'.")
+
+(define-derived-mode expose-watch-active-mode special-mode "ExposeWatch-Active"
+  "Read-only buffer listing every currently-active Expose Watch item."
+
+  (setq truncate-lines nil)
+  (setq buffer-read-only t))
+
+(with-eval-after-load 'evil
+  ;; Keep normal Evil movement/copy/search behavior; only override the
+  ;; navigation keys this mode actually defines.
+  (evil-define-key* 'normal expose-watch-active-mode-map
+    (kbd "TAB") #'expose-watch-active-next-item
+    (kbd "<backtab>") #'expose-watch-active-previous-item
+    (kbd "RET") #'expose-watch-active-open-item
+    (kbd "g") #'expose-watch-active-reload
+    (kbd "q") #'quit-window)
+
+  (evil-define-key* 'motion expose-watch-active-mode-map
+    (kbd "TAB") #'expose-watch-active-next-item
+    (kbd "<backtab>") #'expose-watch-active-previous-item
+    (kbd "RET") #'expose-watch-active-open-item
+    (kbd "g") #'expose-watch-active-reload
+    (kbd "q") #'quit-window)
+
+  (evil-set-initial-state 'expose-watch-active-mode 'normal))
+
+;;;###autoload
+(defun expose-watch-open-active-list ()
+  "Open the Expose Watch active-items buffer for the current project."
+
+  (interactive)
+
+  (let* ((project-root
+          (expose-watch-project-root))
+
+         (buffer
+          (get-buffer-create expose-watch-active-buffer-name)))
+
+    (with-current-buffer buffer
+      (setq default-directory project-root)
+      (expose-watch-active-mode)
+      (setq default-directory project-root)
+      (setq expose-watch-active-project-root project-root)
+      (expose-watch-active-render))
+
+    (switch-to-buffer buffer)))
+
+;;; ---------------------------------------------------------------------------
 ;;; Minor modes / commands
 ;;; ---------------------------------------------------------------------------
 
@@ -2348,16 +3076,15 @@ via `expose-watch-global-mode' to any file opened afterward."
         (setq expose-watch-state 'idle)
 
         (add-hook 'after-save-hook #'expose-watch-after-save nil t)
-        (add-hook 'post-command-hook #'expose-watch-post-command nil t)
 
         (expose-watch-source-refresh)
         (expose-watch-refresh-mode-line))
 
     (remove-hook 'after-save-hook #'expose-watch-after-save t)
-    (remove-hook 'post-command-hook #'expose-watch-post-command t)
 
-    (expose-watch-cancel-hover)
-    (expose-watch-source-clear)
+    ;; expose-watch-mode is already nil at this point, so this just clears
+    ;; overlays (the loop that would rebuild them never runs).
+    (expose-watch-source-refresh)
 
     (setq expose-watch-state 'idle)
     (setq expose-watch-visible-item-count 0)

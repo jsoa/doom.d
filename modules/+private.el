@@ -2,7 +2,7 @@
 
 (require 'seq)
 
-(defconst js/private-doom-directory-candidates
+(defconst jsoa/private-doom-directory-candidates
   (delq
    nil
    (list
@@ -29,7 +29,7 @@
     (expand-file-name "~/doom-private/")))
   "Candidate directories containing optional private Doom configuration.")
 
-(defun js/private-doom-directory-valid-p (directory)
+(defun jsoa/private-doom-directory-valid-p (directory)
   "Return non-nil if DIRECTORY contains a readable private Doom config."
 
   (and
@@ -38,30 +38,30 @@
    (file-readable-p
     (expand-file-name "config.el" directory))))
 
-(defun js/find-private-doom-directory ()
+(defun jsoa/find-private-doom-directory ()
   "Return the first valid private Doom configuration directory."
 
   (seq-find
-   #'js/private-doom-directory-valid-p
-   js/private-doom-directory-candidates))
+   #'jsoa/private-doom-directory-valid-p
+   jsoa/private-doom-directory-candidates))
 
-(defconst js/private-doom-directory
+(defconst jsoa/private-doom-directory
   (when-let ((directory
-              (js/find-private-doom-directory)))
+              (jsoa/find-private-doom-directory)))
 
     (file-name-as-directory
      (file-truename directory)))
   "Resolved private Doom configuration directory, or nil when unavailable.")
 
-(defun js/load-private-doom-config ()
+(defun jsoa/load-private-doom-config ()
   "Load the private Doom configuration when available."
 
-  (when js/private-doom-directory
+  (when jsoa/private-doom-directory
     (load
      (expand-file-name
       "config.el"
-      js/private-doom-directory)
+      jsoa/private-doom-directory)
      nil
      nil)))
 
-(js/load-private-doom-config)
+(jsoa/load-private-doom-config)

@@ -83,7 +83,12 @@ base64 images."
 ;;; ---------------------------------------------------------------------------
 
 (defun expose-hover-review-source-active-p ()
-  "Return non-nil if Expose Review owns hover at point."
+  "Return non-nil if Expose Review owns hover at point.
+
+Watch no longer has its own competing hover popup (its comments show
+inline via a collapsible card instead), so it has nothing left to
+suppress the general hover for -- unlike Full Review and Region
+Review, which still do."
 
   (or
    (and
@@ -92,11 +97,7 @@ base64 images."
 
    (and
     (fboundp 'expose-review-region-item-at-point)
-    (expose-review-region-item-at-point))
-
-   (and
-    (fboundp 'expose-watch-item-at-point)
-    (expose-watch-item-at-point))))
+    (expose-review-region-item-at-point))))
 
 (defun expose-hover-disabled-mode-p ()
   "Return non-nil if the current major mode disables Expose hover."

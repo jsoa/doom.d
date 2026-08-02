@@ -1,4 +1,4 @@
-;;; ~/.doom.d/modes/evil-mode.el -*- lexical-binding: t; -*-
+;;; modules/+evil.el -*- lexical-binding: t; -*-
 
 ;;
 ;; Evil mode

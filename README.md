@@ -35,6 +35,17 @@ This config is built around a few core principles:
 
 ---
 
+## Site-lisp Libraries
+
+Custom local packages under `site-lisp/`, each with its own README and ERT test suite run in CI.
+
+| Library                                      | Status                                                                                                                                                          | Description                                                             |
+|-----------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------|
+| [expose](site-lisp/expose/README.md)         | [![expose tests](https://github.com/jsoa/doom.d/actions/workflows/expose-tests.yml/badge.svg)](https://github.com/jsoa/doom.d/actions/workflows/expose-tests.yml)         | Code context, AI-assisted actions, review sessions, and background Watch mode directly in source buffers. |
+| [dashboard](site-lisp/dashboard/README.md)   | [![dashboard tests](https://github.com/jsoa/doom.d/actions/workflows/dashboard-tests.yml/badge.svg)](https://github.com/jsoa/doom.d/actions/workflows/dashboard-tests.yml) | Per-project command-center buffer: project info, Git summary, LOC breakdown, diagnostics, and TODOs. |
+
+---
+
 ## Installation
 
 ```bash

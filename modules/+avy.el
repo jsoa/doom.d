@@ -1,6 +1,5 @@
-;;; modes/+avy.el -*- lexical-binding: t; -*-
+;;; modules/+avy.el -*- lexical-binding: t; -*-
 
-;; config.el
 (use-package! avy
   :config
   (setq avy-timeout-seconds 0.3))

@@ -10,7 +10,6 @@
         compilation-error-screen-columns nil
         next-error-message-highlight t
         compilation-always-kill t
-        compilation-auto-jump-to-first-error t
         compilation-skip-threshold 2
         )
 

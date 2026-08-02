@@ -1,7 +1,5 @@
 ;;; HTML / Angular setup
 
-(add-hook 'web-mode-hook #'jsoa/web-mode-angular-font-lock)
-
 (defun jsoa/html-mode-dispatch ()
   "Use web-mode for Angular projects, html-mode otherwise."
   (if (and buffer-file-name

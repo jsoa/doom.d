@@ -1,4 +1,4 @@
 ;;; modules/+direnv.el -*- lexical-binding: t; -*-
 
 (after! direnv
-  (direnv-model 1))
+  (direnv-mode 1))

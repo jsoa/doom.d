@@ -1,7 +1,5 @@
 ;;; +env.el -*- lexical-binding: t; -*-
 
-;;; +env.el -*- lexical-binding: t; -*-
-
 (require 'seq)
 (require 'subr-x)
 

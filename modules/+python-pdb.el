@@ -129,6 +129,48 @@ For example, Python 3.13.4 returns `(3 13 4)`."
     expression))
 
 ;;;###autoload
+(defun js/python-pdb-file ()
+  "Start PDB on the current buffer's file."
+  (interactive)
+  (unless buffer-file-name
+    (user-error "Current buffer is not visiting a file"))
+  (js/python-pdb--start
+   (list (expand-file-name buffer-file-name))))
+
+;;;###autoload
+(defun js/python-pdb-django ()
+  "Start PDB wrapping the Django dev server.
+
+Uses `js/python-pdb-django-command'."
+  (interactive)
+  (js/python-pdb--start js/python-pdb-django-command))
+
+;;;###autoload
+(defun js/python-pdb-attach (pid)
+  "Attach PDB to the running process PID.
+
+Requires Python 3.14 or newer."
+  (interactive
+   (list (read-number "PID to attach to: ")))
+  (unless (js/python-pdb--supports-attach-p)
+    (user-error "PDB attach requires Python 3.14 or newer"))
+  (js/python-pdb--start
+   (list "-p" (number-to-string pid))))
+
+;;;###autoload
+(defun js/python-pdb-command (command)
+  "Send an arbitrary COMMAND to the active PDB session."
+  (interactive
+   (list (read-string "PDB command: ")))
+  (js/python-pdb--send-command command))
+
+;;;###autoload
+(defun js/python-pdb-stop ()
+  "Stop the active PDB session."
+  (interactive)
+  (js/python-pdb--send-command "quit"))
+
+;;;###autoload
 (defun js/python-pdb-break ()
   "Set a PDB breakpoint at the current source line."
   (interactive)

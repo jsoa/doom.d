@@ -1,7 +1,5 @@
 ;;; modules/+private.el -*- lexical-binding: t; -*-
 
-;;; modules/+private.el -*- lexical-binding: t; -*-
-
 (require 'seq)
 
 (defconst js/private-doom-directory-candidates
@@ -28,8 +26,7 @@
     (expand-file-name "~/.config/doom-private/")
 
     ;; Optional non-hidden variants.
-    (expand-file-name "~/doom-private/")
-    (expand-file-name "~/.config/doom-private/")))
+    (expand-file-name "~/doom-private/")))
   "Candidate directories containing optional private Doom configuration.")
 
 (defun js/private-doom-directory-valid-p (directory)

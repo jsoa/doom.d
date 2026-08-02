@@ -36,7 +36,7 @@
     (setq doom-font
           (font-spec
            :family font-family
-           :size: (if (eq system-type 'darwin) 14 15)))))
+           :size (if (eq system-type 'darwin) 14 15)))))
 
 
 ;; There are two ways to load a theme. Both assume the theme is installed and

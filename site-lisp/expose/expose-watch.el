@@ -104,8 +104,11 @@ Expected values are `idle', `running', and `error'.")
   :group 'expose-watch)
 
 (defface expose-watch-item-face
-  '((t (:inherit diff-refine-added :extend t)))
-  "Face for concrete Expose Watch comment lines."
+  '((t (:underline (:color "#51afef" :style line))))
+  "Face for concrete Expose Watch comment lines.
+
+Underlined in doom-one's blue rather than filled with a background, so
+it reads as \"annotated\" without competing with syntax highlighting."
   :group 'expose-watch)
 
 (defface expose-watch-fringe-face
@@ -694,6 +697,26 @@ If PATH contains unreadable data, move it aside and return nil."
 
     (and state
          (plist-get state :enabled))))
+
+(defun expose-watch-project-auto-enabled-p (project-root)
+  "Return non-nil when PROJECT-ROOT has Expose Watch auto-arming enabled.
+
+When enabled, editing any file in the project for the first time
+auto-enables `expose-watch-mode' for that file (see
+`expose-watch-arm-auto-watch')."
+
+  (plist-get
+   (expose-watch-load-session project-root)
+   :auto-watch))
+
+(defun expose-watch-set-project-auto-enabled (project-root enabled)
+  "Set Expose Watch auto-arming for PROJECT-ROOT to ENABLED."
+
+  (expose-watch-save-session
+   (plist-put
+    (expose-watch-load-session project-root)
+    :auto-watch
+    enabled)))
 
 (defun expose-watch-reviewed-hunk-hashes (state)
   "Return reviewed hunk hashes from file STATE."
@@ -2243,6 +2266,68 @@ Expose Watch only marks concrete comments in the source buffer."
       (let ((expose-watch--restoring t))
         (expose-watch-mode 1)))))
 
+(defun expose-watch-auto-enable-on-first-change ()
+  "Enable `expose-watch-mode' for the current buffer, if not already on.
+
+Added to `first-change-hook', which Emacs runs the first time a buffer
+becomes modified -- including again after a save, since saving clears
+the modified flag. The latter is harmless here: once Watch is on for a
+file it stays on, so this is a no-op on every save after the first."
+
+  (unless expose-watch-mode
+    (expose-watch-mode 1)))
+
+(defun expose-watch-arm-auto-watch ()
+  "Arm the current buffer to auto-enable Expose Watch on its first edit.
+
+Only takes effect when the current project has auto-arming enabled (see
+`expose-watch-toggle-project-auto') and the file isn't already watched
+or excluded from Expose requests."
+
+  (when-let* ((project-root
+               (expose-watch-current-project-root))
+
+              (file
+               (expose-watch-current-buffer-file)))
+
+    (when (and
+           (not expose-watch-mode)
+           (expose-watch-project-auto-enabled-p project-root)
+           (not (expose-redact-excluded-path-p file project-root)))
+
+      (add-hook 'first-change-hook #'expose-watch-auto-enable-on-first-change nil t))))
+
+;;;###autoload
+(defun expose-watch-toggle-project-auto ()
+  "Toggle Expose Watch auto-arming for the current project.
+
+When enabled, editing any file in this project for the first time
+automatically enables `expose-watch-mode' for that file -- the first
+save after that runs Expose Watch exactly as if you'd enabled it by
+hand. Applies immediately to already-open buffers in this project, and
+via `expose-watch-global-mode' to any file opened afterward."
+
+  (interactive)
+
+  (let* ((project-root
+          (expose-watch-project-root))
+
+         (enabled
+          (not (expose-watch-project-auto-enabled-p project-root))))
+
+    (expose-watch-set-project-auto-enabled project-root enabled)
+
+    (when enabled
+      (dolist (buffer (buffer-list))
+        (with-current-buffer buffer
+          (when buffer-file-name
+            (expose-watch-arm-auto-watch)))))
+
+    (message
+     "Expose Watch auto-arming %s for %s"
+     (if enabled "enabled" "disabled")
+     (abbreviate-file-name project-root))))
+
 ;;;###autoload
 (define-minor-mode expose-watch-mode
   "Watch this buffer for changed hunks and background review comments."
@@ -2290,21 +2375,24 @@ Expose Watch only marks concrete comments in the source buffer."
 
 ;;;###autoload
 (define-minor-mode expose-watch-global-mode
-  "Restore Expose Watch mode for watched files."
+  "Restore Expose Watch mode for watched files, and arm auto-watch projects."
   :global t
 
   (if expose-watch-global-mode
 
       (progn
         (add-hook 'find-file-hook #'expose-watch-enable-if-watched)
+        (add-hook 'find-file-hook #'expose-watch-arm-auto-watch)
 
         (dolist (buffer
                  (buffer-list))
           (with-current-buffer buffer
             (when buffer-file-name
-              (expose-watch-enable-if-watched)))))
+              (expose-watch-enable-if-watched)
+              (expose-watch-arm-auto-watch)))))
 
-    (remove-hook 'find-file-hook #'expose-watch-enable-if-watched)))
+    (remove-hook 'find-file-hook #'expose-watch-enable-if-watched)
+    (remove-hook 'find-file-hook #'expose-watch-arm-auto-watch)))
 
 ;;;###autoload
 (defun expose-watch-current-buffer ()

@@ -97,11 +97,17 @@ to serialize it.")
   :group 'expose-review-region)
 
 (defface expose-review-region-item-face
-  '((t (:underline (:color "#51afef" :style line))))
+  '((t (:underline (:color "#c678dd" :style wave) :extend nil)))
   "Face for lines with concrete region review items.
 
-Underlined in doom-one's blue rather than filled with a background, so
-it reads as \"annotated\" without competing with syntax highlighting."
+A squiggly underline in doom-one's magenta, rather than filled with a
+background, so it reads as \"annotated\" without competing with syntax
+highlighting, and stands out more than a plain line underline would.
+`:extend nil' keeps the underline from bleeding across the blank tail
+of each line -- the source overlay this face is applied to spans full
+lines (including each trailing newline) to cover multi-line items, and
+without this the underline would stretch to the window's right edge on
+every line instead of stopping at the actual code."
   :group 'expose-review-region)
 
 (defface expose-review-region-fringe-face
@@ -413,6 +419,34 @@ the active directory forever. See
     (forward-line
      (max 0 line))
     (point)))
+
+(defun expose-review-region-line-content-bounds (line)
+  "Return (START . END) bounding LINE's non-blank content, or nil if blank.
+
+START skips leading indentation; END stops before trailing whitespace.
+Used to keep item source overlays hugging real code instead of
+underlining indentation or trailing blank space -- unlike the full-range
+overlay, which deliberately does cover blank lines/line endings."
+
+  (save-excursion
+    (goto-char (point-min))
+    (forward-line
+     (max 0
+          (1- line)))
+
+    (let ((eol
+           (line-end-position)))
+
+      (skip-chars-forward " \t" eol)
+
+      (unless (= (point) eol)
+
+        (let ((start
+               (point)))
+
+          (goto-char eol)
+          (skip-chars-backward " \t" start)
+          (cons start (point)))))))
 
 (defun expose-review-region-session-line-start (session)
   "Return SESSION start line."
@@ -1294,7 +1328,18 @@ the active directory forever. See
     (cons line-start line-end)))
 
 (defun expose-review-region-source-add-item-overlay (item session)
-  "Add Watch-style source overlay for review ITEM in SESSION."
+  "Add Watch-style source overlay(s) for review ITEM in SESSION.
+
+One overlay per non-blank line in ITEM's effective range, each trimmed
+to that line's actual content -- so the underline only covers real
+code, never indentation, trailing whitespace, or blank lines inside a
+multi-line item.
+
+Walks the range with a single forward pass (one `goto-char' to
+LINE-START, then `forward-line' between each line) rather than calling
+`expose-review-region-line-content-bounds' per line, which would
+independently re-seek from `point-min' every time -- fine for a single
+lookup, but quadratic here across a multi-line range."
 
   (when (expose-review-region-item-file-matches-session-p item session)
 
@@ -1305,26 +1350,47 @@ the active directory forever. See
             (car line-range))
 
            (line-end
-            (cdr line-range))
+            (cdr line-range)))
 
-           (start
-            (expose-review-region-line-start-position line-start))
+      (save-excursion
+        (goto-char (point-min))
+        (forward-line
+         (max 0
+              (1- line-start)))
 
-           ;; Same idea as Watch: cover the full visual line/range.
-           (end
-            (expose-review-region-line-after-position line-end))
+        (cl-loop
+         for line from line-start to line-end
+         do
+         (let ((eol
+                (line-end-position)))
 
-           (overlay
-            (make-overlay start end nil t nil)))
+           (skip-chars-forward " \t" eol)
 
-      (overlay-put overlay 'face 'expose-review-region-item-face)
-      (overlay-put overlay 'priority 95)
-      (overlay-put overlay 'evaporate nil)
-      (overlay-put overlay 'help-echo "Expose Region Review item")
-      (overlay-put overlay 'expose-review-region-session session)
-      (overlay-put overlay 'expose-review-region-item item)
+           (unless (= (point) eol)
 
-      (push overlay expose-review-region-source-overlays))))
+             (let* ((start
+                     (point))
+
+                    (end
+                     (progn
+                       (goto-char eol)
+                       (skip-chars-backward " \t" start)
+                       (point)))
+
+                    (overlay
+                     (make-overlay start end nil t nil)))
+
+               (overlay-put overlay 'face 'expose-review-region-item-face)
+               (overlay-put overlay 'priority 95)
+               (overlay-put overlay 'evaporate nil)
+               (overlay-put overlay 'help-echo "Expose Region Review item")
+               (overlay-put overlay 'expose-review-region-session session)
+               (overlay-put overlay 'expose-review-region-item item)
+
+               (push overlay expose-review-region-source-overlays)))
+
+           (goto-char eol)
+           (forward-line 1)))))))
 
 (defun expose-review-region-source-add-session-overlays (session)
   "Add source overlays for region review SESSION."

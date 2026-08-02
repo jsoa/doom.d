@@ -1,4 +1,4 @@
-;;; ~/.doom.d/modes/org.el -*- lexical-binding: t; -*-
+;;; modules/+org.el -*- lexical-binding: t; -*-
 
 
 (after! org

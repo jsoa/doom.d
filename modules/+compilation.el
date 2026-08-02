@@ -1,4 +1,4 @@
-;;; ~/.doom.d/modes/compilation-mode.el -*- lexical-binding: t; -*-
+;;; modules/+compilation.el -*- lexical-binding: t; -*-
 
 ;;
 ;; Compilation

@@ -1,4 +1,4 @@
-;;; ~/.doom.d/modes/magit.el -*- lexical-binding: t; -*-
+;;; modules/+magit.el -*- lexical-binding: t; -*-
 
 ;;
 ;; Magit
@@ -28,10 +28,15 @@
 (add-hook! 'git-commit-setup-hook 'jsoa/git-commit-setup)
 
 (after! magit
-  ;; Do NOT show diffs automatically in status buffer
+  ;; Word-level diff refinement, without highlighting whitespace-only
+  ;; changes as part of it.
   (setq magit-diff-refine-hunk t
         magit-diff-paint-whitespace nil
         magit-diff-refine-ignore-whitespace t)
+
+  ;; Diffs are not shown automatically in the status buffer by default;
+  ;; this toggles `magit-insert-diff' in and out of
+  ;; `magit-status-sections-hook' on demand instead.
   (defun jsoa/magit-toggle-diff ()
     (interactive)
     (if (member 'magit-insert-diff magit-status-sections-hook)

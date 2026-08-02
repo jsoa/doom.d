@@ -1,4 +1,4 @@
-;;; ~/.doom.d/modes/projectile.el -*- lexical-binding: t; -*-
+;;; modules/+projectile.el -*- lexical-binding: t; -*-
 
 ;;
 ;; Projectile

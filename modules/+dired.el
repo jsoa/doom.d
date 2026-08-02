@@ -1,4 +1,4 @@
-;;; ~/.doom.d/modes/dired.el -*- lexical-binding: t; -*-
+;;; modules/+dired.el -*- lexical-binding: t; -*-
 
 ;;
 ;; Dired

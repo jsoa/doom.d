@@ -1,4 +1,4 @@
-;;; modes/+corfu.el -*- lexical-binding: t; -*-
+;;; modules/+corfu.el -*- lexical-binding: t; -*-
 
 (after! corfu
   (setq corfu-auto t

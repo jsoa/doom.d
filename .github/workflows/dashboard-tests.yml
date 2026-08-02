@@ -1,0 +1,30 @@
+name: dashboard tests
+
+on:
+  push:
+    paths:
+      - "site-lisp/dashboard/**"
+      - ".github/workflows/dashboard-tests.yml"
+  pull_request:
+    paths:
+      - "site-lisp/dashboard/**"
+      - ".github/workflows/dashboard-tests.yml"
+
+jobs:
+  ert:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        emacs-version: ["29.4", "snapshot"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: purcell/setup-emacs@master
+        with:
+          version: ${{ matrix.emacs-version }}
+
+      - name: Run ERT suite
+        working-directory: site-lisp/dashboard
+        run: emacs -Q --batch -l test/run-tests.el

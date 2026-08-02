@@ -11,6 +11,40 @@
     (setenv "PATH"
             (concat dir path-separator (getenv "PATH")))))
 
+(defun jsoa/setup-node-path-nvm-async ()
+  "Resolve NVM's active `npx' directory asynchronously and prepend it.
+
+Sourcing `nvm.sh' to resolve the active Node version is slow -- often
+several hundred milliseconds or more -- and this previously ran via a
+synchronous `shell-command-to-string' at startup, blocking all of
+Emacs for however long that took on every single launch (the same
+class of bug `du -sh .' was in the project dashboard). Using
+`make-process' instead means startup itself never waits on it: nothing
+that actually needs `npx'/`node' on PATH (LSP servers, Prettier, etc.)
+runs until well after startup finishes, once a relevant buffer is
+opened."
+
+  (make-process
+   :name "jsoa-nvm-npx"
+   :buffer (generate-new-buffer " *jsoa-nvm-npx*")
+   :command
+   (list shell-file-name shell-command-switch
+         (format "%s -lc 'source ~/.nvm/nvm.sh >/dev/null 2>&1 && command -v npx'"
+                 shell-file-name))
+   :noquery t
+   :sentinel
+   (lambda (process _event)
+     (when (memq (process-status process) '(exit signal))
+       (let ((npx
+              (string-trim
+               (with-current-buffer (process-buffer process)
+                 (buffer-string)))))
+         (kill-buffer (process-buffer process))
+
+         (unless (string-empty-p npx)
+           (jsoa/prepend-path (file-name-directory npx))
+           (message "Node (NVM): %s" npx)))))))
+
 (defun jsoa/setup-node-path ()
   "Configure Node.js for the current platform."
 
@@ -20,14 +54,7 @@
    ;; NVM (Linux or macOS)
    ;; ------------------------------------------------------------
    ((file-directory-p (expand-file-name "~/.nvm"))
-    (when-let* ((npx
-                 (string-trim
-                  (shell-command-to-string
-                   (format "%s -lc 'source ~/.nvm/nvm.sh >/dev/null 2>&1 && command -v npx'"
-                           shell-file-name))))
-                ((not (string-empty-p npx))))
-      (jsoa/prepend-path (file-name-directory npx))
-      (message "Node (NVM): %s" npx)))
+    (jsoa/setup-node-path-nvm-async))
 
    ;; ------------------------------------------------------------
    ;; Homebrew (Apple Silicon)

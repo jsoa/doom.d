@@ -1,4 +1,4 @@
-;;; ~/.doom.d/modes/+lsp.el -*- lexical-binding: t; -*-
+;;; modules/+lsp.el -*- lexical-binding: t; -*-
 
 (after! lsp-mode
   (setq lsp-completion-provider :capf
@@ -35,7 +35,10 @@
         lsp-ui-doc-show-with-cursor nil
         lsp-ui-doc-show-with-mouse nil
 
-        lsp-ui-sideline-enable t
+        ;; Every specific sideline feature is disabled below, so there's
+        ;; nothing left for the sideline itself to show -- keep it off
+        ;; too, rather than leaving it enabled with nothing to display.
+        lsp-ui-sideline-enable nil
         lsp-ui-sideline-show-hover nil
         lsp-ui-sideline-show-diagnostics nil
         lsp-ui-sideline-show-code-actions nil))

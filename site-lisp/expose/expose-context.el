@@ -338,6 +338,14 @@
 
   (thing-at-point 'symbol t))
 
+(defun expose-context-selected-text ()
+  "Return the active region's text, or nil when no region is active."
+
+  (when (use-region-p)
+    (buffer-substring-no-properties
+     (region-beginning)
+     (region-end))))
+
 (defun expose-context-find-parent-text (types)
   "Return the source text for the first parent node in TYPES."
 
@@ -395,17 +403,26 @@
         "expression_statement")))))
 
 (defun expose-context-focus ()
-  "Return the semantic focus at point."
+  "Return the semantic focus at point, or the active selection if one exists.
 
-  (list
-   :identifier
-   (expose-context-focus-identifier)
+A selected region is a more explicit statement of what to focus on than
+any point-based heuristic, so it takes priority over the usual
+identifier/expression/construct lookup when present."
 
-   :expression
-   (expose-context-focus-expression)
+  (if-let ((selection
+            (expose-context-selected-text)))
 
-   :construct
-   (expose-context-focus-construct)))
+      (list :construct selection)
+
+    (list
+     :identifier
+     (expose-context-focus-identifier)
+
+     :expression
+     (expose-context-focus-expression)
+
+     :construct
+     (expose-context-focus-construct))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Git
@@ -558,7 +575,15 @@ handled everywhere else."
 ;;; ---------------------------------------------------------------------------
 
 (defun expose-context-build ()
-  "Return the semantic context surrounding point."
+  "Return the semantic context surrounding point, or the active selection.
+
+When a region is active, its text is used for `:code' and `:focus'
+instead of the point-derived enclosing scope/identifier -- an explicit
+selection is a more direct statement of what the action should operate
+on than any point-based heuristic. `:scope'/`:parent-scope' are always
+still computed from point, since the surrounding function/class is
+useful background even when a specific selection is the primary
+subject."
 
   (list
    :project
@@ -589,7 +614,9 @@ handled everywhere else."
    (expose-context-focus)
 
    :code
-   (expose-context-scope-code)))
+   (or
+    (expose-context-selected-text)
+    (expose-context-scope-code))))
 
 (defun expose-context-get (context key)
   "Return KEY from CONTEXT."

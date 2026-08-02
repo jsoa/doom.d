@@ -210,6 +210,8 @@ Expose installs bindings under `SPC c h` by default.
 
 ### Thing at Point
 
+These actions use the active region when one is selected, falling back to the point-based symbol/expression/construct otherwise -- select a range first for a more precise target than whatever the point-based heuristic would have picked.
+
 | Key           | Command                              | Description                          |
 |---------------|--------------------------------------|--------------------------------------|
 | `SPC c h h r` | `expose-run-review`                  | Review current code                  |

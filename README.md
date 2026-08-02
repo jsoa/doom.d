@@ -20,6 +20,10 @@ This config is built around a few core principles:
 
 ---
 
+## Disclaimer
+
+The code here is written by AI with my guidance.
+
 ## Structure
 
 ```

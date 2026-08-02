@@ -262,6 +262,9 @@ These actions use the active region when one is selected, falling back to the po
 | `SPC c h W l` | `expose-watch-open-list`              | Open Watch list buffer                  |
 | `SPC c h W c` | `expose-watch-clear-current-buffer`   | Clear Watch comments for current buffer |
 | `SPC c h W C` | `expose-watch-clear-project`          | Clear Watch comments for current project |
+| `SPC c h W a` | `expose-watch-toggle-project-auto`    | Toggle auto-arm for current project     |
+| `SPC c h W A` | `expose-watch-open-active-list`       | Open active Watch items for current project |
+| `SPC c h W h` | `expose-watch-toggle-hidden`          | Toggle inline markers hidden/shown (all buffers) |
 
 ## Quick Hover Scroll Keys
 
@@ -468,11 +471,27 @@ Watched buffers show a compact mode-line indicator using Nerd Icons when availab
 ```text
 eye icon       watched / idle
 eye icon …     currently reviewing changed hunks
-eye icon :2    watched with two visible comments
+eye icon :2    watched with two active comments
 eye icon !     last watch run failed
+eye icon :2⊘   two active comments, inline markers currently hidden
 ```
 
 The idle/running/error states use different faces so active processing is visible without adding source-buffer noise.
+
+### Hiding Inline Markers
+
+```text
+SPC c h W h
+  -> toggle Expose Watch's inline markers hidden/shown, across every watched buffer
+```
+
+Useful for decluttering a large change: hide the squiggly underlines and inline summary cards while skimming a big diff, then reveal them again once ready to work through the comments.
+
+Hiding only suppresses the in-buffer rendering:
+
+- Watch keeps reviewing changed hunks and storing comments normally in the background.
+- The mode-line count keeps updating, so you still know something is there.
+- `expose-watch-open-active-list` (`SPC c h W A`) reads stored state directly and is unaffected either way, so it stays a good way to see what Watch has found while markers are hidden.
 
 ### Watch List
 

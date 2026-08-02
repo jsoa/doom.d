@@ -128,7 +128,8 @@
                 :desc "Review changed hunks now"   "r" #'expose-watch-review-current-buffer
                 :desc "Open watch list"            "l" #'expose-watch-open-list
                 :desc "Clear current buffer"       "c" #'expose-watch-clear-current-buffer
-                :desc "Clear project comments"     "C" #'expose-watch-clear-project)
+                :desc "Clear project comments"     "C" #'expose-watch-clear-project
+                :desc "Toggle project auto-arm"    "a" #'expose-watch-toggle-project-auto)
 
                ))))))
 

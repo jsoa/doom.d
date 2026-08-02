@@ -97,8 +97,11 @@ to serialize it.")
   :group 'expose-review-region)
 
 (defface expose-review-region-item-face
-  '((t (:inherit diff-refine-added :extend t)))
-  "Face for lines with concrete region review items."
+  '((t (:underline (:color "#51afef" :style line))))
+  "Face for lines with concrete region review items.
+
+Underlined in doom-one's blue rather than filled with a background, so
+it reads as \"annotated\" without competing with syntax highlighting."
   :group 'expose-review-region)
 
 (defface expose-review-region-fringe-face

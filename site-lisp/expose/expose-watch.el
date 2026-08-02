@@ -1188,6 +1188,9 @@ single save, instead of one load/save per hunk."
     - Maximum findings: %s.
     - Every finding must use real file line_start and line_end values.
     - Findings should point to the smallest useful changed-line range.
+    - Keep each comment to 1-2 sentences.
+    - Keep suggestion text to 1-2 sentences; only include a patch when a small, precise
+      diff is clearly better than prose.
 
     Scope / name-resolution rules:
     - All changed-hunk blocks are from the same current file.

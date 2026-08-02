@@ -80,7 +80,24 @@ long title gets truncated instead of stretching the card out."
 Expected values are `idle', `running', and `error'.")
 
 (defvar-local expose-watch-visible-item-count 0
-  "Number of visible Expose Watch comments in this buffer.")
+  "Number of active Expose Watch comments in this buffer.
+
+Counted the same whether or not their inline markers are actually
+shown -- see `expose-watch-hidden' -- so the mode-line count stays
+accurate even while markers are hidden.")
+
+(defvar expose-watch-hidden nil
+  "When non-nil, Expose Watch's inline underline/card markers are
+suppressed in every watched buffer, without affecting anything else --
+Watch keeps reviewing changed hunks, storing comments, and counting
+them normally in the background. Toggle with
+`expose-watch-toggle-hidden'.
+
+Useful for decluttering a large change: hide the inline markers while
+skimming a big diff, then reveal them again once ready to work through
+the comments. `expose-watch-open-active-list' reads stored state
+directly and is unaffected by this either way, so it stays a good way
+to see what Watch has found while markers are hidden.")
 
 (defvar-local expose-watch-pending-hashes nil
   "Hunk hashes currently being reviewed for this buffer.")
@@ -309,15 +326,23 @@ Same border color the real Expose popup itself uses (see
 
     ""))
 
+(defun expose-watch-mode-line-hidden-label ()
+  "Return a compact label when Expose Watch's inline markers are hidden."
+
+  (if expose-watch-hidden
+      "⊘"
+    ""))
+
 (defun expose-watch-mode-line ()
   "Return Expose Watch mode-line indicator."
 
   (propertize
    (format
-    " %s%s%s "
+    " %s%s%s%s "
     (expose-watch-mode-line-icon)
     (expose-watch-mode-line-state-label)
-    (expose-watch-mode-line-count-label))
+    (expose-watch-mode-line-count-label)
+    (expose-watch-mode-line-hidden-label))
    'face
    (expose-watch-mode-line-face)
    'help-echo
@@ -329,7 +354,9 @@ Same border color the real Expose popup itself uses (see
       "Expose Watch is active, but the last review failed")
 
      (_
-      "Expose Watch is active for this buffer"))))
+      (if expose-watch-hidden
+          "Expose Watch is active for this buffer; markers are hidden"
+        "Expose Watch is active for this buffer")))))
 
 (defun expose-watch-refresh-mode-line ()
   "Refresh mode-line for Expose Watch."
@@ -2057,7 +2084,13 @@ lookup, but quadratic here across a multi-line range."
       (expose-watch-source-add-fringe-overlay item file))))
 
 (defun expose-watch-source-refresh ()
-  "Refresh Expose Watch source overlays for current buffer."
+  "Refresh Expose Watch source overlays for current buffer.
+
+While `expose-watch-hidden' is non-nil, the inline underline/card/fringe
+markers are skipped entirely, but `expose-watch-visible-item-count' is
+still updated as usual, so the mode-line count and the review pipeline
+both keep working normally -- only the in-buffer rendering is
+suppressed."
 
   (expose-watch-source-clear)
 
@@ -2077,10 +2110,11 @@ lookup, but quadratic here across a multi-line range."
         (dolist (item
                  (plist-get hunk :items))
 
-          (expose-watch-source-add-item-overlay
-           item
-           file
-           (plist-get hunk :hash))
+          (unless expose-watch-hidden
+            (expose-watch-source-add-item-overlay
+             item
+             file
+             (plist-get hunk :hash)))
 
           (setq expose-watch-visible-item-count
                 (1+ expose-watch-visible-item-count))))))
@@ -2098,6 +2132,27 @@ lookup, but quadratic here across a multi-line range."
       (with-current-buffer buffer
         (when (bound-and-true-p expose-watch-mode)
           (expose-watch-source-refresh))))))
+
+;;;###autoload
+(defun expose-watch-toggle-hidden ()
+  "Toggle whether Expose Watch's inline markers are shown or hidden.
+
+Applies across every watched buffer at once. Watch keeps reviewing
+changed hunks and storing comments normally while hidden -- only the
+inline underline/card/fringe rendering is suppressed. See
+`expose-watch-hidden'."
+
+  (interactive)
+
+  (setq expose-watch-hidden
+        (not expose-watch-hidden))
+
+  (expose-watch-source-refresh-all)
+
+  (message
+   (if expose-watch-hidden
+       "Expose Watch: markers hidden (still reviewing in the background)"
+     "Expose Watch: markers shown")))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Review current changed hunks

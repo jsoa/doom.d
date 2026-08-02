@@ -130,7 +130,8 @@
                 :desc "Clear current buffer"       "c" #'expose-watch-clear-current-buffer
                 :desc "Clear project comments"     "C" #'expose-watch-clear-project
                 :desc "Toggle project auto-arm"    "a" #'expose-watch-toggle-project-auto
-                :desc "Active items"               "A" #'expose-watch-open-active-list)
+                :desc "Active items"               "A" #'expose-watch-open-active-list
+                :desc "Toggle hidden markers"      "h" #'expose-watch-toggle-hidden)
 
                ))))))
 

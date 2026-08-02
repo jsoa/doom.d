@@ -839,6 +839,12 @@ the active directory forever. See
     - If a finding applies to the whole selected region, use line_start=%s and line_end=%s.
     - Do not copy the JSON schema/example from this prompt.
     - Never return placeholder values like 123, 126, \"Short title\", \"Review comment.\", or \"high|medium|low|info\".
+    - Prefer the most important, highest-impact findings. Prioritize high/medium severity
+      over low/info; skip minor findings rather than padding toward a higher count.
+    - Do not create filler findings.
+    - Keep each comment to 1-2 sentences.
+    - Keep suggestion text to 1-2 sentences; only include a patch when a small, precise
+      diff is clearly better than prose.
 
     Return valid JSON only.
     Do not return Markdown.
@@ -1121,7 +1127,10 @@ the active directory forever. See
     :body
     (expose-review-region-render-markdown
      (expose-review-region-full-markdown session))
-    :history t)))
+    :history t))
+
+  (when (eq (plist-get session :state) 'running)
+    (expose-popup-set-mode-line "Loading Region Review")))
 
 (defun expose-review-region-source-clear ()
   "Clear active region review overlays in current buffer."
@@ -1560,6 +1569,8 @@ the active directory forever. See
           line-start
           line-end))
         :history nil))
+
+      (expose-popup-set-mode-line "Loading Region Review")
 
       (expose-log
        "ReviewRegion"

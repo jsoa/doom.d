@@ -21,5 +21,14 @@
       (ediff-get-region-contents ediff-current-difference 'A ediff-control-buffer)
       (ediff-get-region-contents ediff-current-difference 'B ediff-control-buffer))))
 
-  (map! :map ediff-mode-map
-        :n "B" #'jsoa/ediff-copy-both-to-C))
+  ;; `ediff-mode-map' is buffer-local and only a real keymap while a session
+  ;; is active (its global value is nil the rest of the time) -- binding
+  ;; into it here, directly in the `after! ediff' body, only ever worked
+  ;; because `ediff' historically was never loaded except by actually
+  ;; starting a session. `ediff-keymap-setup-hook' runs once per session,
+  ;; right after `ediff-mode-map' is freshly built, which is the actual
+  ;; documented extension point for this.
+  (add-hook 'ediff-keymap-setup-hook
+            (defun jsoa/ediff-setup-keys ()
+              (map! :map ediff-mode-map
+                    :n "B" #'jsoa/ediff-copy-both-to-C))))

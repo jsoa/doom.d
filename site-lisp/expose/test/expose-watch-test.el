@@ -355,6 +355,34 @@ CHANGED-CONTENT -- leaves a real, computable live diff hunk for FILE that
      (string= (face-attribute 'font-lock-warning-face :background nil t)
               (expose-watch-card-resolve-face-background 'default)))))
 
+;;; ---------------------------------------------------------------------------
+;;; expose-watch-catch-up-item-cap
+;;; ---------------------------------------------------------------------------
+
+(ert-deftest expose-watch-test-catch-up-item-cap-scales-with-hunk-count ()
+  (let ((expose-watch-max-items-per-run 3)
+        (expose-watch-max-hunks-per-run 4))
+
+    ;; 6 hunks: 3 * 6/4 = 4.5, rounded up to 5.
+    (should
+     (= 5 (expose-watch-catch-up-item-cap 6)))))
+
+(ert-deftest expose-watch-test-catch-up-item-cap-floors-at-normal-default ()
+  ;; A small backlog (fewer hunks than a normal run's own cap) should not
+  ;; get a *worse* findings budget than a normal steady-state run would.
+  (let ((expose-watch-max-items-per-run 3)
+        (expose-watch-max-hunks-per-run 4))
+
+    (should
+     (= 3 (expose-watch-catch-up-item-cap 1)))))
+
+(ert-deftest expose-watch-test-catch-up-item-cap-matches-normal-at-the-cap ()
+  (let ((expose-watch-max-items-per-run 3)
+        (expose-watch-max-hunks-per-run 4))
+
+    (should
+     (= 3 (expose-watch-catch-up-item-cap 4)))))
+
 (provide 'expose-watch-test)
 
 ;;; expose-watch-test.el ends here

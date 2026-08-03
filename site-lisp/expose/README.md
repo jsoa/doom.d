@@ -464,6 +464,22 @@ Watch mode is designed to stay out of the way:
 
 This means if you remove or rewrite code that produced a Watch comment, the old comment stays available historically in `*EXPOSE Watch*`, but the underline and inline card disappear after save.
 
+### Catching Up on Existing Changes
+
+If you enable Watch (explicitly, or via auto-arm) on a file that already has a backlog of uncommitted changes, the first save reviews the *whole* current backlog in one combined request, instead of the normal `expose-watch-max-hunks-per-run'-hunk cap trickling it in across several saves:
+
+```text
+watch a file with pre-existing uncommitted changes
+save the file (the first save since watching)
+  -> one request covering every unreviewed hunk, not just a capped batch
+subsequent saves
+  -> back to reviewing one capped batch per save, as usual
+```
+
+`expose-watch-max-items-per-run' (the findings-per-run cap) is a fixed number baked into every request regardless of hunk count, so bundling a large backlog into one request without adjusting it would silently shrink coverage as the backlog grows. The catch-up request instead scales its findings budget to roughly the same findings-per-hunk density as a normal run (`expose-watch-catch-up-item-cap'), with the normal default as a floor -- a catch-up request never asks for fewer findings than a normal one would, only more as the backlog grows.
+
+If the catch-up request fails, it isn't retried automatically; the next save (or a manual "Review changed hunks now") picks up wherever the live diff still shows unreviewed hunks.
+
 ### Watch Mode Line
 
 Watched buffers show a compact mode-line indicator using Nerd Icons when available:

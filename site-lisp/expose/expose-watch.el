@@ -99,6 +99,21 @@ the comments. `expose-watch-open-active-list' reads stored state
 directly and is unaffected by this either way, so it stays a good way
 to see what Watch has found while markers are hidden.")
 
+(defvar-local expose-watch-catch-up-pending nil
+  "Non-nil until Expose Watch has fully caught up on this buffer's
+backlog of unreviewed hunks.
+
+Set whenever `expose-watch-mode' turns on (covers both the explicit
+\"Watch current buffer\" command and auto-arm, since both go through
+the same enable body). A buffer enabled with pre-existing uncommitted
+changes would otherwise only get `expose-watch-max-hunks-per-run'
+hunks reviewed per save, trickling in slowly -- while this is non-nil,
+`expose-watch-review-current-buffer' instead sends the whole backlog
+of unreviewed hunks as one combined request (see
+`expose-watch-catch-up-item-cap' for how its findings budget scales to
+match) on the first save after enabling, then clears this and behaves
+exactly as it does today (one capped batch per save) from then on.")
+
 (defvar-local expose-watch-pending-hashes nil
   "Hunk hashes currently being reviewed for this buffer.")
 
@@ -1317,11 +1332,21 @@ indentation or trailing blank space."
          "\n")
       "No editor diagnostics reported.")))
 
-(defun expose-watch-request (file hunks)
-  "Build Expose Watch request for FILE and HUNKS."
+(defun expose-watch-request (file hunks &optional max-items)
+  "Build Expose Watch request for FILE and HUNKS.
+
+MAX-ITEMS overrides `expose-watch-max-items-per-run' for this request
+when non-nil -- used by the catch-up path in
+`expose-watch-review-current-buffer' to scale the requested findings
+budget to the number of hunks in a combined catch-up request, instead
+of applying the same fixed cap regardless of how many hunks are
+attached."
 
   (let ((diagnostics
-         (expose-watch-diagnostics)))
+         (expose-watch-diagnostics))
+
+        (max-items
+         (or max-items expose-watch-max-items-per-run)))
 
     (format
      "<expose-watch-request>
@@ -1390,7 +1415,7 @@ indentation or trailing blank space."
 
 %s
 </expose-watch-request>"
-     expose-watch-max-items-per-run
+     max-items
      (expose-watch-escape file)
      (expose-watch-escape file)
      major-mode
@@ -2158,8 +2183,13 @@ inline underline/card/fringe rendering is suppressed. See
 ;;; Review current changed hunks
 ;;; ---------------------------------------------------------------------------
 
-(defun expose-watch-new-hunks (project-root file)
-  "Return changed hunks for FILE that have not already been reviewed."
+(defun expose-watch-new-hunks (project-root file &optional unlimited)
+  "Return changed hunks for FILE that have not already been reviewed.
+
+Capped at `expose-watch-max-hunks-per-run', unless UNLIMITED is
+non-nil -- used by the catch-up path in
+`expose-watch-review-current-buffer' to send a file's whole backlog of
+unreviewed hunks in a single request instead of one capped batch."
 
   (let* ((session
           (expose-watch-load-session project-root))
@@ -2168,18 +2198,41 @@ inline underline/card/fringe rendering is suppressed. See
           (expose-watch-ensure-file-state session file))
 
          (hunks
-          (expose-watch-current-file-hunks project-root file)))
+          (expose-watch-current-file-hunks project-root file))
 
-    (seq-take
-     (seq-remove
-      (lambda (hunk)
-        (or
-         (expose-watch-hunk-reviewed-p state hunk)
-         (member
-          (plist-get hunk :hash)
-          expose-watch-pending-hashes)))
-      hunks)
-     expose-watch-max-hunks-per-run)))
+         (filtered
+          (seq-remove
+           (lambda (hunk)
+             (or
+              (expose-watch-hunk-reviewed-p state hunk)
+              (member
+               (plist-get hunk :hash)
+               expose-watch-pending-hashes)))
+           hunks)))
+
+    (if unlimited
+        filtered
+      (seq-take filtered expose-watch-max-hunks-per-run))))
+
+(defun expose-watch-catch-up-item-cap (hunk-count)
+  "Return a findings cap scaled to HUNK-COUNT, for a combined catch-up request.
+
+`expose-watch-max-items-per-run' is a fixed cap baked into every
+request regardless of how many hunks are attached -- fine for the
+normal steady-state run, which is already capped at
+`expose-watch-max-hunks-per-run' hunks, but a combined catch-up
+request can carry far more hunks than that in one shot. Applying the
+same fixed cap there would silently shrink coverage as the backlog
+grows, so this instead scales it to roughly the same findings-per-hunk
+density as a normal run, with `expose-watch-max-items-per-run' itself
+as a floor -- a catch-up request never asks for less than a normal one
+would."
+
+  (max
+   expose-watch-max-items-per-run
+   (ceiling
+    (* expose-watch-max-items-per-run
+       (/ (float hunk-count) expose-watch-max-hunks-per-run)))))
 
 (defun expose-watch-set-state (state)
   "Set Expose Watch STATE for current buffer."
@@ -2203,14 +2256,23 @@ inline underline/card/fringe rendering is suppressed. See
           (expose-watch-project-root))
 
          (file
-          (expose-watch-buffer-file project-root)))
+          (expose-watch-buffer-file project-root))
+
+         ;; Captured once, up front: whether this run is catching up a
+         ;; pre-existing backlog (see `expose-watch-catch-up-pending')
+         ;; decides both how many hunks to fetch and how the findings
+         ;; budget is computed below, and must stay consistent for the
+         ;; whole run even though the flag itself gets cleared once the
+         ;; catch-up run completes.
+         (catching-up
+          expose-watch-catch-up-pending))
 
     (when (expose-redact-excluded-path-p file project-root)
       (expose-redact-log-excluded-path file project-root)
       (user-error "Expose Watch refuses to review excluded path: %s" file))
 
     (let* ((hunks
-            (expose-watch-new-hunks project-root file)))
+            (expose-watch-new-hunks project-root file catching-up)))
 
       (unless hunks
         ;; Nothing new to send the provider, but this is still a good time to
@@ -2219,6 +2281,13 @@ inline underline/card/fringe rendering is suppressed. See
         ;; getting saved without producing new hunks.
         (expose-watch-sync-file-state project-root file)
 
+        (when catching-up
+          (setq expose-watch-catch-up-pending nil)
+          (expose-log
+           "Watch"
+           "Watch is already caught up for %s."
+           file))
+
         (when (called-interactively-p 'interactive)
           (message "Expose Watch: no new changed hunks to review")))
 
@@ -2226,8 +2295,12 @@ inline underline/card/fringe rendering is suppressed. See
         (let* ((provider
                 expose-provider-default)
 
+               (max-items
+                (when catching-up
+                  (expose-watch-catch-up-item-cap (length hunks))))
+
                (document
-                (expose-watch-request file hunks))
+                (expose-watch-request file hunks max-items))
 
                (hashes
                 (mapcar
@@ -2245,12 +2318,22 @@ inline underline/card/fringe rendering is suppressed. See
 
           (expose-watch-set-state 'running)
 
-          (expose-log
-           "Watch"
-           "Reviewing %d changed hunk(s) in %s using %s."
-           (length hunks)
-           file
-           provider)
+          (if catching-up
+
+              (expose-log
+               "Watch"
+               "Catching up on %s: reviewing %d backlog hunk(s) in one request (max %d finding(s)) using %s."
+               file
+               (length hunks)
+               max-items
+               provider)
+
+            (expose-log
+             "Watch"
+             "Reviewing %d changed hunk(s) in %s using %s."
+             (length hunks)
+             file
+             provider))
 
           (setq timeout-timer
                 (run-at-time
@@ -2338,7 +2421,20 @@ inline underline/card/fringe rendering is suppressed. See
                                 "Watch"
                                 "Watch review completed for %s with %d item(s)."
                                 file
-                                (length items)))
+                                (length items))
+
+                               ;; This run already carried the whole backlog
+                               ;; (see `expose-watch-catch-up-pending' and
+                               ;; the unlimited fetch above) -- catching up
+                               ;; is done in this one request, no chaining
+                               ;; needed.
+                               (when catching-up
+                                 (setq expose-watch-catch-up-pending nil)
+
+                                 (expose-log
+                                  "Watch"
+                                  "Watch caught up on %s."
+                                  file)))
 
                            (error
                             (expose-watch-set-state 'error)
@@ -3129,6 +3225,7 @@ via `expose-watch-global-mode' to any file opened afterward."
             (expose-watch-enable-file-state project-root file)))
 
         (setq expose-watch-state 'idle)
+        (setq expose-watch-catch-up-pending t)
 
         (add-hook 'after-save-hook #'expose-watch-after-save nil t)
 

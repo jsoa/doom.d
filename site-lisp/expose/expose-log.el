@@ -9,14 +9,16 @@
   :type 'boolean
   :group 'expose-log)
 
-(defcustom expose-log-max-size 2000000
-  "Maximum size in characters of the Expose log buffer.
+(defcustom expose-log-max-size nil
+  "Maximum size in characters of the Expose log buffer, or nil for no limit.
 
-Once exceeded, the oldest log lines are trimmed. Kept generous by default
-since this buffer is the main way to see what Expose actually did (provider
-requests, timeouts, failures) across a long-running session. Set to nil to
-disable trimming entirely."
-  :type '(choice integer (const :tag "No limit" nil))
+When non-nil and exceeded, the oldest log lines are trimmed. Defaults to
+nil (unbounded) since this buffer is the main way to see what Expose
+actually did (provider requests, timeouts, failures) across a
+long-running session -- it should keep everything for as long as Emacs
+stays open, clearing only via `expose-log-clear' or on restart, not on
+its own. Set to an integer to cap it instead."
+  :type '(choice (const :tag "No limit" nil) integer)
   :group 'expose-log)
 
 (defconst expose-log-buffer-name

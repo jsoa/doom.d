@@ -39,18 +39,46 @@
    tool
    (jsoa/project-name)))
 
+(defun jsoa/window-left-right-pair ()
+  "Return (LEFT . RIGHT) if the selected frame has exactly two windows
+arranged side by side, or nil otherwise (a different count, or two
+windows stacked vertically instead)."
+
+  (let ((windows
+         (window-list)))
+
+    (when (= (length windows) 2)
+      (let ((a (car windows))
+            (b (cadr windows)))
+
+        (cond
+         ((eq (window-in-direction 'right a) b)
+          (cons a b))
+
+         ((eq (window-in-direction 'right b) a)
+          (cons b a))
+
+         (t nil))))))
+
 (defun jsoa/display-project-terminal (buffer)
   "Show and select BUFFER in a window to the right of the current one.
 
-Reuses a window already positioned there -- replacing whatever buffer
-it was showing -- instead of creating another split alongside it; only
-splits when there is no window to the right yet.
+With exactly two windows already open side by side, the terminal
+always ends up in the right one and whatever you were looking at
+always ends up in the left one, regardless of which of the two you
+were actually in when this was called -- so switching to the terminal
+from the right-hand window swaps the two instead of splitting a third
+window off to the right of it (there being nothing further right of
+the rightmost window otherwise). With any other window layout, this
+reuses or creates a window to the right of the current one instead --
+splitting when there's only a single window, matching the two-window
+case for any layout more complex than that.
 
-`display-buffer-in-direction' looks like the built-in tool for this,
-but its own notion of \"reuse\" only kicks in when that window already
-shows this exact BUFFER; for any other buffer it always splits instead
-of replacing, which is not what \"replace whatever's already there\"
-means here.
+Reusing an existing window replaces whatever buffer it was showing,
+same as the two-window case above; `display-buffer-in-direction' looks
+like the built-in tool for that, but its own notion of \"reuse\" only
+kicks in when that window already shows this exact BUFFER, splitting
+instead of replacing for any other buffer.
 
 Also closes any OTHER window already showing BUFFER: creating a vterm
 buffer runs it through `display-buffer', and Doom's popup rules (e.g.
@@ -58,9 +86,36 @@ for terminal-like buffers) can already have placed it somewhere -- a
 bottom popup, typically -- before this function gets a chance to
 position it, leaving it visible in two places at once otherwise."
 
-  (let ((window
-         (or (window-in-direction 'right)
-             (split-window-right))))
+  (let* ((source-window
+          (selected-window))
+
+         (source-buffer
+          (window-buffer source-window))
+
+         (pair
+          (jsoa/window-left-right-pair))
+
+         (window
+          (if pair
+
+              (let ((left
+                     (car pair))
+
+                    (right
+                     (cdr pair)))
+
+                (when (and (eq source-window right)
+                           (not (eq source-buffer buffer)))
+                  ;; Active on the right window, showing something
+                  ;; other than this terminal already -- move it to
+                  ;; the left so the terminal can take the right,
+                  ;; instead of losing track of it.
+                  (set-window-buffer left source-buffer))
+
+                right)
+
+            (or (window-in-direction 'right)
+                (split-window-right)))))
 
     (set-window-buffer window buffer)
 
@@ -160,33 +215,11 @@ Return the Codex buffer."
 
   (jsoa/kill-project-terminal "codex"))
 
-;;; ---------------------------------------------------------------------------
-;;; Claude Code
-;;; ---------------------------------------------------------------------------
-
-(defun jsoa/project-claude ()
-  "Open a dedicated, interactive Claude Code terminal for the current project.
-
-Unlike Expose's Claude provider (a one-shot, non-interactive `-p' call
-used by the action lenses and Watch), this is a real conversational
-Claude Code CLI session, for when you want to talk to it directly
-instead of running a single focused action.
-
-Return the Claude buffer."
-
-  (interactive)
-
-  (jsoa/project-terminal "claude" "claude"))
-
-(defun jsoa/kill-project-claude ()
-  "Kill the dedicated Claude Code terminal for the current project."
-
-  (interactive)
-
-  (jsoa/kill-project-terminal "claude"))
+;; Claude Code has its own dedicated integration instead of a vterm
+;; terminal here -- see modules/+claude-code-ide.el, which gives it real
+;; MCP-based Emacs awareness (current buffer, selection, diagnostics)
+;; that this vterm setup has no way to provide.
 
 (map! :leader
-      :desc "Codex"        "v c" #'jsoa/project-codex
-      :desc "Kill Codex"   "v C" #'jsoa/kill-project-codex
-      :desc "Claude"       "v l" #'jsoa/project-claude
-      :desc "Kill Claude"  "v L" #'jsoa/kill-project-claude)
+      :desc "Codex"      "v c" #'jsoa/project-codex
+      :desc "Kill Codex" "v C" #'jsoa/kill-project-codex)

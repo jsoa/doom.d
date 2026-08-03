@@ -55,4 +55,9 @@
 (package! consult)
 (package! embark)
 
+;; MCP-integrated Claude Code CLI session, for interactive work rather
+;; than Expose's one-shot advisory actions. See modules/+claude-code-ide.el.
+(package! claude-code-ide
+  :recipe (:host github :repo "manzaltu/claude-code-ide.el"))
+
 (package! flycheck-popup-tip :disable t)

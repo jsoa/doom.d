@@ -123,6 +123,7 @@
 (load! "modules/+lsp")
 (load! "modules/+magit")
 (load! "modules/+vterm")
+(load! "modules/+claude-code-ide")
 
 ;; Programming mode configuration
 (load! "modules/+groovy")

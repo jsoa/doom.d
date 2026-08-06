@@ -59,20 +59,18 @@ Set to nil to store full responses."
   :type 'integer
   :group 'expose-watch)
 
-(defcustom expose-watch-card-width 60
-  "Maximum width, in columns, of the inline Expose Watch comment card.
-
-The card is only ever as wide as its longer line (summary or hint)
-actually needs -- it hugs its content rather than padding out empty
-space to a fixed size -- but never wider than this, so an unusually
-long title gets truncated instead of stretching the card out."
-  :type 'integer
+(defcustom expose-watch-source-hover-delay 0.20
+  "Idle delay before showing an Expose Watch comment hover in source buffers."
+  :type 'number
   :group 'expose-watch)
 
 (defvar expose-provider-default)
 
 (defvar-local expose-watch-source-overlays nil
   "Source overlays for Expose Watch comments in the current buffer.")
+
+(defvar-local expose-watch-source-hover-timer nil
+  "Idle timer for Expose Watch source hovers.")
 
 (defvar-local expose-watch-state 'idle
   "Current Expose Watch state for this buffer.
@@ -87,8 +85,8 @@ shown -- see `expose-watch-hidden' -- so the mode-line count stays
 accurate even while markers are hidden.")
 
 (defvar expose-watch-hidden nil
-  "When non-nil, Expose Watch's inline underline/card markers are
-suppressed in every watched buffer, without affecting anything else --
+  "When non-nil, Expose Watch's inline underline markers are suppressed
+in every watched buffer, without affecting anything else --
 Watch keeps reviewing changed hunks, storing comments, and counting
 them normally in the background. Toggle with
 `expose-watch-toggle-hidden'.
@@ -155,56 +153,12 @@ highlighting, and stands out more than a plain line underline would.
 of each line -- the source overlay this face is applied to spans full
 lines (including each trailing newline) to cover multi-line items, and
 without this the underline would stretch to the window's right edge on
-every line instead of stopping at the actual code."
-  :group 'expose-watch)
+every line instead of stopping at the actual code.
 
-(defface expose-watch-card-face
-  '((t (:background "#262b33" :overline "#666666")))
-  "Background/top-border face for the inline Expose Watch card's summary line.
-
-Layered on top of the card's own severity/title colors via
-`add-face-text-property' (not a plain :inherit) so both apply. Its
-`:background' is overwritten at render time by
-`expose-watch-card-sync-faces' to match the real Expose popup's own
-body background exactly (whatever the current theme, and `solaire-mode'
-if active, render that as) rather than staying a hardcoded guess.
-
-`:overline' (not `:box'): a dedicated top/bottom border ROW (a separate
-line of `-'/`+' characters) is itself extra line-height, which is
-exactly what read as unwanted padding around the card. `:overline'
-draws the top border directly on this line's own text instead of
-needing a line for it; `:underline' on `expose-watch-card-hint-line-face'
-below does the same for the bottom border. Manual `|' characters (see
-`expose-watch-card-content-row') provide the left/right edges, so the
-full card is still bordered on all four sides -- just without a line
-between the two rows, and without either border needing a row of its
-own."
-  :group 'expose-watch)
-
-(defface expose-watch-card-hint-line-face
-  '((t (:background "#1c1f26" :underline (:color "#666666" :style line))))
-  "Background/bottom-border face for the Expose Watch card's hint line.
-
-Its `:background' is overwritten at render time by
-`expose-watch-card-sync-faces' to match `mode-line-inactive' --
-mirroring how the real Expose popup's own bottom bar
-(`:respect-mode-line t') renders, since posframes essentially never
-have real input focus, so it's always the *inactive* mode-line face
-that ends up showing there, not `mode-line'.
-
-`:underline' with `:style line' (a straight rule, not the wavy style
-`expose-watch-item-face' uses to mark flagged code) draws the card's
-bottom border directly on this line -- see
-`expose-watch-card-face's docstring for why that's preferable to a
-separate border row."
-  :group 'expose-watch)
-
-(defface expose-watch-card-border-face
-  '((t (:foreground "#666666")))
-  "Foreground face for the inline Expose Watch card's border characters.
-
-Same border color the real Expose popup itself uses (see
-`expose-popup-show-buffer's `:border-color \"#666666\"')."
+Magenta is Watch's own color in this scheme -- region review uses blue
+(`expose-review-region-item-face') and full review uses teal
+(`expose-review-source-patch-target-face') -- so which of the three
+flagged a given line is visible at a glance."
   :group 'expose-watch)
 
 (defface expose-watch-fringe-face
@@ -1686,159 +1640,16 @@ Expose Watch only marks concrete comments in the source buffer."
     (push overlay expose-watch-source-overlays)))
 
 ;;; ---------------------------------------------------------------------------
-;;; Inline comment cards
+;;; Comment hover
 ;;;
-;;; Each item gets a small, always-visible, fixed-width two-line card
-;;; rendered under (not in) the commented code via an overlay
-;;; `after-string': a severity/title summary line, and a dimmer hint line
-;;; below it explaining how to see the full comment. The card itself
-;;; never expands -- C-<tab> (or a click) opens the full comment in
-;;; Expose's normal shared popup instead, the same one used for hover,
-;;; review comments, etc., with all its existing behavior (auto-hides on
-;;; unrelated commands, C-j/C-k scrolling, copy, open-in-buffer) for free.
+;;; Each item gets a squiggly underline on its source lines
+;;; (`expose-watch-item-face') as the persistent, ambient marker -- unlike
+;;; the always-visible two-line card this replaced, nothing sits inline
+;;; taking up vertical space or getting in the way while editing. The full
+;;; comment shows in Expose's normal shared popup, the same one used for
+;;; hover and other Review comments, either on idle hover (matching how
+;;; region and full review already work) or explicitly via C-<tab>/click.
 ;;; ---------------------------------------------------------------------------
-
-(defun expose-watch-card-collapsed-text (item)
-  "Return the always-visible inline one-line summary for ITEM.
-
-The leading chevron is a static affordance marking the line as
-expandable (into the shared Expose popup, via C-<tab> or a click) --
-it does not track any open/closed state of its own, since the card
-itself never expands."
-
-  (let* ((severity
-          (expose-watch-string
-           (or
-            (plist-get item :severity)
-            "info")))
-
-         (title
-          (expose-watch-string
-           (or
-            (plist-get item :title)
-            "Watch comment"))))
-
-    (concat
-     (propertize
-      "▸ "
-      'face
-      'expose-watch-list-meta-face)
-     (propertize
-      (format "[%s] " (upcase severity))
-      'face
-      (expose-watch-severity-face severity))
-     (propertize title 'face 'expose-watch-list-meta-face))))
-
-(defun expose-watch-card-hint-text ()
-  "Return the Expose Watch card's second-line hint.
-
-Styled like the shared Expose popup's own bottom mode-line bar
-(`expose-popup-mode-line-info'): \"EXPOSE\" in the same buffer-id face,
-and the shortcut in the same blue keyword face used there for the
-Expose leader prefix (\"SPC c h\")."
-
-  (concat
-   (propertize "EXPOSE" 'face 'mode-line-buffer-id)
-   " "
-   (propertize "C-<tab>" 'face 'font-lock-keyword-face)))
-
-(defun expose-watch-card-pad (text width)
-  "Pad or truncate TEXT to WIDTH columns."
-
-  (truncate-string-to-width text width 0 ?\s t))
-
-(defun expose-watch-card-fit-width (&rest texts)
-  "Return the column width an Expose Watch card containing TEXTS should use.
-
-The longest of TEXTS, capped at `expose-watch-card-width' -- the card
-hugs its content (so there's no dead space between text and border)
-rather than always padding out to a fixed size."
-
-  (min expose-watch-card-width
-       (apply #'max (mapcar #'length texts))))
-
-(defun expose-watch-card-ensure-popup-buffer ()
-  "Return the shared Expose popup buffer, creating/mode-enabling it if needed.
-
-Only used to read its actual rendered background color (see
-`expose-watch-card-sync-faces') -- never shown or otherwise touched --
-so the inline card's summary-line background matches the real popup's
-body exactly, under whatever theme (and `solaire-mode', if active) is
-currently active, rather than a hardcoded guess."
-
-  (let ((buffer
-         (get-buffer-create expose-popup-buffer-name)))
-
-    (with-current-buffer buffer
-      (unless (derived-mode-p 'expose-popup-mode)
-        (expose-popup-mode)))
-
-    buffer))
-
-(defun expose-watch-card-resolve-face-background (face)
-  "Return FACE's effective background color in the current buffer.
-
-Unlike plain `face-attribute', this also resolves a buffer-local
-`face-remapping-alist' entry for FACE, if one exists. Remapping FACE
-this way -- not a theme's face spec for it -- is exactly how e.g.
-`solaire-mode' gives \"unreal\" buffers (which the real Expose popup's
-own buffer, a `special-mode' buffer with no file, qualifies as) a
-different background than a plain theme lookup would find."
-
-  (let ((remap
-         (cdr
-          (assq face face-remapping-alist))))
-
-    (or
-     (cl-loop
-      for spec in remap
-      thereis
-      (cond
-       ((facep spec)
-        (face-attribute spec :background nil t))
-
-       ((and (listp spec)
-             (plist-member spec :background))
-        (plist-get spec :background))))
-
-     (face-attribute face :background nil t))))
-
-(defun expose-watch-card-sync-faces ()
-  "Sync the Watch card's background faces to the real Expose popup's colors.
-
-`expose-watch-card-face' (summary line) mirrors the popup body's own
-`default' background; `expose-watch-card-hint-line-face' (hint line)
-mirrors `mode-line-inactive', since posframes essentially never have
-real input focus, so the popup's own `:respect-mode-line t' bar always
-renders with the inactive mode-line face. Both are read fresh each time
-rather than cached, so a theme switch is picked up automatically."
-
-  (with-current-buffer (expose-watch-card-ensure-popup-buffer)
-
-    (set-face-attribute
-     'expose-watch-card-face nil
-     :background
-     (expose-watch-card-resolve-face-background 'default))
-
-    (set-face-attribute
-     'expose-watch-card-hint-line-face nil
-     :background
-     (expose-watch-card-resolve-face-background 'mode-line-inactive))))
-
-(defun expose-watch-card-content-row (text left right)
-  "Return TEXT framed with LEFT and RIGHT border characters (strings).
-
-Plain ASCII `|'. Two Unicode corner-glyph attempts were tried and
-rejected: thin box-drawing corners (`┌'/`┐'/`└'/`┘') rendered visibly
-shorter than a full-height `|', breaking the connection to the
-`:overline'/`:underline' rule above/below them; block-element quadrant
-corners (`▛'/`▜'/`▙'/`▟') rendered fine but weren't wanted after all.
-Plain `|' is the one that reliably looked right."
-
-  (concat
-   (propertize left 'face 'expose-watch-card-border-face)
-   text
-   (propertize right 'face 'expose-watch-card-border-face)))
 
 (defun expose-watch-card-popup-body (item)
   "Return full detail text for ITEM, for the Expose popup."
@@ -1909,6 +1720,14 @@ Plain `|' is the one that reliably looked right."
 
       (string-trim (buffer-string)))))
 
+(defun expose-watch-source-item-overlay-at-point ()
+  "Return the Expose Watch source overlay at point, or nil."
+
+  (cl-loop
+   for ov in (overlays-at (point))
+   when (overlay-get ov 'expose-watch-item)
+   return ov))
+
 (defun expose-watch-source-show-card-at-point ()
   "Show the full Expose Watch comment for the item at point.
 
@@ -1921,10 +1740,7 @@ copy, open-in-buffer) for free."
   (interactive)
 
   (if-let ((overlay
-            (cl-loop
-             for ov in (overlays-at (point))
-             when (overlay-get ov 'expose-watch-item)
-             return ov)))
+            (expose-watch-source-item-overlay-at-point)))
 
       (expose-popup-show-view
        (expose-popup-view-create
@@ -1957,64 +1773,71 @@ plain TAB is corfu's own primary accept/complete key -- with
 TAB before it ever reaches this overlay's keymap. C-<tab> isn't claimed
 by either.")
 
-(defun expose-watch-source-add-item-card (item file hunk-hash line-end)
-  "Add the always-visible two-line summary card for ITEM after LINE-END.
+(defun expose-watch-source-show-hover (buffer position)
+  "Show Expose Watch hover for BUFFER at POSITION."
 
-FILE and HUNK-HASH identify ITEM's hunk. The card is a bordered box
-sized to hug its own content up to `expose-watch-card-width', framing
-two rows: a severity/title summary row, and a darker hint row below it
-explaining how to see the full comment. The border is drawn on the
-rows' own faces (`:overline'/`:underline'; see `expose-watch-card-face')
-plus manual `|' side bars -- not a separate top/bottom border row of
-characters, which is itself extra line-height. The card itself never
-expands or resizes."
+  (when (buffer-live-p buffer)
 
-  (expose-watch-card-sync-faces)
+    (with-current-buffer buffer
 
-  (let* ((position
-          (expose-watch-line-end-position line-end))
+      (when (and
+             expose-watch-mode
+             (= position
+                (point)))
 
-         (overlay
-          (make-overlay position position nil nil nil))
+        (when-let ((overlay
+                    (expose-watch-source-item-overlay-at-point)))
 
-         (raw-summary
-          (expose-watch-card-collapsed-text item))
+          (expose-popup-show-view
+           (expose-popup-view-create
+            "Expose Watch"
+            (expose-watch-card-popup-body
+             (overlay-get overlay 'expose-watch-item)))))))))
 
-         (raw-hint
-          (expose-watch-card-hint-text))
+(defun expose-watch-source-schedule-hover ()
+  "Schedule Expose Watch source hover for current point."
 
-         (width
-          (expose-watch-card-fit-width raw-summary raw-hint))
+  (when expose-watch-source-hover-timer
+    (cancel-timer expose-watch-source-hover-timer)
+    (setq expose-watch-source-hover-timer nil))
 
-         (summary-line
-          (expose-watch-card-pad raw-summary width))
+  (setq expose-watch-source-hover-timer
+        (run-with-idle-timer
+         expose-watch-source-hover-delay
+         nil
+         #'expose-watch-source-show-hover
+         (current-buffer)
+         (point))))
 
-         (hint-line
-          (expose-watch-card-pad raw-hint width)))
+(defun expose-watch-source-cancel-hover ()
+  "Cancel pending Expose Watch source hover."
 
-    (add-face-text-property 0 (length summary-line) 'expose-watch-card-face nil summary-line)
-    (add-face-text-property 0 (length hint-line) 'expose-watch-card-hint-line-face nil hint-line)
+  (when expose-watch-source-hover-timer
+    (cancel-timer expose-watch-source-hover-timer)
+    (setq expose-watch-source-hover-timer nil)))
 
-    (overlay-put
-     overlay
-     'after-string
-     (concat
-      "\n" (expose-watch-card-content-row summary-line "|" "|")
-      "\n" (expose-watch-card-content-row hint-line "|" "|")))
+(defun expose-watch-source-post-command ()
+  "Schedule an Expose Watch hover when point is inside a Watch item."
 
-    (overlay-put overlay 'priority 49)
-    (overlay-put overlay 'evaporate nil)
-    (overlay-put overlay 'help-echo "C-<tab> (or click) shows the full comment")
-    (overlay-put overlay 'expose-watch-item item)
-    (overlay-put overlay 'expose-watch-file file)
-    (overlay-put overlay 'expose-watch-hunk-hash hunk-hash)
-    (overlay-put overlay 'expose-watch-card t)
-    (overlay-put overlay 'keymap expose-watch-source-item-map)
+  (cond
+   ;; Popup commands such as C-j/C-k should only scroll the popup. Do
+   ;; not reschedule the hover, or it will redraw the popup and reset
+   ;; scroll back to the top.
+   ((and
+     (symbolp this-command)
+     (fboundp 'expose-popup-command-p)
+     (expose-popup-command-p this-command))
 
-    (push overlay expose-watch-source-overlays)))
+    (expose-watch-source-cancel-hover))
+
+   ((expose-watch-source-item-overlay-at-point)
+    (expose-watch-source-schedule-hover))
+
+   (t
+    (expose-watch-source-cancel-hover))))
 
 (defun expose-watch-source-add-item-overlay (item file hunk-hash)
-  "Add visible source overlay(s), inline card, and fringe marker for ITEM.
+  "Add visible source overlay(s) and fringe marker for ITEM.
 
 FILE and HUNK-HASH identify ITEM's hunk. Two kinds of overlay per line
 in ITEM's range: a full-line \"interactive\" overlay (indentation,
@@ -2022,8 +1845,8 @@ trailing whitespace, and all) carrying the toggle keymap, so C-<tab>
 works no matter where on the line point is -- and, only on non-blank
 lines, a second overlay trimmed to that line's actual content, carrying
 just the underline face, so the *visible* marker still only covers real
-code. Plus one collapsible inline card after the item's last line (see
-`expose-watch-source-add-item-card').
+code. The full comment shows via hover or C-<tab>/click, not an inline
+card (see `expose-watch-source-show-hover').
 
 Walks the range with a single forward pass (one `goto-char' to
 LINE-START, then `forward-line' between each line) rather than calling
@@ -2103,15 +1926,13 @@ lookup, but quadratic here across a multi-line range."
          (goto-char eol)
          (forward-line 1))))
 
-    (expose-watch-source-add-item-card item file hunk-hash line-end)
-
     (when expose-watch-show-fringe-markers
       (expose-watch-source-add-fringe-overlay item file))))
 
 (defun expose-watch-source-refresh ()
   "Refresh Expose Watch source overlays for current buffer.
 
-While `expose-watch-hidden' is non-nil, the inline underline/card/fringe
+While `expose-watch-hidden' is non-nil, the inline underline/fringe
 markers are skipped entirely, but `expose-watch-visible-item-count' is
 still updated as usual, so the mode-line count and the review pipeline
 both keep working normally -- only the in-buffer rendering is
@@ -2164,7 +1985,7 @@ suppressed."
 
 Applies across every watched buffer at once. Watch keeps reviewing
 changed hunks and storing comments normally while hidden -- only the
-inline underline/card/fringe rendering is suppressed. See
+inline underline/fringe rendering is suppressed. See
 `expose-watch-hidden'."
 
   (interactive)
@@ -3228,11 +3049,14 @@ via `expose-watch-global-mode' to any file opened afterward."
         (setq expose-watch-catch-up-pending t)
 
         (add-hook 'after-save-hook #'expose-watch-after-save nil t)
+        (add-hook 'post-command-hook #'expose-watch-source-post-command nil t)
 
         (expose-watch-source-refresh)
         (expose-watch-refresh-mode-line))
 
     (remove-hook 'after-save-hook #'expose-watch-after-save t)
+    (remove-hook 'post-command-hook #'expose-watch-source-post-command t)
+    (expose-watch-source-cancel-hover)
 
     ;; expose-watch-mode is already nil at this point, so this just clears
     ;; overlays (the loop that would rebuild them never runs).

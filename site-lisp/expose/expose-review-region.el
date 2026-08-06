@@ -97,17 +97,22 @@ to serialize it.")
   :group 'expose-review-region)
 
 (defface expose-review-region-item-face
-  '((t (:underline (:color "#c678dd" :style wave) :extend nil)))
+  '((t (:underline (:color "#51afef" :style wave) :extend nil)))
   "Face for lines with concrete region review items.
 
-A squiggly underline in doom-one's magenta, rather than filled with a
+A squiggly underline in doom-one's blue, rather than filled with a
 background, so it reads as \"annotated\" without competing with syntax
 highlighting, and stands out more than a plain line underline would.
 `:extend nil' keeps the underline from bleeding across the blank tail
 of each line -- the source overlay this face is applied to spans full
 lines (including each trailing newline) to cover multi-line items, and
 without this the underline would stretch to the window's right edge on
-every line instead of stopping at the actual code."
+every line instead of stopping at the actual code.
+
+Blue is region review's own color in this scheme -- Watch uses magenta
+(`expose-watch-item-face') and full review uses teal
+(`expose-review-source-patch-target-face') -- so which of the three
+flagged a given line is visible at a glance."
   :group 'expose-review-region)
 
 (defface expose-review-region-fringe-face

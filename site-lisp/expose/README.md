@@ -175,13 +175,13 @@ Watch mode-line icon:
 
 `nerd-icons` is optional. If available, Watch uses a Nerd Font eye icon in the mode line.
 
-Watch inline card width:
+Watch hover delay:
 
 ```elisp
-(setq expose-watch-card-width 60)
+(setq expose-watch-source-hover-delay 0.20)
 ```
 
-The maximum width, in columns, of the inline Watch summary card. The card hugs its own content (severity/title, and the `EXPOSE C-<tab>` hint) rather than padding out empty space -- this only caps it for unusually long titles.
+Idle delay, in seconds, before an Expose Watch comment hover appears when point rests on a flagged line.
 
 ## Default Keybindings
 
@@ -442,15 +442,12 @@ save file
   -> reviews only new/changed hunks
   -> stores comments
   -> underlines the flagged code
-  -> shows an inline summary card below it
 ```
 
 Each Watch comment shows up directly in the source buffer, GitHub-PR-review style:
 
-- The flagged code gets a squiggly underline (doom-one magenta, `expose-watch-item-face`), trimmed to the real code on each line -- indentation, trailing whitespace, and blank lines in a multi-line range are not underlined.
-- Directly below the flagged code, an always-visible, fixed-width bordered card shows a one-line summary (severity + title) and a dimmer hint line reading `EXPOSE C-<tab>`.
-- `C-<tab>` (or a click), anywhere on the flagged line or the card, opens the full comment -- severity, category, title, comment, suggestion, and patch -- in Expose's normal shared popup, with all of its usual behavior: auto-hides on unrelated commands, `C-j`/`C-k` scrolling, copy, open-in-buffer.
-- The card's colors track the real popup's own colors live (background and mode-line-style hint bar), so it looks consistent even across theme switches, instead of a hardcoded guess.
+- The flagged code gets a squiggly underline (doom-one magenta, `expose-watch-item-face`), trimmed to the real code on each line -- indentation, trailing whitespace, and blank lines in a multi-line range are not underlined. Region review and full review use the same style, in blue and teal respectively, so which feature flagged a given line is visible at a glance.
+- Resting point on a flagged line (idle for `expose-watch-source-hover-delay`), or `C-<tab>`/a click anywhere on the flagged line, opens the full comment -- severity, category, title, comment, suggestion, and patch -- in Expose's normal shared popup, with all of its usual behavior: auto-hides on unrelated commands, `C-j`/`C-k` scrolling, copy, open-in-buffer.
 - Right-fringe markers are optional and off by default (`expose-watch-show-fringe-markers`).
 
 Watch mode is designed to stay out of the way:
@@ -458,11 +455,11 @@ Watch mode is designed to stay out of the way:
 - It does not block editing.
 - It does not open loading popups.
 - It does not highlight entire source lines -- only the actual flagged code.
-- The inline card never expands or resizes; opening the full comment always uses the shared popup instead.
+- Nothing sits permanently inline; the full comment only appears on hover or explicit request, via the shared popup.
 - It keeps historical comments in the Watch list.
 - It only shows source markers for hunks that still exist in the current working-tree diff.
 
-This means if you remove or rewrite code that produced a Watch comment, the old comment stays available historically in `*EXPOSE Watch*`, but the underline and inline card disappear after save.
+This means if you remove or rewrite code that produced a Watch comment, the old comment stays available historically in `*EXPOSE Watch*`, but the underline disappears after save.
 
 ### Catching Up on Existing Changes
 
@@ -501,7 +498,7 @@ SPC c h W h
   -> toggle Expose Watch's inline markers hidden/shown, across every watched buffer
 ```
 
-Useful for decluttering a large change: hide the squiggly underlines and inline summary cards while skimming a big diff, then reveal them again once ready to work through the comments.
+Useful for decluttering a large change: hide the squiggly underlines while skimming a big diff, then reveal them again once ready to work through the comments.
 
 Hiding only suppresses the in-buffer rendering:
 
@@ -623,7 +620,7 @@ emacs -Q --batch -l test/run-tests.el
 
 The suite covers redaction, XML rendering, review-request parsing, transport, commands, and Watch (project auto-arm state, active-entry filtering). It runs against real, disposable temp Git repos where relevant rather than mocking Git away.
 
-Rendering/UI code -- the popup, hover, and Watch's inline card (overlays, faces, the shared-popup integration) -- needs a real display and a real `posframe` frame, so it's deliberately not covered by this suite; those paths are instead verified manually and with ad hoc scripts that stub `posframe-show`/`posframe-hide` in batch mode.
+Rendering/UI code -- the popup, hover, and Watch's source overlays (overlays, faces, the shared-popup integration) -- needs a real display and a real `posframe` frame, so it's deliberately not covered by this suite; those paths are instead verified manually and with ad hoc scripts that stub `posframe-show`/`posframe-hide` in batch mode.
 
 CI runs the suite on Emacs 29.4 and `snapshot` via `.github/workflows/expose-tests.yml`.
 

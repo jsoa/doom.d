@@ -40,17 +40,21 @@ Use `right-fringe' to avoid colliding with Git gutter/fringe indicators."
   :group 'expose-review-source)
 
 (defface expose-review-source-patch-target-face
-  '((t (:underline (:color "#c678dd" :style wave) :extend nil)))
+  '((t (:underline (:color "#4db5bd" :style wave) :extend nil)))
   "Face for suggested patch target ranges.
 
-A squiggly underline in doom-one's magenta, matching
+A squiggly underline in doom-one's teal, in the same style as
 `expose-watch-item-face' and `expose-review-region-item-face' -- rather
 than filled with a background (previously inherited from
 `diff-refine-added', which also brought along its yellow-green
 foreground and tinted the underlying text), so it reads as \"annotated\"
 without competing with syntax highlighting. `:extend nil' keeps the
 underline from bleeding across the blank tail of each line, matching
-those other two faces."
+those other two faces.
+
+Teal is full review's own color in this scheme -- Watch uses magenta
+and region review uses blue -- so which of the three flagged a given
+line is visible at a glance."
   :group 'expose-review-source)
 
 (defface expose-review-source-high-face

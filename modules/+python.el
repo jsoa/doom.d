@@ -36,8 +36,14 @@
 
 Set via `.dir-locals.el' for the project -- e.g.:
 
-  ((python-mode . ((jsoa/docker-jump-container . \"myproject-app-1\")
-                    (jsoa/docker-jump-site-packages . \"/usr/local/lib/python3.11/site-packages\"))))")
+  ((python-base-mode
+    . ((jsoa/docker-jump-container . \"myproject-app-1\")
+       (jsoa/docker-jump-site-packages . \"/usr/local/lib/python3.11/site-packages\"))))
+
+`python-base-mode', not `python-mode': `python-mode' and
+`python-ts-mode' are siblings, not parent/child, so a `python-mode'
+entry would silently never apply to `python-ts-mode' buffers (or vice
+versa) -- `python-base-mode' is the actual shared parent of both.")
 
 (defvar-local jsoa/docker-jump-site-packages nil
   "Absolute site-packages path inside `jsoa/docker-jump-container'.
@@ -189,12 +195,13 @@ directly when no matching import is found."
 
 ;;;###autoload
 (defun jsoa/docker-jump-to-definition ()
-  "Jump to the definition of the symbol at point inside
-`jsoa/docker-jump-container', via its TRAMP Docker connection.
-
-Requires `jsoa/docker-jump-container' and `jsoa/docker-jump-site-packages'
-to be set first, normally via `.dir-locals.el' (see
-`jsoa/docker-jump-container's docstring).
+  "Jump to the definition of the symbol at point -- ordinary
+`+lookup/definition' if `jsoa/docker-jump-container' and
+`jsoa/docker-jump-site-packages' aren't set for this buffer (so this
+is safe to bind over `gd' unconditionally, not just in
+docker-jump-configured projects), otherwise via
+`jsoa/docker-jump-container's TRAMP Docker connection when the target
+turns out to be a dependency rather than local code.
 
 Tries `+lookup/definition' first, so a local venv's real type-aware
 resolution is used whenever there is one -- even one out of sync with
@@ -209,41 +216,45 @@ at the wrong (or a missing) file. If it instead lands inside local
 project code, that's left alone. If `+lookup/definition' can't resolve
 the symbol locally at all (nothing installed locally for this import),
 falls back to `jsoa/docker-jump--via-import-scan', which works from
-the plain text of an import statement instead."
+the plain text of an import statement instead -- but only when
+container/site-packages are actually configured; otherwise this
+behaves exactly like plain `+lookup/definition' always has."
 
   (interactive)
 
-  (unless (and jsoa/docker-jump-container jsoa/docker-jump-site-packages)
-    (user-error
-     "Set `jsoa/docker-jump-container' and `jsoa/docker-jump-site-packages' first (see their docstrings, normally via .dir-locals.el)"))
+  ;; Captured before `+lookup/definition' runs (rather than left as buffer-
+  ;; local reads below): a successful jump switches to the target buffer,
+  ;; where they'd otherwise read back unset (or some *other* project's
+  ;; values) rather than this buffer's own configured container/site-packages.
+  (let ((container jsoa/docker-jump-container)
+        (site-packages jsoa/docker-jump-site-packages))
 
-  ;; Captured before `+lookup/definition' runs: both are buffer-local, and a
-  ;; successful jump switches to the target buffer, where they'd otherwise
-  ;; read back unset (or some *other* project's values) rather than this
-  ;; buffer's own configured container/site-packages.
-  (let* ((container jsoa/docker-jump-container)
-         (site-packages jsoa/docker-jump-site-packages)
+    (if (not (and container site-packages))
+        ;; Not configured for this buffer/project -- exactly plain
+        ;; `+lookup/definition', including its own error on failure.
+        (call-interactively #'+lookup/definition)
 
-         (local-jump-failed
-          (condition-case nil
-              (progn (call-interactively #'+lookup/definition) nil)
-            (user-error t))))
+      (let ((local-jump-failed
+             (condition-case nil
+                 (progn (call-interactively #'+lookup/definition) nil)
+               (user-error t))))
 
-    (if local-jump-failed
-        (jsoa/docker-jump--via-import-scan)
+        (if local-jump-failed
+            (jsoa/docker-jump--via-import-scan)
 
-      (when-let* ((local-file
-                   (buffer-file-name))
+          (when-let* ((local-file
+                       (buffer-file-name))
 
-                  (relative
-                   (jsoa/docker-jump--site-packages-relative-path local-file)))
+                      (relative
+                       (jsoa/docker-jump--site-packages-relative-path local-file)))
 
-        (find-file
-         (format "/docker:%s:%s/%s"
-                 container
-                 (directory-file-name site-packages)
-                 relative))))))
+            (find-file
+             (format "/docker:%s:%s/%s"
+                     container
+                     (directory-file-name site-packages)
+                     relative))))))))
 
 (map! :map python-base-mode-map
+      :n "gd" #'jsoa/docker-jump-to-definition
       :localleader
       :desc "Jump to definition (Docker)" "j" #'jsoa/docker-jump-to-definition)

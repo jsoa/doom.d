@@ -19,6 +19,12 @@
   (setq projectile-auto-discover nil)
   (setq projectile-require-project-root t)
 
+  ;; Projectile's master-branch async-indexing wait loop can spin forever at
+  ;; 100% CPU instead of detecting completion (no live subprocess, but `done'
+  ;; never flips) -- this forces the synchronous alien path instead, which
+  ;; doesn't have that bug.
+  (setq projectile-async-indexing nil)
+
   (setq +workspaces-switch-project-function #'jsoa/project-command-center)
 
 

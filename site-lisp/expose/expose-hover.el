@@ -82,13 +82,14 @@ base64 images."
 ;;; State
 ;;; ---------------------------------------------------------------------------
 
-(defun expose-hover-review-source-active-p ()
-  "Return non-nil if Expose Review owns hover at point.
+(defun expose-hover-other-popup-active-p ()
+  "Return non-nil if Full Review, Region Review, or Watch owns hover
+at point.
 
-Watch no longer has its own competing hover popup (its comments show
-inline via a collapsible card instead), so it has nothing left to
-suppress the general hover for -- unlike Full Review and Region
-Review, which still do."
+Each shows its own hover popup (Full Review and Region Review always
+have; Watch, as of its inline-card removal, now does too) -- this
+keeps the general LSP/eldoc hover from also trying to show at the
+same point and fighting over the shared popup."
 
   (or
    (and
@@ -97,7 +98,11 @@ Review, which still do."
 
    (and
     (fboundp 'expose-review-region-item-at-point)
-    (expose-review-region-item-at-point))))
+    (expose-review-region-item-at-point))
+
+   (and
+    (fboundp 'expose-watch-source-item-overlay-at-point)
+    (expose-watch-source-item-overlay-at-point))))
 
 (defun expose-hover-disabled-mode-p ()
   "Return non-nil if the current major mode disables Expose hover."
@@ -117,6 +122,18 @@ Review, which still do."
        (string-match-p regexp name))
      expose-hover-disabled-buffer-name-regexps)))
 
+(defun expose-hover-corfu-active-p ()
+  "Return non-nil if a Corfu completion popup is currently visible.
+
+Shared with Expose's other hover mechanisms (Watch, Full Review,
+Region Review) via their own `post-command-hook' functions, not just
+this general LSP/eldoc hover -- any of them popping up mid-completion
+gets in the way exactly the same way this one would."
+
+  (and
+   (bound-and-true-p corfu--frame)
+   (frame-visible-p corfu--frame)))
+
 (defun expose-hover-suppressed-p ()
   "Return non-nil if hover should currently be suppressed."
 
@@ -124,9 +141,7 @@ Review, which still do."
    (minibufferp)
    (expose-hover-disabled-mode-p)
    (expose-hover-disabled-buffer-p)
-   (and
-    (bound-and-true-p corfu--frame)
-    (frame-visible-p corfu--frame))))
+   (expose-hover-corfu-active-p)))
 
 (defun expose-hover-clear-request ()
   "Clear the current hover request."
@@ -729,7 +744,7 @@ entities, and JSDoc formatting noise."
   (unless (or
            expose-popup-visible
            (expose-hover-suppressed-p)
-           (expose-hover-review-source-active-p))
+           (expose-hover-other-popup-active-p))
 
     (expose-log
      "Hover"
@@ -786,7 +801,7 @@ entities, and JSDoc formatting noise."
            expose-popup-visible
            (eq (point) expose-hover-last-point)
            (expose-hover-suppressed-p)
-           (expose-hover-review-source-active-p))
+           (expose-hover-other-popup-active-p))
 
     (setq expose-hover-timer
           (run-with-idle-timer

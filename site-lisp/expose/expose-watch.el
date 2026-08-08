@@ -1830,7 +1830,10 @@ by either.")
 
     (expose-watch-source-cancel-hover))
 
-   ((expose-watch-source-item-overlay-at-point)
+   ((and
+     (expose-watch-source-item-overlay-at-point)
+     (not (expose-hover-corfu-active-p)))
+
     (expose-watch-source-schedule-hover))
 
    (t

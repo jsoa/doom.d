@@ -61,3 +61,5 @@
   :recipe (:host github :repo "manzaltu/claude-code-ide.el"))
 
 (package! flycheck-popup-tip :disable t)
+
+(package! blamer :recipe (:host github :repo "artawower/blamer.el"))

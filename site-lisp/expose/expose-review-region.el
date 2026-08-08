@@ -1500,7 +1500,8 @@ lookup, but quadratic here across a multi-line range."
 
    ((and
      (expose-review-region-item-at-point)
-     (fboundp 'expose-review-region-show-item-hover))
+     (fboundp 'expose-review-region-show-item-hover)
+     (not (expose-hover-corfu-active-p)))
 
     (expose-review-region-source-cancel-hover)
 

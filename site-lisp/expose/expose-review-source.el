@@ -1329,7 +1329,10 @@ not contain a unified-diff hunk header."
 
     (expose-review-source-cancel-hover))
 
-   ((expose-review-source-item-at-point)
+   ((and
+     (expose-review-source-item-at-point)
+     (not (expose-hover-corfu-active-p)))
+
     (expose-review-source-schedule-hover))
 
    (t

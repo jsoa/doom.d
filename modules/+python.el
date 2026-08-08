@@ -147,6 +147,20 @@ configured or detected separately from `jsoa/docker-jump-site-packages'."
     (when pos
       (mapconcat #'identity (nthcdr (1+ pos) parts) "/"))))
 
+(defun jsoa/docker-jump--container-running-p (container)
+  "Return non-nil if Docker container CONTAINER is running.
+
+A fast, local `docker inspect' call -- entirely independent of TRAMP,
+so a stopped or nonexistent container is detected immediately instead
+of waiting out TRAMP's own, much longer connection timeout (tens of
+seconds) the first time a jump tries to reach it."
+
+  (with-temp-buffer
+    (and
+     (zerop
+      (call-process "docker" nil t nil "inspect" "-f" "{{.State.Running}}" container))
+     (string-prefix-p "true" (string-trim (buffer-string))))))
+
 (defun jsoa/docker-jump--via-import-scan ()
   "Resolve and open the module at point inside `jsoa/docker-jump-container'
 from the plain text of an import statement.
@@ -201,7 +215,10 @@ directly when no matching import is found."
 is safe to bind over `gd' unconditionally, not just in
 docker-jump-configured projects), otherwise via
 `jsoa/docker-jump-container's TRAMP Docker connection when the target
-turns out to be a dependency rather than local code.
+turns out to be a dependency rather than local code. When configured,
+checks `jsoa/docker-jump--container-running-p' first and fails with a
+clear message if the container's down, rather than silently paying
+TRAMP's own, much longer connection timeout first.
 
 Tries `+lookup/definition' first, so a local venv's real type-aware
 resolution is used whenever there is one -- even one out of sync with
@@ -233,6 +250,9 @@ behaves exactly like plain `+lookup/definition' always has."
         ;; Not configured for this buffer/project -- exactly plain
         ;; `+lookup/definition', including its own error on failure.
         (call-interactively #'+lookup/definition)
+
+      (unless (jsoa/docker-jump--container-running-p container)
+        (user-error "Docker container `%s' is not running" container))
 
       (let ((local-jump-failed
              (condition-case nil

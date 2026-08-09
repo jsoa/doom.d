@@ -78,6 +78,12 @@
                :desc "Commit Message"    "g" #'expose-run-commit-message
                :desc "Changelog"         "n" #'expose-run-changelog
 
+               ;; Not `q': that closes the popup, and rebinding it would
+               ;; break a key used constantly. The query *plan* is not here
+               ;; at all -- it draws a picture, so it lives with the
+               ;; diagrams, same as everything else that does.
+               :desc "Queryset SQL"      "s" #'expose-orm-inspect
+
                :desc "Popup scroll down" "j" #'expose-popup-scroll-down
                :desc "Popup scroll up"   "k" #'expose-popup-scroll-up
                :desc "Popup quit"        "q" #'expose-popup-hide
@@ -127,13 +133,7 @@
                 :desc "Migration history" "h" #'expose-run-migration-history
                 :desc "Tests for this"    "t" #'expose-run-test-graph
                 :desc "Entity relations"  "e" #'expose-run-er-diagram
-                :desc "Reverse call graph" "r" #'expose-run-reverse-call-graph)
-
-               ;; Their own prefix rather than two more keys here: `q'
-               ;; directly under this prefix already closes the popup, and
-               ;; quietly rebinding it would break a key used constantly.
-               (:prefix-map ("Q" . "Queryset")
-                :desc "SQL"               "s" #'expose-orm-inspect
+                :desc "Reverse call graph" "r" #'expose-run-reverse-call-graph
                 :desc "Query plan"        "p" #'expose-orm-explain)
 
                (:prefix-map ("R" . "Full Review")

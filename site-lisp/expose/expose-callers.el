@@ -493,16 +493,25 @@ resolved call list."
 (defun expose-callers-test-mentions (name)
   "Return test-file nodes that mention NAME textually.
 
-Static analysis misses most of how Django code is actually tested. A
-test calling `self.client.post(url)' reaches the view through runtime
-URL resolution, and `@patch(\"app.utils.thing\")' names its target in a
-string -- neither produces a call edge or even a reference, so a graph
-built only from the language server reports untested code that is
-thoroughly tested.
+Static analysis misses most of how Django code is actually tested, in
+three separate ways:
 
-A word-boundary grep over test files finds both. It's weaker evidence
-than a call -- a mention could be a comment -- so these are rendered
-distinctly rather than counted as the same thing."
+  self.client.post(url)            reaches a view through runtime URL
+                                   resolution -- no call edge exists
+  @patch(\"app.utils.thing\")        names its target in a string
+  class ThingViewSetTest(...)      never names the thing at all, and is
+                                   tied to it only by convention
+
+The last is the common case for DRF viewsets and the one a plain
+word-boundary search still misses, since `ThingViewSetTest' is a
+different identifier than `Thing ViewSet'. So the pattern also allows a
+`Test'/`TestCase' affix on either side.
+
+Deliberately no looser than that: bare substring matching would tie
+`send_email' to `send_email_task', which is a different function. This
+is weaker evidence than a call either way -- a mention could be a
+comment -- so these render distinctly rather than counting as the same
+thing."
 
   (when-let* ((project (project-current nil))
               (root (expand-file-name (project-root project))))
@@ -512,12 +521,15 @@ distinctly rather than counted as the same thing."
              (ignore-errors
                (call-process
                 "grep" nil t nil
-                "-rnw"
+                "-rnE"
                 "--include=test_*.py" "--include=*_test.py"
                 "--include=*.spec.ts" "--include=*.test.ts"
                 "--include=*.spec.js" "--include=*.test.js"
                 "--include=conftest.py"
-                "--" name root))))
+                "--"
+                (format "\\b(Test)?%s(Test|TestCase|Tests)?\\b"
+                        (regexp-quote name))
+                root))))
 
         ;; grep exits 1 for "no matches", which is not an error here.
         (when (memq status '(0 1))

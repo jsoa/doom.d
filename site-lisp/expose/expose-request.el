@@ -474,7 +474,7 @@ your head."
      "- Effects that cannot be rolled back -- mail, queued tasks, outbound HTTP, file writes -- must keep their own shape wherever they sit. Do not redraw them as database writes because they appear inside the transaction cluster."
      "- Only effects visible in the provided code. Do not infer effects from a function's name alone."
      "- Quote every label, and escape any embedded double quotes. A label is a single quoted string: never place text after the closing quote."
-     "- Set `rankdir=LR' and give the graph a short `label' naming what it depicts.")
+     "- Set `rankdir=TB' and give the graph a short `label' naming what it depicts.")
     "\n")
 
    (expose-request-select

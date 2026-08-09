@@ -513,7 +513,36 @@ and `replace-match' agree on positions."
 
     (buffer-string)))
 
-(defun expose-diagram-style-dot (dot &optional focus)
+(defun expose-diagram-force-direction (dot direction)
+  "Return DOT with its `rankdir' replaced by DIRECTION.
+
+Orientation is asked for in each request's instruction, but an
+instruction is a request, not a guarantee, and the difference between a
+readable diagram and an unreadable ribbon is too large to leave to
+compliance. Stripped and re-stated for the same reason `bgcolor' is:
+whichever the provider chose, this is the one that applies."
+
+  (if (not direction)
+      dot
+
+    (let ((stripped
+           (replace-regexp-in-string
+            "[ \t]*rankdir[ \t]*=[ \t]*\"?[A-Za-z]+\"?[ \t]*;?"
+            ""
+            dot)))
+
+      (if (string-match
+           (concat "\\(?:strict[ \t\n]+\\)?\\(?:di\\)?graph\\b[ \t\n]*"
+                   "\\(?:[A-Za-z_][A-Za-z0-9_]*\\|\"[^\"]*\"\\)?[ \t\n]*{")
+           stripped)
+
+          (concat (substring stripped 0 (match-end 0))
+                  (format "\n  rankdir=%s;" direction)
+                  (substring stripped (match-end 0)))
+
+        stripped))))
+
+(defun expose-diagram-style-dot (dot &optional focus direction)
   "Return DOT restyled: graph-wide defaults plus per-node semantic colors.
 
 Two passes. First the defaults (font, spacing, canvas) go in right after
@@ -530,9 +559,10 @@ Returns DOT unchanged when `expose-diagram-apply-theme' is nil, or when
 the graph header can't be located."
 
   (if (not expose-diagram-apply-theme)
-      dot
+      (expose-diagram-force-direction dot direction)
 
-    (let* ((canvas (cdr (assq 'canvas expose-diagram-palette)))
+    (let* ((dot (expose-diagram-force-direction dot direction))
+           (canvas (cdr (assq 'canvas expose-diagram-palette)))
            (edge (cdr (assq 'edge expose-diagram-palette)))
            (edge-label (cdr (assq 'edge-label expose-diagram-palette)))
            (normal (expose-diagram-color 'normal))
@@ -586,7 +616,7 @@ the graph header can't be located."
 
         colored))))
 
-(defun expose-diagram-render (dot format &optional focus)
+(defun expose-diagram-render (dot format &optional focus direction)
   "Render DOT source using Graphviz output FORMAT (a `dot -T' name).
 
 Returns (t . DATA-STRING) on success, or (nil . STDERR-STRING) when
@@ -607,7 +637,7 @@ read as raw bytes (which is what `create-image' wants anyway)."
           (let* ((coding-system-for-read 'binary)
                  (status
                   (call-process-region
-                   (expose-diagram-style-dot dot focus) nil
+                   (expose-diagram-style-dot dot focus direction) nil
                    expose-diagram-dot-executable
                    nil
                    (list t stderr-file)
@@ -626,10 +656,10 @@ read as raw bytes (which is what `create-image' wants anyway)."
 
       (delete-file stderr-file))))
 
-(defun expose-diagram-render-svg (dot &optional focus)
+(defun expose-diagram-render-svg (dot &optional focus direction)
   "Render DOT source to SVG. See `expose-diagram-render'."
 
-  (expose-diagram-render dot "svg" focus))
+  (expose-diagram-render dot "svg" focus direction))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Display

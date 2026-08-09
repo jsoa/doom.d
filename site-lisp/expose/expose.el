@@ -121,6 +121,7 @@
                 :desc "Call flow"         "C" #'expose-run-call-flow-diagram
                 :desc "Data flow"         "d" #'expose-run-data-flow-diagram
                 :desc "Request flow"      "R" #'expose-run-request-flow-diagram
+                :desc "Side effects"      "s" #'expose-run-side-effects-diagram
                 :desc "Import graph"      "m" #'expose-run-import-graph
                 :desc "Tests for this"    "t" #'expose-run-test-graph
                 :desc "Entity relations"  "e" #'expose-run-er-diagram

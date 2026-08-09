@@ -434,6 +434,62 @@ surface."
 
    'raw))
 
+(defun expose-request-side-effects-diagram (context)
+  "Build a side-effects diagram request.
+
+Answers what calling this does to the world, which none of the other
+diagrams quite does: control flow shows which paths run, call flow what
+gets invoked, data flow where values go. This is about consequences that
+outlive the call -- rows written, mail sent, jobs queued, services
+called -- including the ones several frames down.
+
+The transaction boundary is drawn because of a specific and common bug:
+mail sent or a task enqueued inside `transaction.atomic' is not rolled
+back with it, so a failure after that point leaves a notification about
+a row that no longer exists. Grouping effects by whether they are inside
+the block makes that visible instead of something you have to hold in
+your head."
+
+  (expose-request-create
+   'side-effects-diagram
+   'xml
+
+   (string-join
+    (list
+     "Produce a SIDE EFFECTS diagram of the current code as Graphviz DOT."
+     ""
+     "Rules:"
+     "- Output a single `digraph' and nothing else. No prose, no Markdown, no code fences."
+     "- Show what this code changes outside itself: database writes, mail, queued or background tasks, cache writes, file writes, outbound network calls, signals, and mutation of state that outlives the call. Ignore pure computation and anything that only reads."
+     "- Include effects performed by functions this code calls, when their bodies are visible. If a callee's body is not shown, include it as one effect node labelled with the call, and do not guess what it does inside."
+     "- Shapes carry meaning, so use exactly these:"
+     "  `ellipse' for the entry point;"
+     "  `cylinder' for a database, cache or queue write;"
+     "  `component' for an outbound call to a third-party or external service;"
+     "  `box' for an intermediate step that leads to an effect;"
+     "  `diamond' for a condition that decides whether an effect happens;"
+     "  `doubleoctagon' for a raise."
+     "- Label each effect edge with the operation: \"INSERT\", \"UPDATE\", \"DELETE\", \"sends email\", \"enqueues task\", \"HTTP POST\", \"writes cache\", and so on."
+     "- If any effects occur inside a transaction (`transaction.atomic', `atomic()', an equivalent block), put those nodes in `subgraph cluster_transaction' labelled \"transaction.atomic\", and leave the rest outside it."
+     "- Effects that cannot be rolled back -- mail, queued tasks, outbound HTTP, file writes -- must keep their own shape wherever they sit. Do not redraw them as database writes because they appear inside the transaction cluster."
+     "- Only effects visible in the provided code. Do not infer effects from a function's name alone."
+     "- Quote every label, and escape any embedded double quotes. A label is a single quoted string: never place text after the closing quote."
+     "- Set `rankdir=LR' and give the graph a short `label' naming what it depicts.")
+    "\n")
+
+   (expose-request-select
+    context
+    :project
+    :language
+    :file
+    :imports
+    :focus
+    :scope
+    :parent-scope
+    :code)
+
+   'raw))
+
 (defun expose-request-request-flow-diagram (context)
   "Build a Django request-flow diagram request.
 
@@ -813,6 +869,9 @@ entire node."
 
       ('request-flow-diagram
        (expose-request-request-flow-diagram context))
+
+      ('side-effects-diagram
+       (expose-request-side-effects-diagram context))
 
       ('usage
        (expose-request-usage context))

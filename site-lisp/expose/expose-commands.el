@@ -1447,6 +1447,32 @@ excluded (`expose-imports-exclude-regexps'); bounded by
       (message "Expose import graph: dot failed"))))
 
 ;;;###autoload
+(defun expose-run-side-effects-diagram ()
+  "Render what the code at point changes outside itself.
+
+Rows written, mail sent, jobs queued, services called -- including
+effects several frames down, where the body is visible. Where call flow
+shows what gets invoked and data flow where values go, this is about
+consequences that outlive the call.
+
+Effects inside a transaction are grouped in their own box, because the
+useful question is usually which of them survive a rollback: mail and
+queued tasks do, and a failure after that point leaves a notification
+about a row that no longer exists. They keep their own shape inside the
+transaction box rather than being redrawn as writes, so that stays
+visible.
+
+Provider-generated and inference-heavy, so worth checking: `s' shows the
+DOT it was built from."
+
+  (interactive)
+
+  (expose-run-diagram
+   'side-effects-diagram
+   "Side Effects"
+   #'expose-run-side-effects-diagram))
+
+;;;###autoload
 (defun expose-run-request-flow-diagram ()
   "Render a Django request-flow diagram of the view at point.
 

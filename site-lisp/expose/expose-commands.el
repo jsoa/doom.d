@@ -1162,7 +1162,7 @@ placeholder with the generated result (or an error message)."
         "Expose commit message failed: %s"
         (error-message-string error-data))))))
 
-(defun expose-run-diagram (type title command &optional focus)
+(defun expose-run-diagram (type title command &optional focus direction)
   "Request a TYPE diagram, render it, and display it under TITLE.
 
 COMMAND is the interactive command that produced this, recorded so the
@@ -1226,7 +1226,7 @@ rendering, display, and both failure paths are identical."
                   (message "Expose %s diagram: no DOT in response" (downcase title)))
 
               (let ((result
-                     (expose-diagram-render-svg dot focus)))
+                     (expose-diagram-render-svg dot focus direction)))
 
                 (if (car result)
                     (progn
@@ -1481,7 +1481,11 @@ DOT it was built from."
   (expose-run-diagram
    'side-effects-diagram
    "Side Effects"
-   #'expose-run-side-effects-diagram))
+   #'expose-run-side-effects-diagram
+   nil
+   ;; Vertical: effects fan out from one entry point, and laid out
+   ;; left-to-right that fan runs along the X axis into a ribbon.
+   "TB"))
 
 ;;;###autoload
 (defun expose-run-request-flow-diagram ()

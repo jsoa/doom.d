@@ -247,6 +247,7 @@ These actions use the active region when one is selected, falling back to the po
 | `SPC c h G s` | `expose-run-side-effects-diagram`   | What this changes outside itself         |
 | `SPC c h G m` | `expose-run-import-graph`           | What this file imports, transitively     |
 | `SPC c h G t` | `expose-run-test-graph`             | Which tests reach the code at point      |
+| `SPC c h G h` | `expose-run-migration-history`      | How a Django model was shaped over time  |
 | `SPC c h G e` | `expose-run-er-diagram`             | Models and their relationships           |
 | `SPC c h G r` | `expose-run-reverse-call-graph`     | What calls the function at point         |
 
@@ -335,6 +336,7 @@ Four graphs, rendered with Graphviz and shown as an SVG image in a full-frame bu
 | Side effects       | What this changes outside itself, and what survives a rollback | Provider |
 | Import graph       | What this file imports, and its cycles             | Parsed     |
 | Tests              | Which tests reach this code, and how               | LSP / xref |
+| Migration history  | How a Django model was shaped over time            | Parsed     |
 | Entity relations   | Which models exist and how they relate             | Provider   |
 | Reverse call graph | What calls this, transitively                      | LSP / xref |
 
@@ -394,6 +396,12 @@ The cost of parsing over running is the dynamic cases: `include()` namespaces an
 Mentions also catch `@patch("app.tasks.send_email")`, which names its target in a string, and the `<Symbol>Test` naming convention.
 
 When nothing at all reaches it, that is stated plainly rather than drawn as an empty graph.
+
+**Migration history** reads a model's migrations and shows every operation that touched it, oldest first: created, fields added, retyped, renamed, dropped. Colored by what each does to existing data — additive green, altering amber, renaming violet, destructive red — so the edits that lost or reshaped data stand out.
+
+Parsed, not generated: migration files are mechanically regular, a project accumulates dozens of them, and "when did this field become nullable" is a question where a plausible answer is worth nothing. Reading any one migration shows a single edit; what this adds is the ordering, since a field added in `0004`, retyped in `0011` and dropped in `0032` lives in three files named after whatever else they happened to contain.
+
+Django numbers migrations per app, so ordering is exact within an app but not comparable across them — `orders/0003` and `events/0032` carry no relative order in their names. Operations from different apps are therefore grouped rather than interleaved into a timeline that would be invented.
 
 **The import graph has no AI in it either**, for the same reason: imports are trivially parseable, so asking a provider to describe them would trade an exact answer for a plausible one. It follows project-local imports and stops at the boundary — third-party and standard library packages are leaves, shown only with a prefix argument, since hiding them usually makes the project's own shape far easier to read. Python and TypeScript/JavaScript; tests, migrations and `node_modules` are excluded by `expose-imports-exclude-regexps`.
 

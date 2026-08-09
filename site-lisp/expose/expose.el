@@ -123,6 +123,7 @@
                 :desc "Request flow"      "R" #'expose-run-request-flow-diagram
                 :desc "Side effects"      "s" #'expose-run-side-effects-diagram
                 :desc "Import graph"      "m" #'expose-run-import-graph
+                :desc "Migration history" "h" #'expose-run-migration-history
                 :desc "Tests for this"    "t" #'expose-run-test-graph
                 :desc "Entity relations"  "e" #'expose-run-er-diagram
                 :desc "Reverse call graph" "r" #'expose-run-reverse-call-graph)

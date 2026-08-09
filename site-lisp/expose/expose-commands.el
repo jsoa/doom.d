@@ -16,6 +16,7 @@
 (declare-function expose-callers-build-dot "expose-callers" ())
 (declare-function expose-callers-build-tests-dot "expose-callers" ())
 (declare-function expose-imports-build-dot "expose-imports" (&optional show-externals))
+(declare-function expose-migrations-build-dot "expose-migrations" ())
 
 (defcustom expose-provider-default
   'codex
@@ -1407,6 +1408,53 @@ code is untested by every possible route."
       (expose-log "Commands" "Test graph: dot failed: %s" (cdr result))
       (expose-diagram-display-failure dot (cdr result) "Tests")
       (message "Expose test graph: dot failed"))))
+
+;;;###autoload
+(defun expose-run-migration-history ()
+  "Graph how the Django model at point was shaped by its migrations.
+
+Every operation that touched it, oldest first: created, fields added,
+retyped, renamed, dropped. Colored by what each does to existing data --
+additive green, altering amber, renaming violet, destructive red -- so
+the edits that lost or reshaped data stand out from the ones that only
+added.
+
+Computed by parsing the migration files, not generated. They are
+mechanically regular and there are usually dozens of them, which makes
+this exactly the tedious exact work a parser does better; and "when did
+this field become nullable" is a question where a plausible answer is
+worth nothing.
+
+Reading any single migration shows one edit. What this adds is the
+ordering: a field added in 0004, retyped in 0011 and dropped in 0032
+lives in three files named after whatever else they happened to
+contain."
+
+  (interactive)
+
+  (unless (executable-find expose-diagram-dot-executable)
+    (user-error
+     "Graphviz `%s' not found on PATH; needed to render Expose diagrams"
+     expose-diagram-dot-executable))
+
+  (require 'expose-migrations)
+
+  (message "Expose migration history: reading migrations...")
+
+  (let* ((origin (list (current-buffer) (point) #'expose-run-migration-history))
+         (built (expose-migrations-build-dot))
+         (dot (car built))
+         (model (cdr built))
+         (result (expose-diagram-render-svg dot model "TB")))
+
+    (if (car result)
+        (progn
+          (expose-diagram-display (cdr result) dot "Migration History" origin)
+          (message "Expose migration history: done"))
+
+      (expose-log "Commands" "Migration history: dot failed: %s" (cdr result))
+      (expose-diagram-display-failure dot (cdr result) "Migration History")
+      (message "Expose migration history: dot failed"))))
 
 ;;;###autoload
 (defun expose-run-import-graph (&optional show-externals)

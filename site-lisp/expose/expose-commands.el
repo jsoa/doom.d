@@ -1421,8 +1421,8 @@ added.
 
 Computed by parsing the migration files, not generated. They are
 mechanically regular and there are usually dozens of them, which makes
-this exactly the tedious exact work a parser does better; and "when did
-this field become nullable" is a question where a plausible answer is
+this exactly the tedious exact work a parser does better; and asking
+when a field became nullable is a question where a plausible answer is
 worth nothing.
 
 Reading any single migration shows one edit. What this adds is the

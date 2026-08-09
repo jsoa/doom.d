@@ -50,6 +50,53 @@ Custom local packages under `site-lisp/`, each with its own README and ERT test 
 
 ---
 
+## Per-project setup (`.dir-locals.el`)
+
+Nothing here requires per-project configuration — every feature falls back to
+working locally. What `.dir-locals.el` buys you is reaching a project that runs
+somewhere else, typically in Docker.
+
+Drop this at the root of a Python project:
+
+```elisp
+((python-base-mode
+  . ((jsoa/docker-jump-container . "myproject-app-1")
+     (jsoa/docker-jump-site-packages . "/usr/local/lib/python3.11/site-packages"))))
+```
+
+| Variable                          | What it does                                                                 |
+|-----------------------------------|------------------------------------------------------------------------------|
+| `jsoa/docker-jump-container`      | Container to resolve `gd` into when the definition is outside the project     |
+| `jsoa/docker-jump-site-packages`  | Absolute path of `site-packages` inside that container                        |
+
+`python-base-mode`, **not** `python-mode`. `python-mode` and `python-ts-mode` are
+siblings rather than parent and child, so a `python-mode` entry silently never
+applies in `python-ts-mode` buffers, and vice versa. `python-base-mode` is the
+actual shared parent of both, and getting this wrong looks exactly like the
+feature not working.
+
+Expose's Django queryset commands (`SPC c h s`, `SPC c h G p`) reuse that same
+container, so a project configured as above needs nothing further. Override any
+of it only if the defaults don't fit:
+
+```elisp
+((python-base-mode
+  . ((expose-orm-container . "myproject-app-1")   ; defaults to the docker-jump one
+     (expose-orm-workdir . "/code")               ; defaults to the image's WORKDIR
+     (expose-orm-python . "python")
+     (expose-orm-database . "replica")            ; DATABASES alias to take plans from
+     (expose-orm-dsn . "postgresql://...")))) ; or bypass DATABASES entirely
+```
+
+`expose-orm-database` and `expose-orm-dsn` exist so query plans can come from a
+replica or a dev copy rather than whatever `DATABASES["default"]` points at —
+worth setting if the default connection is production. All of these are marked
+safe, so Emacs won't prompt for them. See the
+[expose README](site-lisp/expose/README.md#queryset-sql) for what the commands do
+with them.
+
+---
+
 ## Installation
 
 ```bash

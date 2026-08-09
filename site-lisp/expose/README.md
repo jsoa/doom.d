@@ -485,7 +485,29 @@ Everything else is coloured structurally — index scans green, joins blue, sort
 
 ### Setup
 
-Runs `manage.py shell` in the project root, found by locating `manage.py` above the current file. To run inside a container, set `expose-orm-container` in `.dir-locals.el`; it falls back to `jsoa/docker-jump-container`, so a project already configured for remote jump-to-definition needs no second setting. `expose-orm-workdir` overrides the image's `WORKDIR`, and `expose-orm-python` the interpreter.
+Runs `manage.py shell` in the project root, found by locating `manage.py` above the current file. That is the whole setup for a project whose Python runs locally — there is nothing to configure.
+
+To run inside a container, set it in the project's `.dir-locals.el`:
+
+```elisp
+((python-base-mode
+  . ((expose-orm-container . "myproject-app-1"))))
+```
+
+`python-base-mode`, not `python-mode`: `python-mode` and `python-ts-mode` are siblings rather than parent and child, so a `python-mode` entry silently never applies in `python-ts-mode` buffers.
+
+| Variable                        | Default                        | Purpose                                        |
+|---------------------------------|--------------------------------|------------------------------------------------|
+| `expose-orm-container`          | `jsoa/docker-jump-container`   | Container to run the project's Python in       |
+| `expose-orm-workdir`            | the image's `WORKDIR`          | Where `manage.py` lives inside the container   |
+| `expose-orm-python`             | `python`                       | Interpreter                                    |
+| `expose-orm-database`           | `default`                      | `DATABASES` alias to take query plans from     |
+| `expose-orm-dsn`                | unset                          | Connection string, bypassing `DATABASES`       |
+| `expose-orm-statement-timeout`  | `10000`                        | Milliseconds before the database cancels a plan |
+
+The container falls back to `jsoa/docker-jump-container`, so a project already configured for remote jump-to-definition needs no second setting. All of these are marked safe, so Emacs does not prompt for them.
+
+`expose-orm-database` and `expose-orm-dsn` are worth setting when the default connection is one you would rather not plan against: they only change which database the plan comes from, since the SQL is still compiled by the project's own Django.
 
 The expression travels as a JSON environment variable rather than interpolated into a command line, so quoting inside it can't break anything, and the script's output is delimited by markers because `manage.py shell` prints banners and deprecation warnings around it.
 

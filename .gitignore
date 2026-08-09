@@ -3,6 +3,12 @@
 *.log
 tmp/
 
+# Claude Code session state, and the throwaway git worktrees it creates
+# under .claude/worktrees/ -- those are checkouts of this same repo, so
+# leaving them untracked keeps greps, reviews, and `doom sync` from
+# picking up a second, stale copy of every module.
+.claude/
+
 *~
 
 /private

@@ -288,6 +288,150 @@ inserted directly into a buffer rather than displayed as Markdown."
     :parent-scope
     :code)))
 
+(defun expose-request-control-flow-diagram (context)
+  "Build a control-flow diagram request.
+
+Same context selection as `expose-request-flow' -- this is that same
+question rendered as a graph rather than prose -- but asks for Graphviz
+DOT and nothing else, and so passes RAW so the response isn't wrapped in
+Markdown (see `expose-request-raw-output-instruction').
+
+The instruction is deliberately prescriptive about node shapes and about
+staying inside the visible code: a diagram reads as more authoritative
+than prose does, so an invented edge is more misleading here than a
+vague sentence would be."
+
+  (expose-request-create
+   'control-flow-diagram
+   'xml
+
+   (string-join
+    (list
+     "Produce a CONTROL FLOW graph of the current code as Graphviz DOT."
+     ""
+     "Rules:"
+     "- Output a single `digraph' and nothing else. No prose, no Markdown, no code fences."
+     "- Model control flow only: branches, loops, early returns, raised/caught exceptions, and the paths between them. Do not model the call graph of unrelated functions."
+     "- One node per meaningful step. Label nodes with a short paraphrase of the code, not a line number."
+     "- Shapes: `diamond' for a condition, `box' for a statement or block, `ellipse' for an entry point, `doubleoctagon' for a return or raise."
+     "- Label edges out of a condition with the branch taken (e.g. \"true\"/\"false\", or the matched case)."
+     "- Quote every label, and escape any embedded double quotes."
+     "- Only include flow you can actually see in the provided code. If a called function's internals are not shown, treat the call as a single step rather than guessing what happens inside it."
+     "- Set `rankdir=TB' and give the graph a short `label' naming what it depicts.")
+    "\n")
+
+   (expose-request-select
+    context
+    :project
+    :language
+    :file
+    :imports
+    :focus
+    :scope
+    :parent-scope
+    :code)
+
+   'raw))
+
+(defun expose-request-call-flow-diagram (context)
+  "Build a call-flow diagram request.
+
+Where `expose-request-control-flow-diagram' maps the branches *inside*
+one unit of code, this maps outward: what it calls, and what those call
+in turn. That's the axis most prone to invention -- a model asked what a
+function \"calls\" will happily describe the insides of a dependency it
+has never seen -- so the instruction repeatedly pins it to calls
+actually present in the provided code, and asks for an explicit
+`unresolved' marking rather than a guess."
+
+  (expose-request-create
+   'call-flow-diagram
+   'xml
+
+   (string-join
+    (list
+     "Produce a CALL FLOW graph of the current code as Graphviz DOT."
+     ""
+     "Rules:"
+     "- Output a single `digraph' and nothing else. No prose, no Markdown, no code fences."
+     "- Model what this code CALLS, and what those call in turn -- not its internal branching."
+     "- Include a call only if the call site is visible in the provided code. Never invent a callee's internals; if its body isn't shown, it's a leaf."
+     "- Shapes carry meaning, so use exactly these:"
+     "  `ellipse' for the entry point being diagrammed;"
+     "  `box' for a call to something defined in the provided code;"
+     "  `component' for a call into a third-party or standard library;"
+     "  `cylinder' for a call that performs I/O -- database, network, filesystem, cache, queue;"
+     "  `doubleoctagon' for a raise."
+     "- When a call only happens conditionally, label the edge with the condition (e.g. \"if payment completed\")."
+     "- For any callee whose body you cannot actually see, add the attribute `style=dashed' to that node instead of guessing what it does. Do not write this into the label text."
+     "- Quote every label, and escape any embedded double quotes. A label is a single quoted string: never place text after the closing quote."
+     "- Correct: node1 [label=\"do_thing\", shape=box, style=dashed];"
+     "- Wrong:   node1 [label=\"do_thing\" (unresolved)\"\", shape=box];"
+     "- Set `rankdir=LR' and give the graph a short `label' naming the entry point.")
+    "\n")
+
+   (expose-request-select
+    context
+    :project
+    :language
+    :file
+    :imports
+    :focus
+    :scope
+    :parent-scope
+    :code)
+
+   'raw))
+
+(defun expose-request-er-diagram (context)
+  "Build an entity-relationship diagram request.
+
+The most trustworthy of the diagram requests, because its source is
+declarative: a `ForeignKey' and its `related_name' are written down, not
+inferred, so there is far less for the provider to invent than in
+`expose-request-call-flow-diagram'.
+
+The record-label escaping rule below matters more than it looks:
+Graphviz's record shapes give `{', `}', `|', `<' and `>' structural
+meaning, so an unescaped one in a field type silently reshapes the
+entire node."
+
+  (expose-request-create
+   'er-diagram
+   'xml
+
+   (string-join
+    (list
+     "Produce an ENTITY RELATIONSHIP diagram of the data models in this code, as Graphviz DOT."
+     ""
+     "Rules:"
+     "- Output a single `digraph' and nothing else. No prose, no Markdown, no code fences."
+     "- One node per model/entity actually defined or referenced in the provided code. Do not invent models."
+     "- Models defined here: `shape=Mrecord', with a record label of the form"
+     "  \"{ModelName|field: Type\\lfield: Type\\l}\" -- note the trailing \\l on each field line."
+     "- Include the primary key, every foreign/relational key, and the few fields that identify the record. Omit routine bookkeeping fields; a readable node beats a complete one."
+     "- Models from outside this code (framework or third-party, e.g. Django's auth user): `shape=component' with just the dotted name as the label, no field list."
+     "- Abstract or base models: add `style=dashed'."
+     "- One edge per relationship, from the model that DECLARES the field to the model it points at, labelled with the field name:"
+     "  ForeignKey / many-to-one: `arrowhead=crow';"
+     "  ManyToMany: `dir=both, arrowhead=crow, arrowtail=crow';"
+     "  OneToOne: `arrowhead=tee'."
+     "- Add \" (nullable)\" to an edge's label when the relation allows null."
+     "- Escape any literal `{', `}', `|', `<' or `>' inside a record label as \\{ \\} \\| \\< \\> -- unescaped they are record structure, not text, and will corrupt the node."
+     "- Quote every label, and escape any embedded double quotes. A label is a single quoted string: never place text after the closing quote."
+     "- Set `rankdir=LR' and give the graph a short `label' naming what it depicts.")
+    "\n")
+
+   (expose-request-select
+    context
+    :project
+    :language
+    :file
+    :imports
+    :code)
+
+   'raw))
+
 (defun expose-request-usage (context)
   "Build a usage request."
 
@@ -548,6 +692,15 @@ inserted directly into a buffer rather than displayed as Markdown."
 
       ('flow
        (expose-request-flow context))
+
+      ('control-flow-diagram
+       (expose-request-control-flow-diagram context))
+
+      ('call-flow-diagram
+       (expose-request-call-flow-diagram context))
+
+      ('er-diagram
+       (expose-request-er-diagram context))
 
       ('usage
        (expose-request-usage context))

@@ -100,6 +100,7 @@
 
 ;; Custom modules
 (load! "modules/+env")
+(load! "modules/+direnv")
 (load! "modules/+expose")
 (load! "modules/+large-file")
 (load! "modules/+dashboard")
@@ -129,6 +130,7 @@
 (load! "modules/+groovy")
 (load! "modules/+python")
 (load! "modules/+python-debug")
+(load! "modules/+python-pdb")
 (load! "modules/+typescript")
 (load! "modules/+javascript")
 (load! "modules/+html")

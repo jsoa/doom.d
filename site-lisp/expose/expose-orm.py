@@ -6,11 +6,17 @@ the time this runs. The expression to inspect arrives as JSON in
 EXPOSE_ORM_PAYLOAD rather than interpolated into the source, which keeps
 quoting out of it entirely.
 
-Nothing here opens a database connection. `str(queryset.query)' compiles SQL
-through the backend's operations without connecting, and every fact reported
-below comes from the query object or the model's `_meta' -- so this is safe
-to point at a project whose DB_HOST is production, or whose database isn't
-running at all.
+By default nothing here opens a database connection. `str(queryset.query)'
+compiles SQL through the backend's operations without connecting, and every
+fact reported below comes from the query object or the model's `_meta' -- so
+the default path is safe to point at a project whose DB_HOST is production,
+or whose database isn't running at all.
+
+Asking for a plan (`explain' in the payload) is the exception, and the only
+thing here that connects: EXPLAIN needs the planner's own statistics, and
+EXPLAIN ANALYZE additionally *runs the query*. Both go through
+`fetch_plan', which rolls its transaction back and sets a statement timeout
+regardless.
 """
 
 import ast
@@ -280,7 +286,84 @@ def compile_sql(queryset):
     return sqlparse.format(sql, reindent=True, keyword_case="upper"), None
 
 
-def analyse(expression, module_path):
+def fetch_plan(queryset, payload):
+    """Return (PLAN, ERROR) from the database for QUERYSET.
+
+    ANALYZE genuinely executes the query, so it runs inside a transaction
+    that is always rolled back and under a statement timeout. A SELECT has
+    nothing to roll back, but the guard costs nothing and the alternative --
+    a CTE with a write in it, or an expression that slipped past the parser
+    -- is unrecoverable.
+    """
+
+    analyze = bool(payload.get("analyze"))
+    timeout_ms = int(payload.get("timeout_ms") or 10000)
+    dsn = payload.get("dsn")
+
+    options = ["FORMAT JSON"]
+    if analyze:
+        options.extend(["ANALYZE", "BUFFERS"])
+    prefix = "EXPLAIN (%s) " % ", ".join(options)
+
+    try:
+        sql, params = queryset.query.sql_with_params()
+    except Exception as exc:
+        return None, "could not compile SQL: %s: %s" % (exc.__class__.__name__, exc)
+
+    # An explicit DSN exists so the plan can be taken from a database you
+    # chose -- a replica or a dev copy -- rather than whichever one the
+    # project's settings happen to point at.
+    if dsn:
+        try:
+            import psycopg2
+        except ImportError:
+            try:
+                import psycopg as psycopg2  # psycopg 3
+            except ImportError:
+                return None, "no psycopg available to use expose-orm-dsn"
+
+        try:
+            connection = psycopg2.connect(dsn)
+        except Exception as exc:
+            return None, "could not connect: %s: %s" % (exc.__class__.__name__, exc)
+
+        try:
+            with connection:
+                with connection.cursor() as cursor:
+                    cursor.execute("SET LOCAL statement_timeout = %s", (timeout_ms,))
+                    cursor.execute(prefix + sql, params)
+                    rows = cursor.fetchall()
+            connection.rollback()
+        except Exception as exc:
+            return None, "%s: %s" % (exc.__class__.__name__, exc)
+        finally:
+            connection.close()
+
+        return rows[0][0], None
+
+    from django.db import connections, transaction
+
+    alias = payload.get("database") or "default"
+    if alias not in connections:
+        return None, "no database named %r in settings" % alias
+
+    connection = connections[alias]
+
+    try:
+        with transaction.atomic(using=alias):
+            with connection.cursor() as cursor:
+                cursor.execute("SET LOCAL statement_timeout = %s", (timeout_ms,))
+                cursor.execute(prefix + sql, params)
+                plan = cursor.fetchall()[0][0]
+            # Always. Nothing here is meant to outlive the inspection.
+            transaction.set_rollback(True, using=alias)
+    except Exception as exc:
+        return None, "%s: %s" % (exc.__class__.__name__, exc)
+
+    return plan, None
+
+
+def analyse(expression, module_path, payload=None):
     from django.db.models import Manager, QuerySet
 
     blocked = refusal(expression)
@@ -315,7 +398,7 @@ def analyse(expression, module_path):
     query = value.query
     sql, sql_note = compile_sql(value)
 
-    return {
+    result = {
         "model": "%s.%s" % (query.model._meta.app_label, query.model.__name__),
         "table": query.model._meta.db_table,
         "sql": sql,
@@ -342,12 +425,22 @@ def analyse(expression, module_path):
         ),
     }
 
+    if (payload or {}).get("explain"):
+        plan, plan_error = fetch_plan(value, payload)
+        result["plan"] = plan
+        result["plan_error"] = plan_error
+        result["analyzed"] = bool(payload.get("analyze"))
+
+    return result
+
 
 def main():
     payload = json.loads(os.environ.get("EXPOSE_ORM_PAYLOAD", "{}"))
 
     try:
-        result = analyse(payload.get("expression", ""), payload.get("module"))
+        result = analyse(
+            payload.get("expression", ""), payload.get("module"), payload
+        )
     except Exception as exc:  # noqa: BLE001 - reported, never swallowed
         import traceback
 

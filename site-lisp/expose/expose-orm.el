@@ -9,17 +9,25 @@
 ;;; question people ask of a queryset ("does this hit an index", "how many
 ;;; joins is this") is worthless answered approximately.
 ;;;
-;;; Nothing here connects to a database. `str(queryset.query)' compiles SQL
-;;; through the backend without opening a connection, and every finding
-;;; comes from the query object or the model's metadata. That is what makes
-;;; this safe to run against a project whose DB_HOST points somewhere you
+;;; `expose-orm-inspect' does not connect to a database. `str(queryset.query)'
+;;; compiles SQL through the backend without opening a connection, and every
+;;; finding comes from the query object or the model's metadata. That is what
+;;; makes it safe to run against a project whose DB_HOST points somewhere you
 ;;; would rather not send a query -- see `expose-orm.py', which also refuses
 ;;; to evaluate an expression containing a write.
+;;;
+;;; `expose-orm-explain' is the exception and the only thing here that
+;;; connects, because a plan is the planner's opinion and only the planner
+;;; holds it. It can be pointed at a replica (`expose-orm-dsn',
+;;; `expose-orm-database'), always rolls back, and always sets a statement
+;;; timeout.
 
 (require 'json)
 (require 'subr-x)
 (require 'python)
 (require 'expose-log)
+(require 'expose-diagram)
+(require 'expose-orm-plan)
 
 (defgroup expose-orm nil
   "Django queryset inspection for Expose."
@@ -48,6 +56,33 @@ images. Set it when `manage.py' is not there."
   "Python executable used to run `manage.py shell'."
   :type 'string
   :safe #'stringp
+  :group 'expose-orm)
+
+(defcustom expose-orm-database nil
+  "Django DATABASES alias to take query plans from, or nil for \"default\".
+
+Set this in `.dir-locals.el' to a read-only replica or a dev copy when
+the default connection is one you would rather not plan against."
+  :type '(choice (const :tag "default" nil) string)
+  :safe #'string-or-null-p
+  :group 'expose-orm)
+
+(defcustom expose-orm-dsn nil
+  "Connection string to take query plans from, bypassing Django settings.
+
+The SQL is still compiled by the project's Django, so it is the real
+query; only the connection it is explained against differs. Use this
+when the database you want a plan from is not in DATABASES at all."
+  :type '(choice (const :tag "Use Django's connection" nil) string)
+  :safe #'string-or-null-p
+  :group 'expose-orm)
+
+(defcustom expose-orm-statement-timeout 10000
+  "Milliseconds a plan query may run before the database cancels it.
+
+Applies to EXPLAIN ANALYZE, which actually executes the query -- without
+a timeout, explaining a bad query means waiting out the bad query."
+  :type 'integer
   :group 'expose-orm)
 
 (defconst expose-orm-script
@@ -269,18 +304,12 @@ alone tells you what will run, but not which part of it is the problem."
 ;;; Command
 ;;; ---------------------------------------------------------------------------
 
-;;;###autoload
-(defun expose-orm-inspect ()
-  "Show the SQL a Django queryset compiles to, and what will make it slow.
+(defun expose-orm-run (extra callback)
+  "Analyse the queryset at point, adding EXTRA to the payload.
 
-Uses the region when there is one, otherwise the statement at point.
-Runs in the project's own Python -- inside `expose-orm-container' when
-one is configured -- so the SQL is Django's, not a reconstruction.
-
-No database connection is opened, and expressions containing writes are
-refused rather than evaluated."
-
-  (interactive)
+CALLBACK receives the parsed result and the expression. Shared by
+`expose-orm-inspect' and `expose-orm-explain', which differ only in what
+they ask for and what they do with the answer."
 
   (let ((root (expose-orm-project-root)))
     (unless root
@@ -289,7 +318,9 @@ refused rather than evaluated."
 
     (let* ((expression (expose-orm-expression))
            (module (expose-orm-module))
-           (payload (json-encode `((expression . ,expression) (module . ,module))))
+           (payload (json-encode
+                     (append `((expression . ,expression) (module . ,module))
+                             extra)))
            (command (expose-orm-command payload))
            (script (with-temp-buffer
                      (insert-file-contents expose-orm-script)
@@ -317,17 +348,117 @@ refused rather than evaluated."
               :sentinel
               (lambda (_process event)
                 (when (string-match-p "\\`\\(finished\\|exited\\|deleted\\)" event)
-                  (if-let ((result (expose-orm-extract output)))
-                      (expose-orm-display result expression)
-                    (expose-log "orm" "No result in output: %s" output)
-                    (expose-orm-display
-                     `((error . ,(format "the project's Python produced no result.%s"
-                                         (if (string-empty-p (string-trim output))
-                                             " It printed nothing at all."
-                                           (concat "\n\n" (string-trim output))))))
-                     expression)))))))
+                  ;; Deferred out of the sentinel: the callback may render a
+                  ;; diagram, and running a subprocess from inside a
+                  ;; sentinel deadlocks on the thread holding this one.
+                  (let ((result (expose-orm-extract output))
+                        (raw output))
+                    (run-at-time
+                     0 nil
+                     (lambda ()
+                       (if result
+                           (funcall callback result expression)
+                         (expose-log "orm" "No result in output: %s" raw)
+                         (expose-orm-display
+                          `((error . ,(format "the project's Python produced no result.%s"
+                                              (if (string-empty-p (string-trim raw))
+                                                  " It printed nothing at all."
+                                                (concat "\n\n" (string-trim raw))))))
+                          expression))))))))))
 
         (process-send-string process script)
         (process-send-eof process)))))
+
+;;;###autoload
+(defun expose-orm-inspect ()
+  "Show the SQL a Django queryset compiles to, and what will make it slow.
+
+Uses the region when there is one, otherwise the statement at point.
+Runs in the project's own Python -- inside `expose-orm-container' when
+one is configured -- so the SQL is Django's, not a reconstruction.
+
+No database connection is opened, and expressions containing writes are
+refused rather than evaluated."
+
+  (interactive)
+
+  (message "Expose ORM: compiling...")
+  (expose-orm-run nil #'expose-orm-display))
+
+;;;###autoload
+(defun expose-orm-explain (&optional analyze)
+  "Draw the query plan for the Django queryset at point.
+
+With a prefix argument, ANALYZE: the query is actually executed, and the
+plan carries real row counts and timings instead of the planner's
+estimates -- which is the only way to see where an estimate was wrong,
+and the reason most bad plans are bad.
+
+Unlike `expose-orm-inspect', this connects: EXPLAIN needs the planner's
+statistics. It runs against `expose-orm-dsn' if set, otherwise the
+`expose-orm-database' alias, so the plan can be taken from a replica
+rather than whatever the project's settings point at. The transaction is
+rolled back either way, and `expose-orm-statement-timeout' bounds it."
+
+  (interactive "P")
+
+  (unless (executable-find expose-diagram-dot-executable)
+    (user-error "Graphviz `%s' not found on PATH; needed to draw the plan"
+                expose-diagram-dot-executable))
+
+  (when (and analyze
+             (not (yes-or-no-p
+                   "EXPLAIN ANALYZE runs the query for real. Continue? ")))
+    (user-error "Cancelled"))
+
+  (message "Expose ORM: asking the database for a plan...")
+
+  (expose-orm-run
+   `((explain . t)
+     (analyze . ,(if analyze t :json-false))
+     (database . ,expose-orm-database)
+     (dsn . ,expose-orm-dsn)
+     (timeout_ms . ,expose-orm-statement-timeout))
+   #'expose-orm-display-plan))
+
+(defun expose-orm-display-plan (result expression)
+  "Draw the plan in RESULT for EXPRESSION, or explain why there isn't one."
+
+  (let ((plan (alist-get 'plan result))
+        (plan-error (or (alist-get 'plan_error result) (alist-get 'error result))))
+
+    (cond
+     ((and (null plan) plan-error)
+      ;; Falling back to the static view rather than only an error: the
+      ;; SQL and findings are still there, and are what you would have
+      ;; asked for next anyway.
+      (expose-orm-display
+       (cons (cons 'note (format "no plan: %s" plan-error)) result)
+       expression)
+      (message "Expose ORM: no plan (%s)" plan-error))
+
+     ((null plan)
+      (expose-orm-display result expression)
+      (message "Expose ORM: the database returned no plan"))
+
+     (t
+      (let* ((analyzed (alist-get 'analyzed result))
+             (total (expose-orm-plan-total-time plan))
+             (title (format "%s%s%s"
+                            (or (alist-get 'model result) "query")
+                            (if analyzed "  -- analyzed" "  -- estimated")
+                            (if total (format ", %.1f ms" total) "")))
+             (dot (expose-orm-plan-to-dot plan title))
+             (origin (list (current-buffer) (point) #'expose-orm-explain))
+             (rendered (expose-diagram-render-svg dot nil "BT")))
+
+        (if (car rendered)
+            (progn
+              (expose-diagram-display (cdr rendered) dot "Query Plan" origin)
+              (message "Expose ORM: plan drawn"))
+
+          (expose-log "orm" "Plan: dot failed: %s" (cdr rendered))
+          (expose-diagram-display-failure dot (cdr rendered) "Query Plan")
+          (message "Expose ORM: dot failed")))))))
 
 (provide 'expose-orm)

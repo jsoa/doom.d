@@ -86,7 +86,17 @@ Typical local layout:
       expose-review-archive.el
       expose-watch.el
       expose-continue.el
+
+      expose-diagram.el
+      expose-callers.el
+      expose-imports.el
+      expose-migrations.el
+
+      expose-orm.el
+      expose-orm.py
 ```
+
+`expose-orm.py` is the one non-Elisp file: it runs inside the *project's* Python, not Emacs, and is kept as a file rather than a string so it can be tested directly against a real Django project.
 
 ## Doom Setup
 
@@ -253,6 +263,12 @@ These actions use the active region when one is selected, falling back to the po
 
 See [Diagrams](#diagrams-1) for what each one draws and how far to trust it.
 
+| Key           | Command              | Purpose                                     |
+|---------------|----------------------|---------------------------------------------|
+| `SPC c h q`   | `expose-orm-inspect` | SQL a Django queryset compiles to           |
+
+See [Queryset SQL](#queryset-sql).
+
 ### Full Review
 
 | Key           | Command                           | Description                      |
@@ -416,6 +432,38 @@ Its main reason to exist is **cycle detection**, drawn in red: an import cycle i
 It also includes non-call *references*, drawn dashed and labelled: a function that is only registered somewhere (`validators=[is_valid_member]`) has no callers at all and would otherwise read as dead code. Test files are excluded (`expose-callers-exclude-regexps`) because tests call everything and bury the production paths. The walk is bounded by `expose-callers-max-depth` and `expose-callers-max-nodes`; anything trimmed is marked on the graph rather than dropped silently.
 
 Requires the `dot` binary; the commands say so plainly if it is missing.
+
+## Queryset SQL
+
+`SPC c h q` (`expose-orm-inspect`) shows the SQL a Django queryset compiles to, and what about it will be slow. It uses the region when there is one, otherwise the whole statement at point — which is what you want for a chain wrapped over several lines, where the line under the cursor is a fragment that wouldn't parse.
+
+**No AI, and no reconstruction.** The expression is handed to the project's own Python and compiled by Django itself, so the SQL is the SQL. Guessing at it from source would defeat the purpose: the questions worth asking a queryset — how many joins is this, does that filter hit an index — are worthless answered approximately.
+
+**No database connection is opened.** `str(queryset.query)` compiles SQL through the backend without connecting, and every finding comes from the query object or the model's `_meta`. That is what makes this safe to point at a project whose `DB_HOST` is production, or whose database isn't running. The test suite proves it by running against settings whose host does not resolve.
+
+**Writes are refused, not executed.** The expression has to be *evaluated* to build the queryset, so a selection that reaches one line too far and catches `.delete()` would destroy data for real. Before anything is evaluated, the expression is parsed and rejected if it contains a write (`.delete()`, `.update()`, `.create()`, `.save()`, m2m `.add()`/`.clear()`) or anything that would run the query (`.count()`, `.first()`, `list(...)`). Method calls and builtins are told apart by call form rather than by name, since `qs.set(...)` is a related-manager write while `set(qs)` is an evaluation — and `.all()` is deliberately never refused, being both the most common call in any queryset and entirely lazy.
+
+What it reports, all computed exactly:
+
+- **Filters that no index will serve** — with the reason. A column with no index at all, and separately a column that is *only a non-leading member* of a composite index, which is the case most often gotten wrong: filtering on the second column of a two-column index scans anyway.
+- **Lookups that defeat an index that does exist** — `icontains`, `endswith`, `regex` and friends compile to `LIKE` with a leading wildcard, so the column can be perfectly indexed and still be scanned.
+- **Unbounded queries** — no `LIMIT`, which is fine until the table grows, and by then nobody is looking at the queryset.
+- **N+1 risk** — the model's forward relations, when the queryset has no `select_related`. Raised only when nothing is being pulled in already, since a queryset that uses `select_related` has clearly had the thought.
+- **Joins**, with type, and `distinct()` over a join, which often masks row duplication rather than fixing it.
+
+Indexed filters are deliberately *not* listed. Findings only mean something when the list is short.
+
+### Scope
+
+The expression is evaluated in the namespace of the module it was written in, so every import and alias that file already has resolves — `Listing.objects.filter(state=ACTIVE)` works when `Listing` and `ACTIVE` are that module's own names. Every model is also bound by its own name, so an expression naming only a model works even from a file that fails to import.
+
+What that cannot reach is **locals**: `self`, `request`, a loop variable. Those exist only where the code runs, and a queryset built around `request.user` reports the name it couldn't resolve rather than silently substituting a value — a plan for a query you didn't write being worse than no plan. This is the real limit of the approach, and how often it bites depends on how much of your ORM code sits inside view methods.
+
+### Setup
+
+Runs `manage.py shell` in the project root, found by locating `manage.py` above the current file. To run inside a container, set `expose-orm-container` in `.dir-locals.el`; it falls back to `jsoa/docker-jump-container`, so a project already configured for remote jump-to-definition needs no second setting. `expose-orm-workdir` overrides the image's `WORKDIR`, and `expose-orm-python` the interpreter.
+
+The expression travels as a JSON environment variable rather than interpolated into a command line, so quoting inside it can't break anything, and the script's output is delimited by markers because `manage.py shell` prints banners and deprecation warnings around it.
 
 ## Commit Message Insertion
 

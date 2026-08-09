@@ -370,7 +370,11 @@ Data flow is the other inference-heavy one: it labels each edge with the operati
 | **Route** | A `reverse(...)` whose URL name resolves to this view | Solid, green, labelled with the name |
 | Mention | The name appears in a test file's text | Dotted, grey |
 
-The route is the important one for Django. A test calling `self.client.get(reverse("user-event-list"))` never names the view at all — the only true link is the URL name, which `urls.py` maps back to the viewset. Expose parses that mapping (DRF `router.register(..., basename=...)` and `path(..., View.as_view(), name=...)`) rather than running `manage.py show_urls`, which would be authoritative but needs settings, an app registry and usually a database — a running container, in a Dockerised project. The cost is the dynamic cases: `include()` namespaces and routers built in a loop are not followed.
+The route is the important one for Django. A test calling `self.client.get(reverse("user-event-list"))` never names the view at all — the only true link is the URL name, which `urls.py` maps back to the viewset. Expose parses that mapping rather than running `manage.py show_urls`, which would be authoritative but needs settings, an app registry and usually a database — a running container, in a Dockerised project. It handles DRF `router.register(..., basename=...)`, plain `path(..., View.as_view(), name=...)`, and registrations with **no** basename, where DRF derives one from the viewset's queryset model (`EventHost` → `eventhost`, lowercased with no separators).
+
+Note that the full route name is never written down anywhere: only the basename is, and DRF generates `-list`, `-detail` and any custom `@action` names from it. Expose reconstructs that rule rather than looking the names up, which is why custom actions are matched without knowing they exist.
+
+The cost of parsing over running is the dynamic cases: `include()` namespaces and routers built in a loop are not followed.
 
 Mentions also catch `@patch("app.tasks.send_email")`, which names its target in a string, and the `<Symbol>Test` naming convention.
 

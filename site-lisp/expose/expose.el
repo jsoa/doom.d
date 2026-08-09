@@ -119,6 +119,7 @@
                (:prefix-map ("G" . "Diagrams")
                 :desc "Control flow"      "c" #'expose-run-control-flow-diagram
                 :desc "Call flow"         "C" #'expose-run-call-flow-diagram
+                :desc "Data flow"         "d" #'expose-run-data-flow-diagram
                 :desc "Entity relations"  "e" #'expose-run-er-diagram
                 :desc "Reverse call graph" "r" #'expose-run-reverse-call-graph)
 

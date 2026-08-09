@@ -1349,6 +1349,32 @@ the buffer, not a judgement call."
             (deactivate-mark)))))))
 
 ;;;###autoload
+(defun expose-run-data-flow-diagram ()
+  "Render a data-flow graph of the code at point as an image.
+
+The third axis: `expose-run-control-flow-diagram' shows when things
+run, `expose-run-call-flow-diagram' shows what gets invoked, and this
+shows where values come from, what reshapes them, and where they end
+up. Inputs, derived values, third-party transforms, sinks that leave
+the process, and returns are colored differently.
+
+Edges carry the operation, so in-place mutation is stated rather than
+implied -- rebinding a name and mutating the object behind it look
+nearly identical in source and behave nothing alike, which is the thing
+this is worth drawing for.
+
+Inference-heavy, so the most worth checking of the provider-generated
+diagrams: aliasing and mutation are exactly where a plausible reading
+can be wrong. Press `s' to see the DOT it was built from."
+
+  (interactive)
+
+  (expose-run-diagram
+   'data-flow-diagram
+   "Data Flow"
+   #'expose-run-data-flow-diagram))
+
+;;;###autoload
 (defun expose-run-call-flow-diagram ()
   "Render a call-flow graph of the code at point as an image.
 

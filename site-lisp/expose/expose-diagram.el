@@ -404,6 +404,13 @@ than a node declaration."
         (format "%s%s [%s color=\"%s\" fontcolor=\"%s\"]"
                 arrow name attrs color color))))
 
+   ;; A node that already states its own fill means it by something the
+   ;; shape can't express -- the coverage graph's red-to-green gradient,
+   ;; for instance. Overwriting it with a class color would throw that
+   ;; information away, so explicit fills win.
+   ((expose-diagram-attribute attrs "fillcolor")
+    nil)
+
    ;; Node declaration.
    (t
     (let* ((colors (expose-diagram-color (expose-diagram-classify attrs)))

@@ -14,6 +14,7 @@
 ;; front: it pulls in `xref' and only matters if that one command is
 ;; used.
 (declare-function expose-callers-build-dot "expose-callers" ())
+(declare-function expose-callers-build-tests-dot "expose-callers" ())
 (declare-function expose-imports-build-dot "expose-imports" (&optional show-externals))
 
 (defcustom expose-provider-default
@@ -1348,6 +1349,53 @@ the buffer, not a judgement call."
           (unwind-protect
               (expose-run-diagram 'er-diagram "ER" #'expose-run-er-diagram focus)
             (deactivate-mark)))))))
+
+;;;###autoload
+(defun expose-run-test-graph ()
+  "Graph which tests reach the function at point, and how.
+
+Answers \"is this tested, and by what\" -- not a coverage percentage.
+The reverse call graph deliberately excludes tests so production paths
+stay readable; this is the half it throws away, and only that half:
+callers no test goes through are pruned, so what's left is the routes
+tests take to get here, intermediate functions included.
+
+Computed, not generated -- LSP call hierarchy, falling back to `xref',
+same as `expose-run-reverse-call-graph'. Non-call references count too,
+since a function registered rather than called is still exercised.
+
+When nothing reaches it, that's stated plainly instead of drawn as an
+empty graph. Worth knowing what that does and doesn't mean: it says no
+test reaches this within `expose-callers-max-depth' levels, not that the
+code is untested by every possible route."
+
+  (interactive)
+
+  (unless (executable-find expose-diagram-dot-executable)
+    (user-error
+     "Graphviz `%s' not found on PATH; needed to render Expose diagrams"
+     expose-diagram-dot-executable))
+
+  (require 'expose-callers)
+
+  (message "Expose test graph: searching...")
+
+  (let* ((origin (list (current-buffer) (point) #'expose-run-test-graph))
+         (built (expose-callers-build-tests-dot))
+         (dot (nth 0 built))
+         (root (nth 1 built))
+         (count (nth 2 built))
+         (result (expose-diagram-render-svg dot root)))
+
+    (if (car result)
+        (progn
+          (expose-diagram-display (cdr result) dot "Tests" origin)
+          (message "Expose test graph: %d test%s reach %s"
+                   count (if (= count 1) "" "s") root))
+
+      (expose-log "Commands" "Test graph: dot failed: %s" (cdr result))
+      (expose-diagram-display-failure dot (cdr result) "Tests")
+      (message "Expose test graph: dot failed"))))
 
 ;;;###autoload
 (defun expose-run-import-graph (&optional show-externals)

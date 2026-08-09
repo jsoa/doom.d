@@ -118,6 +118,16 @@ don't exist."
        (lambda (regexp) (string-match-p regexp path))
        expose-callers-exclude-regexps))))
 
+(defun expose-callers-test-p (file)
+  "Return non-nil if FILE looks like a test.
+
+Deliberately the same patterns as `expose-callers-exclude-regexps': the
+list that answers \"leave tests out of the production call graph\" is the
+same one that answers \"this is a test\", and keeping a second copy in
+sync would be a way to make the two disagree."
+
+  (expose-callers-excluded-p file))
+
 (defun expose-callers-relative-file (file)
   "Return FILE relative to its project root, for display."
 
@@ -470,6 +480,175 @@ resolved call list."
     (push "}" lines)
 
     (mapconcat #'identity (nreverse lines) "\n")))
+
+;;; ---------------------------------------------------------------------------
+;;; Tests reaching a symbol
+;;; ---------------------------------------------------------------------------
+
+(defun expose-callers-test-reachable (nodes edges root-key)
+  "Return the subset of node keys that lie on a path from a test to ROOT-KEY.
+
+Every node in the graph already reaches ROOT-KEY -- the walk built it by
+climbing from there -- so the question is only which ones a test reaches
+in turn. Anything else is a caller that no test goes through, which is
+noise when the question is \"what covers this\"."
+
+  (let ((outgoing (make-hash-table :test 'equal))
+        (keep (make-hash-table :test 'equal)))
+
+    (dolist (edge edges)
+      (push (nth 1 edge) (gethash (nth 0 edge) outgoing)))
+
+    (puthash root-key t keep)
+
+    (maphash
+     (lambda (key node)
+       (when (expose-callers-test-p (plist-get node :file))
+         ;; Walk down from this test toward the root, keeping the whole
+         ;; chain: the intermediate functions are how the test reaches
+         ;; the code, which is the part worth seeing.
+         (let ((queue (list key))
+               (seen (make-hash-table :test 'equal)))
+
+           (while queue
+             (let ((current (pop queue)))
+               (unless (gethash current seen)
+                 (puthash current t seen)
+                 (puthash current t keep)
+                 (setq queue (append queue (gethash current outgoing)))))))))
+     nodes)
+
+    keep))
+
+(defun expose-callers-tests-to-dot (nodes edges root keep)
+  "Render the test paths in NODES/EDGES reaching ROOT as Graphviz DOT.
+
+KEEP is the set of node keys from `expose-callers-test-reachable'."
+
+  (let* ((root-key (expose-callers-node-key root))
+         (test-count 0)
+         (lines nil))
+
+    (maphash
+     (lambda (key node)
+       (when (and (gethash key keep)
+                  (not (equal key root-key))
+                  (expose-callers-test-p (plist-get node :file)))
+         (setq test-count (1+ test-count))))
+     nodes)
+
+    (push "digraph tests {" lines)
+    (push "  rankdir=BT;" lines)
+    (push (format "  label=\"%d test%s reaching %s\";"
+                  test-count
+                  (if (= test-count 1) "" "s")
+                  (expose-callers-escape (plist-get root :name)))
+          lines)
+
+    (maphash
+     (lambda (key node)
+       (when (gethash key keep)
+         (let* ((id (expose-callers-node-id key))
+                (file (expose-callers-relative-file (plist-get node :file)))
+                (test (expose-callers-test-p (plist-get node :file)))
+
+                (label
+                 (format "%s\\n%s"
+                         (expose-callers-escape (plist-get node :name))
+                         (expose-callers-escape (or file "?")))))
+
+           (push
+            (cond
+             ((equal key root-key)
+              (format "  %s [shape=ellipse,label=\"%s\"];" id label))
+
+             ;; Explicit fill rather than a shape class: "this is a test"
+             ;; isn't one of the semantic categories the shape vocabulary
+             ;; encodes, and the styler now leaves stated fills alone.
+             (test
+              (format "  %s [shape=box,label=\"%s\",style=\"filled,rounded\",fillcolor=\"#e9f6ec\",color=\"#4f9d69\",fontcolor=\"#1d4a2d\"];"
+                      id label))
+
+             (t
+              (format "  %s [shape=box,label=\"%s\"];" id label)))
+            lines))))
+     nodes)
+
+    (dolist (edge edges)
+      (when (and (gethash (nth 0 edge) keep)
+                 (gethash (nth 1 edge) keep))
+        (push
+         (if (eq (nth 2 edge) 'reference)
+             (format "  %s -> %s [style=dashed,label=\"references\",color=\"#a2792f\",fontcolor=\"#a2792f\"];"
+                     (expose-callers-node-id (nth 0 edge))
+                     (expose-callers-node-id (nth 1 edge)))
+           (format "  %s -> %s;"
+                   (expose-callers-node-id (nth 0 edge))
+                   (expose-callers-node-id (nth 1 edge))))
+         lines)))
+
+    (push "}" lines)
+
+    (cons (mapconcat #'identity (nreverse lines) "\n") test-count)))
+
+(defun expose-callers-build-tests-dot ()
+  "Return (DOT ROOT-NAME TEST-COUNT) for the tests reaching the symbol at point.
+
+Signals a `user-error' naming the symbol when nothing tests it -- that
+being the answer worth stating plainly rather than drawing an empty
+graph."
+
+  (let* ((use-lsp (expose-callers-lsp-available-p))
+
+         (root
+          (if use-lsp
+              (car (expose-callers-lsp-prepare))
+            (let ((name (or (thing-at-point 'symbol t)
+                            (user-error "No symbol at point"))))
+              (list :name name
+                    :file (buffer-file-name)
+                    :line (line-number-at-pos))))))
+
+    (unless root
+      (user-error "Nothing callable at point"))
+
+    (let* ((root-references
+            (when expose-callers-include-references
+              (condition-case err
+                  (if use-lsp
+                      (expose-callers-lsp-references)
+                    (expose-callers-xref-nodes (plist-get root :name) 'reference))
+                (error
+                 (expose-log "Callers" "Reference lookup failed: %s"
+                             (error-message-string err))
+                 nil))))
+
+           ;; Tests are what we're looking for here, so the exclusion that
+           ;; keeps them out of the production graph has to be lifted --
+           ;; otherwise this would search for exactly what it filtered.
+           (graph
+            (let ((expose-callers-exclude-regexps nil))
+              (expose-callers-collect root use-lsp root-references)))
+
+           (nodes (car graph))
+           (edges (cdr graph))
+           (keep (expose-callers-test-reachable
+                  nodes edges (expose-callers-node-key root)))
+           (rendered (expose-callers-tests-to-dot nodes edges root keep)))
+
+      (expose-log "Callers" "Tests reaching %s: %d (from %d callers)."
+                  (plist-get root :name) (cdr rendered) (hash-table-count nodes))
+
+      (when (zerop (cdr rendered))
+        (user-error
+         "Nothing under %s reaches %s%s"
+         (if use-lsp "test/" "test/")
+         (plist-get root :name)
+         (if use-lsp
+             ""
+           " (searched references only; try again once LSP is running)")))
+
+      (list (car rendered) (plist-get root :name) (cdr rendered)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Entry

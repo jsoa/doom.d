@@ -235,6 +235,17 @@ These actions use the active region when one is selected, falling back to the po
 | `SPC c h h m` | `expose-run-mental-model`            | Build a mental model                 |
 | `SPC c h h ?` | `expose-hover-debug-current-buffer`  | Debug current buffer hover state     |
 
+### Diagrams
+
+| Key           | Command                             | Description                              |
+|---------------|-------------------------------------|------------------------------------------|
+| `SPC c h G c` | `expose-run-control-flow-diagram`   | Control flow of the code at point        |
+| `SPC c h G C` | `expose-run-call-flow-diagram`      | What the code at point calls             |
+| `SPC c h G e` | `expose-run-er-diagram`             | Models and their relationships           |
+| `SPC c h G r` | `expose-run-reverse-call-graph`     | What calls the function at point         |
+
+See [Diagrams](#diagrams-1) for what each one draws and how far to trust it.
+
 ### Full Review
 
 | Key           | Command                           | Description                      |
@@ -304,6 +315,42 @@ Expose actions are intentionally small, focused lenses over the current code con
 | Mental Model   | Conceptual map for reasoning about the code                      |
 | Commit Message | Conventional-style commit message from Git diff/status           |
 | Changelog      | User/developer-facing changelog entry from Git diff/status       |
+
+## Diagrams
+
+Four graphs, rendered with Graphviz and shown as an SVG image in a full-frame buffer. Graphviz because `dot` needs no extra toolchain; SVG because Emacs renders it natively, so zooming stays sharp.
+
+| Diagram            | Answers                                            | Source     |
+|--------------------|----------------------------------------------------|------------|
+| Control flow       | Which paths run through this code                  | Provider   |
+| Call flow          | What this code calls, and what those call          | Provider   |
+| Entity relations   | Which models exist and how they relate             | Provider   |
+| Reverse call graph | What calls this, transitively                      | LSP / xref |
+
+Nodes are colored by what they represent — entry, condition, error, exit, external dependency, I/O — classified from the shapes each request asks for rather than from colors chosen by the provider, which vary run to run. Relationship edges in the ER diagram are colored by kind (foreign key, many-to-many, one-to-one), and the model you invoked it from is outlined.
+
+### Reading the diagram buffer
+
+| Key     | Action                                        |
+|---------|-----------------------------------------------|
+| `+` `-` | Zoom in / out                                 |
+| `0`     | Fit the whole graph to the window             |
+| `1`     | Actual size                                   |
+| `H` `L` | Pan left / right                              |
+| `s`     | Show the DOT source behind the image          |
+| `g`     | Regenerate                                    |
+| `w`     | Write to a file (`.svg`, `.png`, `.jpg`, `.pdf`) |
+| `q`     | Quit, restoring the previous window layout    |
+
+### How far to trust them
+
+The first three are provider-generated and advisory, like the rest of Expose. A picture reads as more authoritative than a paragraph, so `s` is worth using: it shows the exact DOT the image was built from. The ER diagram is the most reliable of the three — relationships are declared in the source rather than inferred. Call flow is the least, since a model asked what something "calls" will readily describe a dependency it was never shown; callees it cannot see are drawn dashed.
+
+**The reverse call graph has no AI in it.** Finding callers needs whole-project knowledge that no provider has, and a fabricated answer to "is it safe to change this?" is worse than none, so its edges come from LSP call hierarchy — or `xref` when the server can't answer, which the graph says on its title since references are not the same as calls.
+
+It also includes non-call *references*, drawn dashed and labelled: a function that is only registered somewhere (`validators=[is_valid_member]`) has no callers at all and would otherwise read as dead code. Test files are excluded (`expose-callers-exclude-regexps`) because tests call everything and bury the production paths. The walk is bounded by `expose-callers-max-depth` and `expose-callers-max-nodes`; anything trimmed is marked on the graph rather than dropped silently.
+
+Requires the `dot` binary; the commands say so plainly if it is missing.
 
 ## Commit Message Insertion
 

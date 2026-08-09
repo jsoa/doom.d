@@ -245,6 +245,7 @@ These actions use the active region when one is selected, falling back to the po
 | `SPC c h G d` | `expose-run-data-flow-diagram`      | How values move through the code         |
 | `SPC c h G R` | `expose-run-request-flow-diagram`   | Django request pipeline for a view       |
 | `SPC c h G m` | `expose-run-import-graph`           | What this file imports, transitively     |
+| `SPC c h G t` | `expose-run-test-graph`             | Which tests reach the code at point      |
 | `SPC c h G e` | `expose-run-er-diagram`             | Models and their relationships           |
 | `SPC c h G r` | `expose-run-reverse-call-graph`     | What calls the function at point         |
 
@@ -331,6 +332,7 @@ Four graphs, rendered with Graphviz and shown as an SVG image in a full-frame bu
 | Data flow          | Where values come from, and where they end up      | Provider   |
 | Request flow       | A Django request through its pipeline layers       | Provider   |
 | Import graph       | What this file imports, and its cycles             | Parsed     |
+| Tests              | Which tests reach this code, and how               | LSP / xref |
 | Entity relations   | Which models exist and how they relate             | Provider   |
 | Reverse call graph | What calls this, transitively                      | LSP / xref |
 
@@ -358,6 +360,8 @@ Request flow groups the same territory as call flow into the layers a request pa
 Routing is included only when the URL configuration is in the code being looked at, which from a views module it usually isn't. Rather than inventing a plausible route, it starts at the view -- use the reverse call graph to find what actually routes there, which reports the `urls.py` reference as a module-level usage.
 
 Data flow is the other inference-heavy one: it labels each edge with the operation, and states "mutated in place" explicitly, because rebinding a name and mutating the object behind it look nearly identical in source and behave nothing alike. That distinction is the reason to draw it, and also the thing most worth checking against the source.
+
+**The tests graph** answers "is this tested, and by what" -- not a coverage percentage. It is the reverse call graph with its filter inverted: that one excludes tests so production paths stay readable, and this keeps only the half it discards. Callers no test goes through are pruned, so what remains is the routes tests take to reach the code, intermediate functions included. When nothing reaches it, that is stated plainly rather than drawn as an empty graph -- though it means "no test reaches this within `expose-callers-max-depth` levels", not "this is untested by every possible route".
 
 **The import graph has no AI in it either**, for the same reason: imports are trivially parseable, so asking a provider to describe them would trade an exact answer for a plausible one. It follows project-local imports and stops at the boundary — third-party and standard library packages are leaves, shown only with a prefix argument, since hiding them usually makes the project's own shape far easier to read. Python and TypeScript/JavaScript; tests, migrations and `node_modules` are excluded by `expose-imports-exclude-regexps`.
 

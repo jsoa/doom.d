@@ -86,20 +86,121 @@ first `)'. Returns nil if the call is never closed within TEXT."
       (substring text (1+ open) (1- index)))))
 
 (defun expose-migrations-signature (type text open)
-  "Return TYPE with its condensed argument list from TEXT at OPEN.
+  "Return TYPE with its argument list from TEXT at OPEN, whitespace collapsed.
 
 Without the arguments an `AlterField' is invisible: most Django
 alterations change a keyword -- `null=True', a wider `max_length' --
 and never the field class, so both sides would read `CharField' and the
-row would be tinted amber with nothing to show for it."
+row would be tinted amber with nothing to show for it.
+
+Kept whole rather than shortened here. Shortening is a display concern
+\(see `expose-migrations-truncate'), and `expose-migrations-delta' needs
+the untruncated text to tell which argument actually changed."
 
   (let* ((raw (expose-migrations-arguments text open))
          (flat (and raw (string-trim (replace-regexp-in-string "[ \t\n]+" " " raw)))))
-    (cond
-     ((or (null flat) (string-empty-p flat)) type)
-     ((> (length flat) expose-migrations-max-definition-width)
-      (format "%s(%s...)" type (substring flat 0 expose-migrations-max-definition-width)))
-     (t (format "%s(%s)" type flat)))))
+    (if (or (null flat) (string-empty-p flat))
+        type
+      (format "%s(%s)" type flat))))
+
+(defun expose-migrations-truncate (text)
+  "Shorten TEXT to `expose-migrations-max-definition-width' arguments."
+
+  (let ((body (or text "")))
+    (if (<= (length body) expose-migrations-max-definition-width)
+        body
+      (concat (substring body 0 expose-migrations-max-definition-width) "..."))))
+
+(defun expose-migrations-split-arguments (text)
+  "Split TEXT on its top-level commas.
+
+Nested calls, lists and string literals are stepped over, so a
+`choices=[(1, \"a\"), (2, \"b\")]' stays one argument instead of four."
+
+  (let ((parts nil) (start 0) (depth 0) (in-string nil)
+        (index 0) (limit (length text)))
+
+    (while (< index limit)
+      (let ((char (aref text index)))
+        (cond
+         (in-string
+          (cond ((eq char ?\\) (setq index (1+ index)))
+                ((eq char in-string) (setq in-string nil))))
+         ((memq char (list ?\" ?\')) (setq in-string char))
+         ((memq char (list ?\( ?\[ ?{)) (setq depth (1+ depth)))
+         ((memq char (list ?\) ?\] ?})) (setq depth (1- depth)))
+         ((and (eq char ?,) (zerop depth))
+          (push (string-trim (substring text start index)) parts)
+          (setq start (1+ index)))))
+      (setq index (1+ index)))
+
+    (push (string-trim (substring text start)) parts)
+    (seq-remove #'string-empty-p (nreverse parts))))
+
+(defun expose-migrations-parse-argument (argument)
+  "Return ARGUMENT as (KEYWORD . VALUE), with KEYWORD nil if positional."
+
+  (if (string-match "\\`\\([A-Za-z_][A-Za-z0-9_]*\\)[ \t]*=[ \t]*" argument)
+      (cons (match-string 1 argument) (substring argument (match-end 0)))
+    (cons nil argument)))
+
+(defun expose-migrations-parse-definition (definition)
+  "Return DEFINITION as (TYPE . ARGUMENTS), ARGUMENTS being parsed pairs."
+
+  (if (string-match "\\`\\([A-Za-z_][A-Za-z0-9_]*\\)(" definition)
+      (let* ((type (match-string 1 definition))
+             (open (1- (match-end 0)))
+             (arguments (expose-migrations-arguments definition open)))
+        (cons type
+              (mapcar #'expose-migrations-parse-argument
+                      (expose-migrations-split-arguments (or arguments "")))))
+    (cons definition nil)))
+
+(defun expose-migrations-delta (old new)
+  "Return what changed between field definitions OLD and NEW, or nil.
+
+Only the arguments that actually differ are described. A Django field
+carries most of its definition unchanged through an alteration -- the
+`help_text' paragraph that was already there stays -- and showing the
+whole thing pushed the one argument that moved past the width limit,
+which is precisely the argument you opened the diagram to find. Dropped
+keywords are shown as `-name', since their absence is otherwise
+invisible."
+
+  (let* ((before (expose-migrations-parse-definition (or old "")))
+         (after (expose-migrations-parse-definition (or new "")))
+         (old-arguments (cdr before))
+         (new-arguments (cdr after))
+         (differences nil))
+
+    (dolist (argument new-arguments)
+      (let ((keyword (car argument))
+            (value (cdr argument)))
+        (cond
+         ;; Positional arguments have no name to compare by, so they
+         ;; count as changed only if the exact text is gone.
+         ((null keyword)
+          (unless (member argument old-arguments)
+            (push value differences)))
+         ((not (equal value (cdr (assoc keyword old-arguments))))
+          (push (format "%s=%s" keyword value) differences)))))
+
+    (dolist (argument old-arguments)
+      (when (and (car argument) (not (assoc (car argument) new-arguments)))
+        (push (format "-%s" (car argument)) differences)))
+
+    ;; Shortest first, rather than in source order. Several arguments can
+    ;; change at once and one of them is typically a paragraph of
+    ;; `help_text', which under the width limit would push a terse
+    ;; `related_name=' or `null=True' off the end -- the terse ones being
+    ;; the changes that alter behaviour rather than wording.
+    (setq differences (sort (nreverse differences)
+                            (lambda (a b) (< (length a) (length b)))))
+
+    ;; Identical definitions produce nothing; the caller falls back to
+    ;; showing the field as it stands.
+    (unless (and (equal (car before) (car after)) (null differences))
+      (format "%s(%s)" (car after) (string-join differences ", ")))))
 
 (defun expose-migrations-files (root)
   "Return every migration file under ROOT, sorted by app then number.
@@ -284,7 +385,7 @@ from a past deploy."
   (let ((fields nil)
         (snapshots nil)
         (current-key nil)
-        (added nil) (altered nil) (removed nil))
+        (added nil) (altered nil) (removed nil) (changes nil))
 
     (cl-flet
         ((flush ()
@@ -303,7 +404,8 @@ from a past deploy."
                                          fields)
                          :added (nreverse added)
                          :altered (nreverse altered)
-                         :removed (nreverse removed))
+                         :removed (nreverse removed)
+                         :changes (nreverse changes))
                    snapshots))))
 
       (dolist (entry history)
@@ -313,7 +415,7 @@ from a past deploy."
           ;; they collapse into one snapshot rather than one per edit.
           (unless (equal key current-key)
             (flush)
-            (setq current-key key added nil altered nil removed nil))
+            (setq current-key key added nil altered nil removed nil changes nil))
 
           (pcase (plist-get entry :operation)
             ("CreateModel"
@@ -331,11 +433,17 @@ from a past deploy."
 
             ("AlterField"
              (when-let ((name (plist-get entry :field)))
-               (if-let ((existing (assoc name fields)))
-                   (setcdr existing (or (plist-get entry :definition) (plist-get entry :type)))
-                 ;; Altering something never seen added: the model
-                 ;; predates the migrations that are checked in.
-                 (setq fields (append fields (list (cons name (or (plist-get entry :definition) (plist-get entry :type)))))))
+               (let ((new (or (plist-get entry :definition) (plist-get entry :type))))
+                 (if-let ((existing (assoc name fields)))
+                     (progn
+                       ;; Recorded here because this is the only place
+                       ;; both sides of the change exist at once.
+                       (when-let ((delta (expose-migrations-delta (cdr existing) new)))
+                         (push (cons name delta) changes))
+                       (setcdr existing new))
+                   ;; Altering something never seen added: the model
+                   ;; predates the migrations that are checked in.
+                   (setq fields (append fields (list (cons name new))))))
                (push name altered)))
 
             ("RemoveField"
@@ -379,7 +487,7 @@ you're looking."
      (if background (format " BGCOLOR=\"%s\"" background) "")
      (expose-migrations-escape-html name)
      (if background (format " BGCOLOR=\"%s\"" background) "")
-     (expose-migrations-escape-html (or type "")))))
+     (expose-migrations-escape-html (expose-migrations-truncate type)))))
 
 (defun expose-migrations-snapshot-node (id model snapshot)
   "Return the DOT node for one SNAPSHOT of MODEL, as an HTML table."
@@ -387,12 +495,17 @@ you're looking."
   (let* ((added (plist-get snapshot :added))
          (altered (plist-get snapshot :altered))
          (removed (plist-get snapshot :removed))
+         (changes (plist-get snapshot :changes))
 
          (rows
           (mapconcat
            (lambda (field)
              (expose-migrations-row
-              (car field) (cdr field)
+              (car field)
+              ;; An altered field shows only what the migration changed.
+              ;; Its full definition is mostly the text it already had,
+              ;; which crowds out the one argument that moved.
+              (or (cdr (assoc (car field) changes)) (cdr field))
               (cond ((member (car field) added) 'added)
                     ((member (car field) altered) 'altered)
                     ;; A rename is recorded as "old -> new", so the

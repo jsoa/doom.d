@@ -111,6 +111,69 @@ the untruncated text to tell which argument actually changed."
         body
       (concat (substring body 0 expose-migrations-max-definition-width) "..."))))
 
+(defcustom expose-migrations-max-expanded-fields 4
+  "Most changed fields in one migration that may be shown in full.
+
+Spelling out a definition earns its space by singling a field out from
+the ones around it. A migration that changes nearly everything -- above
+all `CreateModel', where every field counts as added -- has nothing to
+single out, and expanding all of them turns the table into a wall taller
+than the rest of the diagram."
+  :type 'integer
+  :group 'expose-migrations)
+
+(defcustom expose-migrations-max-detail-lines 6
+  "Most continuation rows a single changed field may occupy.
+
+A `choices=' list can run to hundreds of characters, and letting one
+field claim thirty rows would push every other field in the table out of
+view. Past this the definition is cut, since by then it has said what it
+had to say."
+  :type 'integer
+  :group 'expose-migrations)
+
+(defun expose-migrations-wrap (text width)
+  "Split TEXT into lines of at most WIDTH characters.
+
+Wraps at spaces where it can, which in practice falls between keyword
+arguments and inside prose `help_text', and breaks mid-token only for a
+single run longer than the whole width -- there being nothing else to do
+with one. Capped by `expose-migrations-max-detail-lines'."
+
+  (let ((words (split-string (or text "") " " t))
+        (lines nil)
+        (current ""))
+
+    (dolist (word words)
+      ;; A token wider than the cell has to be broken somewhere; anything
+      ;; else stretches the table to its length.
+      (while (> (length word) width)
+        (unless (string-empty-p current)
+          (push current lines)
+          (setq current ""))
+        (push (substring word 0 width) lines)
+        (setq word (substring word width)))
+
+      (cond
+       ((string-empty-p current) (setq current word))
+       ((<= (+ (length current) 1 (length word)) width)
+        (setq current (concat current " " word)))
+       (t (push current lines)
+          (setq current word))))
+
+    (unless (string-empty-p current)
+      (push current lines))
+
+    (setq lines (nreverse lines))
+
+    (cond
+     ((null lines) (list ""))
+     ((> (length lines) expose-migrations-max-detail-lines)
+      (let ((kept (seq-take lines expose-migrations-max-detail-lines)))
+        (append (butlast kept)
+                (list (concat (car (last kept)) "...")))))
+     (t lines))))
+
 (defun expose-migrations-split-arguments (text)
   "Split TEXT on its top-level commas.
 
@@ -466,28 +529,50 @@ from a past deploy."
 
     (nreverse snapshots)))
 
-(defun expose-migrations-row (name type highlight)
-  "Return one HTML table row for field NAME of TYPE.
+(defun expose-migrations-row (name type highlight &optional expand)
+  "Return the HTML table row or rows for field NAME of TYPE.
 
 HIGHLIGHT is `added', `altered', `removed' or nil, and picks the row's
 background. Colouring the row rather than the whole table is the reason
 these use HTML-like labels at all: a Graphviz record can't tint an
 individual cell, so the change would be invisible in exactly the place
-you're looking."
+you're looking.
 
-  (let ((background
-         (pcase highlight
-           ('added "#e9f6ec")
-           ('altered "#fff5e2")
-           ('removed "#fdeceb")
-           (_ nil))))
+A highlighted row is allowed to run onto continuation rows rather than
+being cut off at the width, because on those rows the definition is the
+thing you came to read. The continuations leave the name column empty,
+so the field still reads as one entry. Unhighlighted rows are carried
+forward unchanged from the migration before and are context rather than
+news, so they still truncate -- letting every one of them wrap would
+make each table taller than the diagram.
 
-    (format
-     "        <TR><TD ALIGN=\"LEFT\"%s>%s</TD><TD ALIGN=\"LEFT\"%s><FONT POINT-SIZE=\"9\">%s</FONT></TD></TR>"
-     (if background (format " BGCOLOR=\"%s\"" background) "")
-     (expose-migrations-escape-html name)
-     (if background (format " BGCOLOR=\"%s\"" background) "")
-     (expose-migrations-escape-html (expose-migrations-truncate type)))))
+EXPAND is decided per migration by `expose-migrations-snapshot-node',
+which withholds it when almost every field changed."
+
+  (let* ((background
+          (pcase highlight
+            ('added "#e9f6ec")
+            ('altered "#fff5e2")
+            ('removed "#fdeceb")
+            (_ nil)))
+         (cell (if background (format " BGCOLOR=\"%s\"" background) ""))
+         (lines (if (and highlight expand)
+                    (expose-migrations-wrap type expose-migrations-max-definition-width)
+                  (list (expose-migrations-truncate type)))))
+
+    (mapconcat
+     (lambda (line)
+       (prog1
+           (format
+            "        <TR><TD ALIGN=\"LEFT\"%s>%s</TD><TD ALIGN=\"LEFT\"%s><FONT POINT-SIZE=\"9\">%s</FONT></TD></TR>"
+            cell
+            (expose-migrations-escape-html (or name ""))
+            cell
+            (expose-migrations-escape-html line))
+         ;; Only the first row is labelled; the rest continue it.
+         (setq name "")))
+     lines
+     "\n")))
 
 (defun expose-migrations-snapshot-node (id model snapshot)
   "Return the DOT node for one SNAPSHOT of MODEL, as an HTML table."
@@ -496,6 +581,12 @@ you're looking."
          (altered (plist-get snapshot :altered))
          (removed (plist-get snapshot :removed))
          (changes (plist-get snapshot :changes))
+
+         ;; Withheld when the migration changed nearly everything: there
+         ;; is then nothing to single out, and `CreateModel' -- where
+         ;; every field counts as added -- would expand the whole model.
+         (expand (<= (+ (length added) (length altered))
+                     expose-migrations-max-expanded-fields))
 
          (rows
           (mapconcat
@@ -513,7 +604,8 @@ you're looking."
                     ((cl-find-if (lambda (a) (string-suffix-p (concat "> " (car field)) a))
                                  altered)
                      'altered)
-                    (t nil))))
+                    (t nil))
+              expand))
            (plist-get snapshot :fields)
            "\n"))
 

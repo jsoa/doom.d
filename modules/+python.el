@@ -50,6 +50,14 @@ versa) -- `python-base-mode' is the actual shared parent of both.")
 
 See `jsoa/docker-jump-container' for how to set both via `.dir-locals.el'.")
 
+;; Both are meant to be set from `.dir-locals.el', which is the only way
+;; they are useful -- and without this Emacs treats every project that
+;; does so as containing unsafe locals and asks on each file opened. A
+;; string here only names a container and a path to read files from;
+;; nothing is evaluated.
+(put 'jsoa/docker-jump-container 'safe-local-variable #'string-or-null-p)
+(put 'jsoa/docker-jump-site-packages 'safe-local-variable #'string-or-null-p)
+
 (defun jsoa/docker-jump--imported-module (name)
   "Return a plist describing the import statement in the current buffer
 that binds NAME, or nil if none is found.

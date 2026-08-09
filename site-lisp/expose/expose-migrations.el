@@ -29,6 +29,15 @@
   :type 'integer
   :group 'expose-migrations)
 
+(defcustom expose-migrations-max-definition-width 44
+  "Maximum characters of a field's arguments to show in a table cell.
+
+Django definitions run long -- a `choices=' list can be hundreds of
+characters -- and a single one of those stretches its table wide enough
+to squash every other node in the diagram."
+  :type 'integer
+  :group 'expose-migrations)
+
 (defconst expose-migrations-operation-colors
   '(("CreateModel"  "#e8f0fe" "#4a7fd4" "#1b3c66")
     ("AddField"     "#e9f6ec" "#4f9d69" "#1d4a2d")
@@ -50,6 +59,47 @@ destructive ones are what you are usually looking for.")
 ;;; ---------------------------------------------------------------------------
 ;;; Parsing
 ;;; ---------------------------------------------------------------------------
+
+(defun expose-migrations-arguments (text open)
+  "Return the argument text of the call whose opening paren is at OPEN in TEXT.
+
+Scans for the matching close paren while tracking nesting and string
+literals, so a definition carrying its own brackets -- Django's
+`choices=[(\"a\", \"A\")]' being the usual one -- is not cut short at the
+first `)'. Returns nil if the call is never closed within TEXT."
+
+  (let ((depth 0) (index open) (limit (length text)) (in-string nil) (closed nil))
+    (while (and (< index limit) (not closed))
+      (let ((char (aref text index)))
+        (cond
+         (in-string
+          (cond ((eq char ?\\) (setq index (1+ index)))
+                ((eq char in-string) (setq in-string nil))))
+         ((memq char (list ?\" ?\')) (setq in-string char))
+         ((memq char (list ?\( ?\[)) (setq depth (1+ depth)))
+         ((memq char (list ?\) ?\]))
+          (setq depth (1- depth))
+          (when (<= depth 0) (setq closed t)))))
+      (setq index (1+ index)))
+
+    (when closed
+      (substring text (1+ open) (1- index)))))
+
+(defun expose-migrations-signature (type text open)
+  "Return TYPE with its condensed argument list from TEXT at OPEN.
+
+Without the arguments an `AlterField' is invisible: most Django
+alterations change a keyword -- `null=True', a wider `max_length' --
+and never the field class, so both sides would read `CharField' and the
+row would be tinted amber with nothing to show for it."
+
+  (let* ((raw (expose-migrations-arguments text open))
+         (flat (and raw (string-trim (replace-regexp-in-string "[ \t\n]+" " " raw)))))
+    (cond
+     ((or (null flat) (string-empty-p flat)) type)
+     ((> (length flat) expose-migrations-max-definition-width)
+      (format "%s(%s...)" type (substring flat 0 expose-migrations-max-definition-width)))
+     (t (format "%s(%s)" type flat)))))
 
 (defun expose-migrations-files (root)
   "Return every migration file under ROOT, sorted by app then number.
@@ -119,6 +169,50 @@ models would split a history in half at its first edit."
                   (when (string-match "field[ \t]*=[ \t]*\\(?:[A-Za-z_][A-Za-z0-9_.]*\\.\\)?\\([A-Za-z]+\\)(" body)
                     (match-string 1 body)))
 
+                 ;; The type plus its arguments, which is what a reader
+                 ;; needs to see an alteration at all -- see
+                 ;; `expose-migrations-signature'.
+                 (field-definition
+                  (when (string-match "field[ \t]*=[ \t]*\\(?:[A-Za-z_][A-Za-z0-9_.]*\\.\\)?\\([A-Za-z]+\\)(" body)
+                    (expose-migrations-signature
+                     (match-string 1 body) body (1- (match-end 0)))))
+
+                 ;; CreateModel carries the model's whole starting shape
+                 ;; in a `fields=[("name", models.Type(...)), ...]' list.
+                 ;; Without it the history would begin from nothing and
+                 ;; every original field would look like a later addition.
+                 (initial-fields
+                  (when (equal operation "CreateModel")
+                    (let ((fields nil)
+                          (offset 0))
+                      (while (string-match
+                              (concat "([ \t\n]*[\"']\\([A-Za-z_][A-Za-z0-9_]*\\)[\"'][ \t\n]*,[ \t\n]*"
+                                      "\\(?:[A-Za-z_][A-Za-z0-9_.]*\\.\\)?\\([A-Za-z]+\\)(")
+                              body offset)
+                        ;; Every piece of this match is read out before
+                        ;; `expose-migrations-signature' runs, because it
+                        ;; calls `replace-regexp-in-string' internally and
+                        ;; that clobbers the match data -- reading
+                        ;; `match-end' afterwards left OFFSET unchanged and
+                        ;; hung the loop.
+                        (let ((field-name (match-string 1 body))
+                              (type (match-string 2 body))
+                              (open (1- (match-end 0)))
+                              (next (match-end 1)))
+                          (push (cons field-name
+                                      (expose-migrations-signature type body open))
+                                fields)
+                          (setq offset next)))
+                      (nreverse fields))))
+
+                 (new-name
+                  (when (string-match "^[ \t]*new_name[ \t]*=[ \t]*[\"']\\([^\"']+\\)[\"']" body)
+                    (match-string 1 body)))
+
+                 (old-name
+                  (when (string-match "^[ \t]*old_name[ \t]*=[ \t]*[\"']\\([^\"']+\\)[\"']" body)
+                    (match-string 1 body)))
+
                  ;; CreateModel/DeleteModel/RenameModel name the model in
                  ;; `name'; everything else names it in `model_name' and
                  ;; uses `name' for the field.
@@ -132,6 +226,10 @@ models would split a history in half at its first edit."
               (push (list :operation operation
                           :field field
                           :type field-type
+                          :definition field-definition
+                          :initial-fields initial-fields
+                          :old-name old-name
+                          :new-name new-name
                           :file file)
                     results))))))
 
@@ -161,48 +259,198 @@ models would split a history in half at its first edit."
   "Escape TEXT for a quoted DOT label."
   (replace-regexp-in-string "\"" "\\\\\"" (or text "")))
 
-(defun expose-migrations-to-dot (model history)
-  "Render MODEL's HISTORY as Graphviz DOT."
+(defun expose-migrations-escape-html (text)
+  "Escape TEXT for use inside a Graphviz HTML-like label."
 
-  (let ((lines nil)
-        (index 0)
-        (previous nil))
+  (let ((escaped (or text "")))
+    (setq escaped (replace-regexp-in-string "&" "&amp;" escaped t t))
+    (setq escaped (replace-regexp-in-string "<" "&lt;" escaped t t))
+    (setq escaped (replace-regexp-in-string ">" "&gt;" escaped t t))
+    escaped))
+
+(defun expose-migrations-replay (history)
+  "Replay HISTORY into one snapshot of the model per migration.
+
+Each snapshot is a plist: `:migration', `:app', `:fields' (an ordered
+list of (NAME . TYPE) as the model stood *after* that migration), and
+`:added', `:altered', `:removed' naming what that migration changed.
+
+Rebuilding the state is the point of doing this at all. A list of
+operations tells you what each migration did; only the accumulated state
+answers what the model actually looked like at a given moment, which is
+the question you have when reading an old migration or a stack trace
+from a past deploy."
+
+  (let ((fields nil)
+        (snapshots nil)
+        (current-key nil)
+        (added nil) (altered nil) (removed nil))
+
+    (cl-flet
+        ((flush ()
+           (when current-key
+             (push (list :migration (car current-key)
+                         :app (cdr current-key)
+                         ;; Each cons is copied, not just the spine.
+                         ;; `AlterField' below edits fields in place with
+                         ;; `setcdr', and a shallow copy shares those
+                         ;; cells -- so a later type change rewrote every
+                         ;; earlier snapshot, showing each field's final
+                         ;; type throughout and hiding the very evolution
+                         ;; this diagram exists to show.
+                         :fields (mapcar (lambda (field)
+                                           (cons (car field) (cdr field)))
+                                         fields)
+                         :added (nreverse added)
+                         :altered (nreverse altered)
+                         :removed (nreverse removed))
+                   snapshots))))
+
+      (dolist (entry history)
+        (let ((key (cons (plist-get entry :migration) (plist-get entry :app))))
+
+          ;; A migration can hold several operations on the same model;
+          ;; they collapse into one snapshot rather than one per edit.
+          (unless (equal key current-key)
+            (flush)
+            (setq current-key key added nil altered nil removed nil))
+
+          (pcase (plist-get entry :operation)
+            ("CreateModel"
+             ;; Deep copy for the same reason as the snapshot above: the
+             ;; in-place edits below must not reach back into the parsed
+             ;; entry, which callers may replay more than once.
+             (setq fields (mapcar (lambda (field) (cons (car field) (cdr field)))
+                                  (plist-get entry :initial-fields)))
+             (dolist (field fields) (push (car field) added)))
+
+            ("AddField"
+             (when-let ((name (plist-get entry :field)))
+               (setq fields (append fields (list (cons name (or (plist-get entry :definition) (plist-get entry :type))))))
+               (push name added)))
+
+            ("AlterField"
+             (when-let ((name (plist-get entry :field)))
+               (if-let ((existing (assoc name fields)))
+                   (setcdr existing (or (plist-get entry :definition) (plist-get entry :type)))
+                 ;; Altering something never seen added: the model
+                 ;; predates the migrations that are checked in.
+                 (setq fields (append fields (list (cons name (or (plist-get entry :definition) (plist-get entry :type)))))))
+               (push name altered)))
+
+            ("RemoveField"
+             (when-let ((name (plist-get entry :field)))
+               (setq fields (assoc-delete-all name fields))
+               (push name removed)))
+
+            ("RenameField"
+             (let ((old (plist-get entry :old-name))
+                   (new (plist-get entry :new-name)))
+               (when (and old new)
+                 (if-let ((existing (assoc old fields)))
+                     (setcar existing new)
+                   (setq fields (append fields (list (cons new nil)))))
+                 (push (format "%s -> %s" old new) altered))))
+
+            (_ nil))))
+
+      (flush))
+
+    (nreverse snapshots)))
+
+(defun expose-migrations-row (name type highlight)
+  "Return one HTML table row for field NAME of TYPE.
+
+HIGHLIGHT is `added', `altered', `removed' or nil, and picks the row's
+background. Colouring the row rather than the whole table is the reason
+these use HTML-like labels at all: a Graphviz record can't tint an
+individual cell, so the change would be invisible in exactly the place
+you're looking."
+
+  (let ((background
+         (pcase highlight
+           ('added "#e9f6ec")
+           ('altered "#fff5e2")
+           ('removed "#fdeceb")
+           (_ nil))))
+
+    (format
+     "        <TR><TD ALIGN=\"LEFT\"%s>%s</TD><TD ALIGN=\"LEFT\"%s><FONT POINT-SIZE=\"9\">%s</FONT></TD></TR>"
+     (if background (format " BGCOLOR=\"%s\"" background) "")
+     (expose-migrations-escape-html name)
+     (if background (format " BGCOLOR=\"%s\"" background) "")
+     (expose-migrations-escape-html (or type "")))))
+
+(defun expose-migrations-snapshot-node (id model snapshot)
+  "Return the DOT node for one SNAPSHOT of MODEL, as an HTML table."
+
+  (let* ((added (plist-get snapshot :added))
+         (altered (plist-get snapshot :altered))
+         (removed (plist-get snapshot :removed))
+
+         (rows
+          (mapconcat
+           (lambda (field)
+             (expose-migrations-row
+              (car field) (cdr field)
+              (cond ((member (car field) added) 'added)
+                    ((member (car field) altered) 'altered)
+                    ;; A rename is recorded as "old -> new", so the
+                    ;; renamed field is matched by its new name too.
+                    ((cl-find-if (lambda (a) (string-suffix-p (concat "> " (car field)) a))
+                                 altered)
+                     'altered)
+                    (t nil))))
+           (plist-get snapshot :fields)
+           "\n"))
+
+         ;; Dropped fields are shown for the step that dropped them and
+         ;; then disappear -- otherwise the removal is the one change the
+         ;; diagram silently omits.
+         (removed-rows
+          (mapconcat
+           (lambda (name) (expose-migrations-row name "removed" 'removed))
+           removed
+           "\n")))
+
+    (format
+     "  %s [shape=plaintext,label=<
+      <TABLE BORDER=\"0\" CELLBORDER=\"1\" CELLSPACING=\"0\" CELLPADDING=\"4\">
+        <TR><TD COLSPAN=\"2\" BGCOLOR=\"#e8f0fe\"><B>%s</B><BR/><FONT POINT-SIZE=\"9\">%s</FONT></TD></TR>
+%s%s%s
+      </TABLE>>];"
+     id
+     (expose-migrations-escape-html model)
+     (expose-migrations-escape-html (plist-get snapshot :migration))
+     rows
+     (if (and (not (string-empty-p rows)) (not (string-empty-p removed-rows))) "\n" "")
+     removed-rows)))
+
+(defun expose-migrations-to-dot (model history)
+  "Render MODEL's HISTORY as a left-to-right series of field tables.
+
+One table per migration, each showing the model as it stood after that
+migration, with the fields that migration touched picked out: added
+green, altered amber, dropped red. A dropped field appears once, in the
+step that dropped it, then disappears -- the same way it did in reality."
+
+  (let* ((snapshots (expose-migrations-replay history))
+         (lines nil)
+         (index 0)
+         (previous nil))
 
     (push "digraph migrations {" lines)
-    (push "  rankdir=TB;" lines)
-    (push (format "  label=\"%s: %d migration operation%s\";"
+    (push "  rankdir=LR;" lines)
+    (push (format "  label=\"%s: %d migration%s\";"
                   (expose-migrations-escape model)
-                  (length history)
-                  (if (= (length history) 1) "" "s"))
+                  (length snapshots)
+                  (if (= (length snapshots) 1) "" "s"))
           lines)
 
-    (dolist (entry history)
-      (let* ((id (format "m%d" index))
-             (operation (plist-get entry :operation))
-             (colors (or (cdr (assoc operation expose-migrations-operation-colors))
-                         (list "#f4f6f8" "#c2cad4" "#1f2933")))
+    (dolist (snapshot snapshots)
+      (let ((id (format "m%d" index)))
 
-             (detail
-              (cond
-               ((and (plist-get entry :field) (plist-get entry :type))
-                (format "%s: %s" (plist-get entry :field) (plist-get entry :type)))
-               ((plist-get entry :field) (plist-get entry :field))
-               (t "")))
-
-             (label
-              (format "%s%s\\n%s"
-                      (expose-migrations-escape operation)
-                      (if (string-empty-p detail)
-                          ""
-                        (concat "  " (expose-migrations-escape detail)))
-                      (expose-migrations-escape (plist-get entry :migration)))))
-
-        (push (format "  %s [shape=%s,label=\"%s\",style=\"filled,rounded\",fillcolor=\"%s\",color=\"%s\",fontcolor=\"%s\"];"
-                      id
-                      (if (equal operation "CreateModel") "ellipse" "box")
-                      label
-                      (nth 0 colors) (nth 1 colors) (nth 2 colors))
-              lines)
+        (push (expose-migrations-snapshot-node id model snapshot) lines)
 
         (when previous
           (push (format "  %s -> %s;" previous id) lines))

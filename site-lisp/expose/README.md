@@ -397,9 +397,11 @@ Mentions also catch `@patch("app.tasks.send_email")`, which names its target in 
 
 When nothing at all reaches it, that is stated plainly rather than drawn as an empty graph.
 
-**Migration history** reads a model's migrations and shows every operation that touched it, oldest first: created, fields added, retyped, renamed, dropped. Colored by what each does to existing data — additive green, altering amber, renaming violet, destructive red — so the edits that lost or reshaped data stand out.
+**Migration history** reads a model's migrations and replays them, drawing the model's **state** at each step as a table of its fields, left to right from the initial shape to the current one — the same table form the entity graph uses. Each step tints only the rows that step changed: added fields green, altered amber, and removed fields shown one last time in red before they disappear from every table after. So the model as it stands today is the rightmost table, and what any one migration did to it is the colored rows in that column.
 
-Parsed, not generated: migration files are mechanically regular, a project accumulates dozens of them, and "when did this field become nullable" is a question where a plausible answer is worth nothing. Reading any one migration shows a single edit; what this adds is the ordering, since a field added in `0004`, retyped in `0011` and dropped in `0032` lives in three files named after whatever else they happened to contain.
+Fields carry their full definition, not just the class name. Most Django alterations change a keyword rather than the field type — `null=True`, a wider `max_length`, a different `default` — so `CharField` alone would render an altered row identical to the one before it, tinted amber with nothing to show for it. Long definitions are truncated at `expose-migrations-max-definition-width`, since a single `choices=` list runs wide enough to squash every other table in the diagram.
+
+Parsed, not generated: migration files are mechanically regular, a project accumulates dozens of them, and "when did this field become nullable" is a question where a plausible answer is worth nothing. Reading any one migration shows a single edit; what this adds is the accumulation, since a field added in `0004`, retyped in `0011` and dropped in `0032` lives in three files named after whatever else they happened to contain.
 
 Django numbers migrations per app, so ordering is exact within an app but not comparable across them — `orders/0003` and `events/0032` carry no relative order in their names. Operations from different apps are therefore grouped rather than interleaved into a timeline that would be invented.
 

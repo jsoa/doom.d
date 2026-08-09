@@ -100,10 +100,6 @@
                 :desc "Tests"            "t" #'expose-run-tests
                 :desc "Edge Cases"       "x" #'expose-run-edge-cases
                 :desc "Flow"             "F" #'expose-run-flow
-                :desc "Control Flow Diagram" "G" #'expose-run-control-flow-diagram
-                :desc "Call Flow Diagram"    "C" #'expose-run-call-flow-diagram
-                :desc "ER Diagram"           "E" #'expose-run-er-diagram
-                :desc "Reverse Call Graph"   "b" #'expose-run-reverse-call-graph
                 :desc "Usage"            "u" #'expose-run-usage
                 :desc "Docstring"        "D" #'expose-run-docstring
                 :desc "Summary"          "S" #'expose-run-summary
@@ -114,6 +110,17 @@
                 :desc "Why"              "y" #'expose-run-why
                 :desc "Mental Model"     "m" #'expose-run-mental-model
                 :desc "Debug Buffer"     "?" #'expose-hover-debug-current-buffer)
+
+               ;; Rendered diagrams. Their own group rather than more
+               ;; entries under "Thing at Point": they answer with a
+               ;; picture in a dedicated buffer instead of popup text,
+               ;; and the reverse call graph isn't a provider action at
+               ;; all.
+               (:prefix-map ("G" . "Diagrams")
+                :desc "Control flow"      "c" #'expose-run-control-flow-diagram
+                :desc "Call flow"         "C" #'expose-run-call-flow-diagram
+                :desc "Entity relations"  "e" #'expose-run-er-diagram
+                :desc "Reverse call graph" "r" #'expose-run-reverse-call-graph)
 
                (:prefix-map ("R" . "Full Review")
                 :desc "Open/start review" "r" #'expose-review-open-or-start

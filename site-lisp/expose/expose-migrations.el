@@ -132,47 +132,39 @@ had to say."
   :type 'integer
   :group 'expose-migrations)
 
-(defun expose-migrations-wrap (text width)
-  "Split TEXT into lines of at most WIDTH characters.
+(defun expose-migrations-detail-lines (definition)
+  "Return DEFINITION as its type, then one line per keyword argument.
 
-Wraps at spaces where it can, which in practice falls between keyword
-arguments and inside prose `help_text', and breaks mid-token only for a
-single run longer than the whole width -- there being nothing else to do
-with one. Capped by `expose-migrations-max-detail-lines'."
+One property per row rather than the definition reflowed across rows:
+the properties are what changed, and a line break falling wherever the
+width ran out puts half of `related_name' on one row and half on the
+next. Each value is still truncated -- a `choices=' list is not made
+readable by giving it six rows, and what you need from it is that it was
+`choices' that moved.
 
-  (let ((words (split-string (or text "") " " t))
-        (lines nil)
-        (current ""))
+Capped by `expose-migrations-max-detail-lines'."
 
-    (dolist (word words)
-      ;; A token wider than the cell has to be broken somewhere; anything
-      ;; else stretches the table to its length.
-      (while (> (length word) width)
-        (unless (string-empty-p current)
-          (push current lines)
-          (setq current ""))
-        (push (substring word 0 width) lines)
-        (setq word (substring word width)))
+  (let* ((parsed (expose-migrations-parse-definition (or definition "")))
+         (type (car parsed))
+         (arguments (cdr parsed))
+         (lines
+          (if (null arguments)
+              (list (expose-migrations-truncate type))
+            (cons type
+                  (mapcar
+                   (lambda (argument)
+                     (expose-migrations-truncate
+                      (if (car argument)
+                          (format "%s=%s" (car argument) (cdr argument))
+                        (cdr argument))))
+                   arguments)))))
 
-      (cond
-       ((string-empty-p current) (setq current word))
-       ((<= (+ (length current) 1 (length word)) width)
-        (setq current (concat current " " word)))
-       (t (push current lines)
-          (setq current word))))
-
-    (unless (string-empty-p current)
-      (push current lines))
-
-    (setq lines (nreverse lines))
-
-    (cond
-     ((null lines) (list ""))
-     ((> (length lines) expose-migrations-max-detail-lines)
-      (let ((kept (seq-take lines expose-migrations-max-detail-lines)))
-        (append (butlast kept)
-                (list (concat (car (last kept)) "...")))))
-     (t lines))))
+    (if (> (length lines) expose-migrations-max-detail-lines)
+        (append (seq-take lines (1- expose-migrations-max-detail-lines))
+                (list (format "... %d more"
+                              (- (length lines)
+                                 (1- expose-migrations-max-detail-lines)))))
+      lines)))
 
 (defun expose-migrations-split-arguments (text)
   "Split TEXT on its top-level commas.
@@ -556,9 +548,15 @@ which withholds it when almost every field changed."
             ('removed "#fdeceb")
             (_ nil)))
          (cell (if background (format " BGCOLOR=\"%s\"" background) ""))
-         (lines (if (and highlight expand)
-                    (expose-migrations-wrap type expose-migrations-max-definition-width)
-                  (list (expose-migrations-truncate type)))))
+         (lines
+          (cond
+           ;; Context, not news: carried forward from the migration before.
+           ((not (and highlight expand))
+            (list (expose-migrations-truncate type)))
+           ;; Nothing would be cut, so nothing needs its own row.
+           ((<= (length (or type "")) expose-migrations-max-definition-width)
+            (list type))
+           (t (expose-migrations-detail-lines type)))))
 
     (mapconcat
      (lambda (line)

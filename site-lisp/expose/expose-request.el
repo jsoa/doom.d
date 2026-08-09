@@ -434,6 +434,61 @@ surface."
 
    'raw))
 
+(defun expose-request-request-flow-diagram (context)
+  "Build a Django request-flow diagram request.
+
+Where `expose-request-call-flow-diagram' draws a flat call tree, this
+groups the same territory into the layers a request actually passes
+through -- view, permissions, validation, domain, data, external -- so
+what the request touches and in what order is legible at a glance, and a
+missing layer (no permission check, a view reaching straight into the
+ORM) shows up as an absence.
+
+Routing is the one part that usually isn't visible: `urls.py' is rarely
+the buffer this runs from, and a provider asked to supply the route
+anyway will invent a plausible one. The instruction therefore admits
+routing only when it's actually in the provided code."
+
+  (expose-request-create
+   'request-flow-diagram
+   'xml
+
+   (string-join
+    (list
+     "Produce a DJANGO REQUEST FLOW diagram of the current code as Graphviz DOT."
+     ""
+     "Rules:"
+     "- Output a single `digraph' and nothing else. No prose, no Markdown, no code fences."
+     "- Trace one HTTP request through this code, from where it enters to the response, in order."
+     "- Group the steps into pipeline layers using `subgraph cluster_<name>' blocks with a `label', including only the layers this code actually has. Typical ones, in order: Routing, Middleware, View, Permissions, Validation, Domain, Data, External, Response."
+     "- Shapes carry meaning, so use exactly these:"
+     "  `ellipse' for the entry point (the view or handler being traced);"
+     "  `diamond' for a gate that can reject the request -- permission, authentication, validation, throttling;"
+     "  `box' for an ordinary step;"
+     "  `cylinder' for a database, cache, queue or network access;"
+     "  `component' for framework or third-party machinery (DRF serializers, middleware you don't own);"
+     "  `doubleoctagon' for a response returned or an exception raised."
+     "- Label edges with what moves or what decides: \"valid\", \"denied (403)\", \"queryset\", \"serialized\", and so on."
+     "- Show the rejection paths, not just the success path. A gate with no failure edge is the most misleading thing this diagram can contain."
+     "- Include routing (URL patterns) ONLY if the URL configuration is present in the provided code. If it isn't, start at the view and do not guess the route."
+     "- Only steps visible in the provided code. If a called function's body isn't shown, treat it as one step rather than inventing its internals."
+     "- Quote every label, and escape any embedded double quotes. A label is a single quoted string: never place text after the closing quote."
+     "- Set `rankdir=LR' and give the graph a short `label' naming the endpoint or view being traced.")
+    "\n")
+
+   (expose-request-select
+    context
+    :project
+    :language
+    :file
+    :imports
+    :focus
+    :scope
+    :parent-scope
+    :code)
+
+   'raw))
+
 (defun expose-request-er-diagram (context)
   "Build an entity-relationship diagram request.
 
@@ -755,6 +810,9 @@ entire node."
 
       ('data-flow-diagram
        (expose-request-data-flow-diagram context))
+
+      ('request-flow-diagram
+       (expose-request-request-flow-diagram context))
 
       ('usage
        (expose-request-usage context))

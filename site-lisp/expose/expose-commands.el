@@ -1349,6 +1349,35 @@ the buffer, not a judgement call."
             (deactivate-mark)))))))
 
 ;;;###autoload
+(defun expose-run-request-flow-diagram ()
+  "Render a Django request-flow diagram of the view at point.
+
+Traces one request through the code -- view, permission and validation
+gates, domain calls, ORM and cache access, response -- grouped into
+labelled pipeline layers. Where `expose-run-call-flow-diagram' draws a
+flat call tree, this one is about order and layering, so a missing layer
+reads as an absence: a view with no permission gate, or one reaching
+straight into the ORM, is visible as a gap rather than something you
+have to notice isn't there.
+
+Gates that can reject the request are drawn as conditions and their
+failure paths are requested explicitly, since a gate shown with only its
+success edge is worse than not drawing it.
+
+Routing is included only when the URL configuration is in the code being
+looked at, which from a views module it usually isn't -- rather than
+inventing a plausible route. To find what actually routes here, use
+`expose-run-reverse-call-graph', which reports the `urls.py' reference
+as a module-level usage."
+
+  (interactive)
+
+  (expose-run-diagram
+   'request-flow-diagram
+   "Request Flow"
+   #'expose-run-request-flow-diagram))
+
+;;;###autoload
 (defun expose-run-data-flow-diagram ()
   "Render a data-flow graph of the code at point as an image.
 

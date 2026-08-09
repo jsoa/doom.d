@@ -213,10 +213,10 @@ Expose installs bindings under `SPC c h` by default.
 | `SPC c h o` | `expose-popup-open`                 | Open popup in a normal buffer                |
 | `SPC c h l` | `expose-log-open`                   | Open Expose log                              |
 | `SPC c h L` | `expose-log-clear`                  | Clear Expose log                             |
+| `SPC c h s` | `expose-orm-inspect`                | SQL a Django queryset compiles to            |
 | `SPC c h ?` | `expose-hover-debug-current-buffer` | Debug current buffer hover state             |
 | `SPC c h h` | Thing at Point prefix               | Focused code-context actions                 |
 | `SPC c h G` | Diagrams prefix                     | Rendered flow, ER and call graphs            |
-| `SPC c h Q` | Queryset prefix                     | Django queryset SQL and query plans          |
 | `SPC c h R` | Full Review prefix                  | Persistent branch/session reviews            |
 | `SPC c h M` | Region Review prefix                | Persistent selected-region reviews           |
 | `SPC c h W` | Watch prefix                        | Background review for watched source buffers |
@@ -262,15 +262,15 @@ These actions use the active region when one is selected, falling back to the po
 | `SPC c h G h` | `expose-run-migration-history`      | How a Django model was shaped over time  |
 | `SPC c h G e` | `expose-run-er-diagram`             | Models and their relationships           |
 | `SPC c h G r` | `expose-run-reverse-call-graph`     | What calls the function at point         |
+| `SPC c h G p` | `expose-orm-explain`                | Query plan for the queryset at point     |
 
 See [Diagrams](#diagrams-1) for what each one draws and how far to trust it.
 
 | Key           | Command              | Purpose                                     |
 |---------------|----------------------|---------------------------------------------|
-| `SPC c h Q s` | `expose-orm-inspect` | SQL a Django queryset compiles to           |
-| `SPC c h Q p` | `expose-orm-explain` | Draw its query plan (`C-u` to ANALYZE)      |
+| `SPC c h s`   | `expose-orm-inspect` | SQL a Django queryset compiles to           |
 
-See [Queryset SQL](#queryset-sql).
+See [Queryset SQL](#queryset-sql). The query plan is a drawing, so it sits with the diagrams as `SPC c h G p`.
 
 ### Full Review
 
@@ -344,7 +344,7 @@ Expose actions are intentionally small, focused lenses over the current code con
 
 ## Diagrams
 
-Four graphs, rendered with Graphviz and shown as an SVG image in a full-frame buffer. Graphviz because `dot` needs no extra toolchain; SVG because Emacs renders it natively, so zooming stays sharp.
+Rendered with Graphviz and shown as an SVG image in a full-frame buffer. Graphviz because `dot` needs no extra toolchain; SVG because Emacs renders it natively, so zooming stays sharp.
 
 | Diagram            | Answers                                            | Source     |
 |--------------------|----------------------------------------------------|------------|
@@ -356,6 +356,7 @@ Four graphs, rendered with Graphviz and shown as an SVG image in a full-frame bu
 | Import graph       | What this file imports, and its cycles             | Parsed     |
 | Tests              | Which tests reach this code, and how               | LSP / xref |
 | Migration history  | How a Django model was shaped over time            | Parsed     |
+| Query plan         | How the database will actually run this queryset   | Database   |
 | Entity relations   | Which models exist and how they relate             | Provider   |
 | Reverse call graph | What calls this, transitively                      | LSP / xref |
 
@@ -438,7 +439,7 @@ Requires the `dot` binary; the commands say so plainly if it is missing.
 
 ## Queryset SQL
 
-`SPC c h Q s` (`expose-orm-inspect`) shows the SQL a Django queryset compiles to, and what about it will be slow. It uses the region when there is one, otherwise the whole statement at point — which is what you want for a chain wrapped over several lines, where the line under the cursor is a fragment that wouldn't parse.
+`SPC c h s` (`expose-orm-inspect`) shows the SQL a Django queryset compiles to, and what about it will be slow. It uses the region when there is one, otherwise the whole statement at point — which is what you want for a chain wrapped over several lines, where the line under the cursor is a fragment that wouldn't parse.
 
 **No AI, and no reconstruction.** The expression is handed to the project's own Python and compiled by Django itself, so the SQL is the SQL. Guessing at it from source would defeat the purpose: the questions worth asking a queryset — how many joins is this, does that filter hit an index — are worthless answered approximately.
 
@@ -464,7 +465,7 @@ What that cannot reach is **locals**: `self`, `request`, a loop variable. Those 
 
 ### Query plans
 
-`SPC c h Q p` (`expose-orm-explain`) draws the plan the database will actually use, as a graph. `C-u SPC c h Q p` runs `EXPLAIN ANALYZE` instead, which **executes the query** and replaces the planner's estimates with what really happened.
+`SPC c h G p` (`expose-orm-explain`) draws the plan the database will actually use, as a graph. `C-u SPC c h G p` runs `EXPLAIN ANALYZE` instead, which **executes the query** and replaces the planner's estimates with what really happened.
 
 This is the one command here that connects — a plan is the planner's opinion and only the planner holds it. It runs against `expose-orm-dsn` if set, otherwise the `expose-orm-database` alias, so you can take plans from a replica rather than whatever `DATABASES["default"]` points at. Either way the transaction is rolled back and `expose-orm-statement-timeout` (10s) bounds it, because explaining a slow query otherwise means waiting out the slow query. Writes are still refused before anything is evaluated.
 

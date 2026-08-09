@@ -1445,7 +1445,7 @@ contain."
          (built (expose-migrations-build-dot))
          (dot (car built))
          (model (cdr built))
-         (result (expose-diagram-render-svg dot model "TB")))
+         (result (expose-diagram-render-svg dot model "LR")))
 
     (if (car result)
         (progn

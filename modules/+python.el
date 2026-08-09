@@ -153,13 +153,19 @@ configured or detected separately from `jsoa/docker-jump-site-packages'."
 A fast, local `docker inspect' call -- entirely independent of TRAMP,
 so a stopped or nonexistent container is detected immediately instead
 of waiting out TRAMP's own, much longer connection timeout (tens of
-seconds) the first time a jump tries to reach it."
+seconds) the first time a jump tries to reach it.
 
-  (with-temp-buffer
-    (and
-     (zerop
-      (call-process "docker" nil t nil "inspect" "-f" "{{.State.Running}}" container))
-     (string-prefix-p "true" (string-trim (buffer-string))))))
+Returns nil rather than signalling when `docker' isn't on `exec-path'
+at all: `call-process' signals `file-missing' for a missing program
+(it does not merely exit non-zero), and a GUI Emacs started from a
+desktop session may well not inherit the shell `PATH' that has it."
+
+  (when (executable-find "docker")
+    (with-temp-buffer
+      (and
+       (zerop
+        (call-process "docker" nil t nil "inspect" "-f" "{{.State.Running}}" container))
+       (string-prefix-p "true" (string-trim (buffer-string)))))))
 
 (defun jsoa/docker-jump--via-import-scan ()
   "Resolve and open the module at point inside `jsoa/docker-jump-container'
@@ -215,9 +221,11 @@ directly when no matching import is found."
 is safe to bind over `gd' unconditionally, not just in
 docker-jump-configured projects), otherwise via
 `jsoa/docker-jump-container's TRAMP Docker connection when the target
-turns out to be a dependency rather than local code. When configured,
-checks `jsoa/docker-jump--container-running-p' first and fails with a
-clear message if the container's down, rather than silently paying
+turns out to be a dependency rather than local code. A jump that stays
+in local project code never consults the container at all, so it keeps
+working normally while the container is stopped; the paths that do
+need it check `jsoa/docker-jump--container-running-p' immediately
+beforehand and fail with a clear message, rather than silently paying
 TRAMP's own, much longer connection timeout first.
 
 Tries `+lookup/definition' first, so a local venv's real type-aware
@@ -251,22 +259,39 @@ behaves exactly like plain `+lookup/definition' always has."
         ;; `+lookup/definition', including its own error on failure.
         (call-interactively #'+lookup/definition)
 
-      (unless (jsoa/docker-jump--container-running-p container)
-        (user-error "Docker container `%s' is not running" container))
-
       (let ((local-jump-failed
              (condition-case nil
                  (progn (call-interactively #'+lookup/definition) nil)
                (user-error t))))
 
+        ;; Checked at each point that actually needs the container, not
+        ;; up front: a jump landing in local project code never touches
+        ;; TRAMP at all, so gating the whole command on a running
+        ;; container would break ordinary in-repo navigation (`gd' on
+        ;; anything local) whenever the container happens to be
+        ;; down -- routine after a `docker compose down' -- despite the
+        ;; container being irrelevant to that jump.
         (if local-jump-failed
-            (jsoa/docker-jump--via-import-scan)
+            (progn
+              (unless (jsoa/docker-jump--container-running-p container)
+                (user-error
+                 "Can't resolve `%s' locally, and Docker container `%s' is not running"
+                 (or (thing-at-point 'symbol t) "symbol")
+                 container))
+
+              (jsoa/docker-jump--via-import-scan))
 
           (when-let* ((local-file
                        (buffer-file-name))
 
                       (relative
                        (jsoa/docker-jump--site-packages-relative-path local-file)))
+
+            (unless (jsoa/docker-jump--container-running-p container)
+              (user-error
+               "Found `%s' locally, but Docker container `%s' is not running"
+               relative
+               container))
 
             (find-file
              (format "/docker:%s:%s/%s"

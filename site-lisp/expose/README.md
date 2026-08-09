@@ -86,7 +86,18 @@ Typical local layout:
       expose-review-archive.el
       expose-watch.el
       expose-continue.el
+
+      expose-diagram.el
+      expose-callers.el
+      expose-imports.el
+      expose-migrations.el
+
+      expose-orm.el
+      expose-orm-plan.el
+      expose-orm.py
 ```
+
+`expose-orm.py` is the one non-Elisp file: it runs inside the *project's* Python, not Emacs, and is kept as a file rather than a string so it can be tested directly against a real Django project.
 
 ## Doom Setup
 
@@ -202,8 +213,10 @@ Expose installs bindings under `SPC c h` by default.
 | `SPC c h o` | `expose-popup-open`                 | Open popup in a normal buffer                |
 | `SPC c h l` | `expose-log-open`                   | Open Expose log                              |
 | `SPC c h L` | `expose-log-clear`                  | Clear Expose log                             |
+| `SPC c h s` | `expose-orm-inspect`                | SQL a Django queryset compiles to            |
 | `SPC c h ?` | `expose-hover-debug-current-buffer` | Debug current buffer hover state             |
 | `SPC c h h` | Thing at Point prefix               | Focused code-context actions                 |
+| `SPC c h G` | Diagrams prefix                     | Rendered flow, ER and call graphs            |
 | `SPC c h R` | Full Review prefix                  | Persistent branch/session reviews            |
 | `SPC c h M` | Region Review prefix                | Persistent selected-region reviews           |
 | `SPC c h W` | Watch prefix                        | Background review for watched source buffers |
@@ -234,6 +247,30 @@ These actions use the active region when one is selected, falling back to the po
 | `SPC c h h y` | `expose-run-why`                     | Explain likely design intent         |
 | `SPC c h h m` | `expose-run-mental-model`            | Build a mental model                 |
 | `SPC c h h ?` | `expose-hover-debug-current-buffer`  | Debug current buffer hover state     |
+
+### Diagrams
+
+| Key           | Command                             | Description                              |
+|---------------|-------------------------------------|------------------------------------------|
+| `SPC c h G c` | `expose-run-control-flow-diagram`   | Control flow of the code at point        |
+| `SPC c h G C` | `expose-run-call-flow-diagram`      | What the code at point calls             |
+| `SPC c h G d` | `expose-run-data-flow-diagram`      | How values move through the code         |
+| `SPC c h G R` | `expose-run-request-flow-diagram`   | Django request pipeline for a view       |
+| `SPC c h G s` | `expose-run-side-effects-diagram`   | What this changes outside itself         |
+| `SPC c h G m` | `expose-run-import-graph`           | What this file imports, transitively     |
+| `SPC c h G t` | `expose-run-test-graph`             | Which tests reach the code at point      |
+| `SPC c h G h` | `expose-run-migration-history`      | How a Django model was shaped over time  |
+| `SPC c h G e` | `expose-run-er-diagram`             | Models and their relationships           |
+| `SPC c h G r` | `expose-run-reverse-call-graph`     | What calls the function at point         |
+| `SPC c h G p` | `expose-orm-explain`                | Query plan for the queryset at point     |
+
+See [Diagrams](#diagrams-1) for what each one draws and how far to trust it.
+
+| Key           | Command              | Purpose                                     |
+|---------------|----------------------|---------------------------------------------|
+| `SPC c h s`   | `expose-orm-inspect` | SQL a Django queryset compiles to           |
+
+See [Queryset SQL](#queryset-sql). The query plan is a drawing, so it sits with the diagrams as `SPC c h G p`.
 
 ### Full Review
 
@@ -304,6 +341,153 @@ Expose actions are intentionally small, focused lenses over the current code con
 | Mental Model   | Conceptual map for reasoning about the code                      |
 | Commit Message | Conventional-style commit message from Git diff/status           |
 | Changelog      | User/developer-facing changelog entry from Git diff/status       |
+
+## Diagrams
+
+Rendered with Graphviz and shown as an SVG image in a full-frame buffer. Graphviz because `dot` needs no extra toolchain; SVG because Emacs renders it natively, so zooming stays sharp.
+
+| Diagram            | Answers                                            | Source     |
+|--------------------|----------------------------------------------------|------------|
+| Control flow       | Which paths run through this code                  | Provider   |
+| Call flow          | What this code calls, and what those call          | Provider   |
+| Data flow          | Where values come from, and where they end up      | Provider   |
+| Request flow       | A Django request through its pipeline layers       | Provider   |
+| Side effects       | What this changes outside itself, and what survives a rollback | Provider |
+| Import graph       | What this file imports, and its cycles             | Parsed     |
+| Tests              | Which tests reach this code, and how               | LSP / xref |
+| Migration history  | How a Django model was shaped over time            | Parsed     |
+| Query plan         | How the database will actually run this queryset   | Database   |
+| Entity relations   | Which models exist and how they relate             | Provider   |
+| Reverse call graph | What calls this, transitively                      | LSP / xref |
+
+Nodes are colored by what they represent — entry, condition, error, exit, external dependency, I/O — classified from the shapes each request asks for rather than from colors chosen by the provider, which vary run to run. Relationship edges in the ER diagram are colored by kind (foreign key, many-to-many, one-to-one), and the model you invoked it from is outlined.
+
+### Reading the diagram buffer
+
+| Key     | Action                                        |
+|---------|-----------------------------------------------|
+| `+` `-` | Zoom in / out                                 |
+| `0`     | Fit the whole graph to the window             |
+| `1`     | Actual size                                   |
+| `H` `L` | Pan left / right                              |
+| `s`     | Show the DOT source behind the image          |
+| `g`     | Regenerate                                    |
+| `w`     | Write to a file (`.svg`, `.png`, `.jpg`, `.pdf`) |
+| `q`     | Quit, restoring the previous window layout    |
+
+### How far to trust them
+
+The first three are provider-generated and advisory, like the rest of Expose. A picture reads as more authoritative than a paragraph, so `s` is worth using: it shows the exact DOT the image was built from. The ER diagram is the most reliable of the three — relationships are declared in the source rather than inferred. Call flow is the least, since a model asked what something "calls" will readily describe a dependency it was never shown; callees it cannot see are drawn dashed.
+
+Request flow groups the same territory as call flow into the layers a request passes through -- view, permissions, validation, domain, data, response -- drawn as labelled boxes. Order and layering are the point: a missing layer reads as an absence, so a view with no permission gate, or one reaching straight into the ORM, is visible as a gap rather than something you have to notice isn't there. Gates that can reject the request are drawn as conditions and their failure paths are asked for explicitly, since a gate shown with only its success edge is worse than not drawing it.
+
+Routing is included only when the URL configuration is in the code being looked at, which from a views module it usually isn't. Rather than inventing a plausible route, it starts at the view -- use the reverse call graph to find what actually routes there, which reports the `urls.py` reference as a module-level usage.
+
+Side effects answers a question none of the others quite do: if I call this, what happens to the world? Rows written, mail sent, jobs queued, services called — including effects several frames down, where the body is visible. Effects inside `transaction.atomic` are grouped in their own box, because the useful question is usually which of them survive a rollback: mail and queued tasks do, so a failure after that point leaves a notification about a row that no longer exists. Those keep their own shape inside the box rather than being redrawn as writes, so the hazard stays visible.
+
+Data flow is the other inference-heavy one: it labels each edge with the operation, and states "mutated in place" explicitly, because rebinding a name and mutating the object behind it look nearly identical in source and behave nothing alike. That distinction is the reason to draw it, and also the thing most worth checking against the source.
+
+**The tests graph** answers "is this tested, and by what" -- not a coverage percentage. It is the reverse call graph with its filter inverted: that one excludes tests so production paths stay readable, and this keeps only the half it discards. Callers no test goes through are pruned, so what remains is the routes tests take to reach the code, intermediate functions included. Static call paths alone would badly under-report on a Django project, so three weaker signals are added, each drawn differently so you can tell what you are looking at:
+
+| Signal | Evidence | Drawn |
+|--------|----------|-------|
+| Call | The language server resolved a call | Solid |
+| Reference | A real symbol usage, not a call | Dashed, amber |
+| **Route** | A `reverse(...)` whose URL name resolves to this view | Solid, green, labelled with the name |
+| Mention | The name appears in a test file's text | Dotted, grey |
+
+The route is the important one for Django. A test calling `self.client.get(reverse("user-event-list"))` never names the view at all — the only true link is the URL name, which `urls.py` maps back to the viewset. Expose parses that mapping rather than running `manage.py show_urls`, which would be authoritative but needs settings, an app registry and usually a database — a running container, in a Dockerised project. DRF is not required — plain Django works the same way:
+
+| Pattern | Example |
+|---------|---------|
+| Function view | `path("", views.post_list, name="post-list")` |
+| Class-based view | `path("p/", PostDetailView.as_view(), name="post-detail")` |
+| …with arguments | `path("a/", ArchiveView.as_view(paginate_by=10), name="archive")` |
+| `re_path` / legacy `url()` | `url(r"^old/$", views.legacy, name="legacy")` |
+| DRF router | `router.register("event", EventViewSet, basename="event")` |
+| DRF router, no basename | derived from the queryset model — `EventHost` → `eventhost` |
+
+`app_name = "shop"` namespaces are handled too: both `item-list` and `shop:item-list` are matched, since which one applies depends on how the module is `include()`d and that isn't visible from the file itself.
+
+Note that the full route name is never written down anywhere: only the basename is, and DRF generates `-list`, `-detail` and any custom `@action` names from it. Expose reconstructs that rule rather than looking the names up, which is why custom actions are matched without knowing they exist.
+
+The cost of parsing over running is the dynamic cases: `include()` namespaces and routers built in a loop are not followed.
+
+Mentions also catch `@patch("app.tasks.send_email")`, which names its target in a string, and the `<Symbol>Test` naming convention.
+
+When nothing at all reaches it, that is stated plainly rather than drawn as an empty graph.
+
+**Migration history** reads a model's migrations and replays them, drawing the model's **state** at each step as a table of its fields, left to right from the initial shape to the current one — the same table form the entity graph uses. Each step tints only the rows that step changed: added fields green, altered amber, and removed fields shown one last time in red before they disappear from every table after. So the model as it stands today is the rightmost table, and what any one migration did to it is the colored rows in that column.
+
+Fields carry their full definition, not just the class name. Most Django alterations change a keyword rather than the field type — `null=True`, a wider `max_length`, a different `default` — so `CharField` alone would render an altered row identical to the one before it, tinted amber with nothing to show for it.
+
+An **altered row shows only the arguments that changed**, not the whole definition. A field keeps most of its definition through an alteration — the paragraph of `help_text` that was already there stays — so rendering all of it pushed the one argument that actually moved past the width limit, which is the argument you opened the diagram to find. A `default` moving 5 → 500 reads as `IntegerField(default=500)` regardless of how much untouched text surrounds it, and a dropped keyword shows as `-null`, since its absence is otherwise invisible. When several arguments change at once they are ordered shortest first, so a terse behavioural change isn't crowded out by a long prose one.
+
+A changed row is also allowed to **run onto continuation rows**, one property per row, leaving the name column blank so the field still reads as one entry. Values are still truncated at `expose-migrations-max-definition-width` — a `choices=` list is not made readable by giving it six rows, and what you need from it is that `choices` is what moved. Splitting by property rather than reflowing the text matters: a line break falling wherever the width ran out puts half of `related_name` on one row and half on the next. Rows are capped by `expose-migrations-max-detail-lines`. A short definition splits the same way as a long one — splitting only what would overflow made a one-property change read differently from a four-property change, so the same kind of edit looked like two different things depending on how much text it happened to carry.
+
+Expansion is withheld when a migration changed nearly everything, above `expose-migrations-max-expanded-fields`. `CreateModel` counts every field as added, so without that rule the very first table spells out the entire model and stands taller than the rest of the diagram — while singling nothing out, which is the only thing expansion is for.
+
+Parsed, not generated: migration files are mechanically regular, a project accumulates dozens of them, and "when did this field become nullable" is a question where a plausible answer is worth nothing. Reading any one migration shows a single edit; what this adds is the accumulation, since a field added in `0004`, retyped in `0011` and dropped in `0032` lives in three files named after whatever else they happened to contain.
+
+Django numbers migrations per app, so ordering is exact within an app but not comparable across them — `orders/0003` and `events/0032` carry no relative order in their names. Operations from different apps are therefore grouped rather than interleaved into a timeline that would be invented.
+
+**The import graph has no AI in it either**, for the same reason: imports are trivially parseable, so asking a provider to describe them would trade an exact answer for a plausible one. It follows project-local imports and stops at the boundary — third-party and standard library packages are leaves, shown only with a prefix argument, since hiding them usually makes the project's own shape far easier to read. Python and TypeScript/JavaScript; tests, migrations and `node_modules` are excluded by `expose-imports-exclude-regexps`.
+
+Its main reason to exist is **cycle detection**, drawn in red: an import cycle is invisible in any single file and in Python is a real failure rather than a style problem.
+
+**The reverse call graph has no AI in it.** Finding callers needs whole-project knowledge that no provider has, and a fabricated answer to "is it safe to change this?" is worse than none, so its edges come from LSP call hierarchy — or `xref` when the server can't answer, which the graph says on its title since references are not the same as calls.
+
+It also includes non-call *references*, drawn dashed and labelled: a function that is only registered somewhere (`validators=[is_valid_member]`) has no callers at all and would otherwise read as dead code. Test files are excluded (`expose-callers-exclude-regexps`) because tests call everything and bury the production paths. The walk is bounded by `expose-callers-max-depth` and `expose-callers-max-nodes`; anything trimmed is marked on the graph rather than dropped silently.
+
+Requires the `dot` binary; the commands say so plainly if it is missing.
+
+## Queryset SQL
+
+`SPC c h s` (`expose-orm-inspect`) shows the SQL a Django queryset compiles to, and what about it will be slow. It uses the region when there is one, otherwise the whole statement at point — which is what you want for a chain wrapped over several lines, where the line under the cursor is a fragment that wouldn't parse.
+
+**No AI, and no reconstruction.** The expression is handed to the project's own Python and compiled by Django itself, so the SQL is the SQL. Guessing at it from source would defeat the purpose: the questions worth asking a queryset — how many joins is this, does that filter hit an index — are worthless answered approximately.
+
+**No database connection is opened.** `str(queryset.query)` compiles SQL through the backend without connecting, and every finding comes from the query object or the model's `_meta`. That is what makes this safe to point at a project whose `DB_HOST` is production, or whose database isn't running. The test suite proves it by running against settings whose host does not resolve.
+
+**Writes are refused, not executed.** The expression has to be *evaluated* to build the queryset, so a selection that reaches one line too far and catches `.delete()` would destroy data for real. Before anything is evaluated, the expression is parsed and rejected if it contains a write (`.delete()`, `.update()`, `.create()`, `.save()`, m2m `.add()`/`.clear()`) or anything that would run the query (`.count()`, `.first()`, `list(...)`). Method calls and builtins are told apart by call form rather than by name, since `qs.set(...)` is a related-manager write while `set(qs)` is an evaluation — and `.all()` is deliberately never refused, being both the most common call in any queryset and entirely lazy.
+
+What it reports, all computed exactly:
+
+- **Filters that no index will serve** — with the reason. A column with no index at all, and separately a column that is *only a non-leading member* of a composite index, which is the case most often gotten wrong: filtering on the second column of a two-column index scans anyway.
+- **Lookups that defeat an index that does exist** — `icontains`, `endswith`, `regex` and friends compile to `LIKE` with a leading wildcard, so the column can be perfectly indexed and still be scanned.
+- **Unbounded queries** — no `LIMIT`, which is fine until the table grows, and by then nobody is looking at the queryset.
+- **N+1 risk** — the model's forward relations, when the queryset has no `select_related`. Raised only when nothing is being pulled in already, since a queryset that uses `select_related` has clearly had the thought.
+- **Joins**, with type, and `distinct()` over a join, which often masks row duplication rather than fixing it.
+
+Indexed filters are deliberately *not* listed. Findings only mean something when the list is short.
+
+### Scope
+
+The expression is evaluated in the namespace of the module it was written in, so every import and alias that file already has resolves — `Listing.objects.filter(state=ACTIVE)` works when `Listing` and `ACTIVE` are that module's own names. Every model is also bound by its own name, so an expression naming only a model works even from a file that fails to import.
+
+What that cannot reach is **locals**: `self`, `request`, a loop variable. Those exist only where the code runs, and a queryset built around `request.user` reports the name it couldn't resolve rather than silently substituting a value — a plan for a query you didn't write being worse than no plan. This is the real limit of the approach, and how often it bites depends on how much of your ORM code sits inside view methods.
+
+### Query plans
+
+`SPC c h G p` (`expose-orm-explain`) draws the plan the database will actually use, as a graph. `C-u SPC c h G p` runs `EXPLAIN ANALYZE` instead, which **executes the query** and replaces the planner's estimates with what really happened.
+
+This is the one command here that connects — a plan is the planner's opinion and only the planner holds it. It runs against `expose-orm-dsn` if set, otherwise the `expose-orm-database` alias, so you can take plans from a replica rather than whatever `DATABASES["default"]` points at. Either way the transaction is rolled back and `expose-orm-statement-timeout` (10s) bounds it, because explaining a slow query otherwise means waiting out the slow query. Writes are still refused before anything is evaluated.
+
+Drawn bottom to top, the direction rows actually move: scans at the bottom feed joins feed the result at the top. That also suits the shape — plans are deep and narrow, and a deep tree laid out left to right is a ribbon.
+
+**Red is rationed.** A sequential scan is not a problem by itself: over a small table it is the *correct* plan, and colouring every one of them red says only that the query touched a table. Red means the node did something worth looking at:
+
+- **Rows read and then discarded** — the clearest possible statement that an index is missing, and unlike a cost number it needs no interpretation.
+- **A row estimate that was badly wrong** — nearly every bad plan is a good plan chosen from a bad estimate, so this is the first thing to check when the shape looks reasonable but the query is slow. Reported only above `expose-orm-plan-misestimate-floor` rows: a ten-fold error on fifty rows is still fifty rows and cannot change which plan wins, and small tables throw large ratios constantly.
+- **A sort that spilled to disk**, and scans that read more than `expose-orm-plan-large-scan-rows`.
+
+Everything else is coloured structurally — index scans green, joins blue, sorts and hashes amber for the rows they buffer.
+
+### Setup
+
+Runs `manage.py shell` in the project root, found by locating `manage.py` above the current file. To run inside a container, set `expose-orm-container` in `.dir-locals.el`; it falls back to `jsoa/docker-jump-container`, so a project already configured for remote jump-to-definition needs no second setting. `expose-orm-workdir` overrides the image's `WORKDIR`, and `expose-orm-python` the interpreter.
+
+The expression travels as a JSON environment variable rather than interpolated into a command line, so quoting inside it can't break anything, and the script's output is delimited by markers because `manage.py shell` prints banners and deprecation warnings around it.
 
 ## Commit Message Insertion
 

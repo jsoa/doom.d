@@ -1,6 +1,18 @@
 ;;; modules/+large-file.el -*- lexical-binding: t; -*-
 
-(setq jsoa/large-file-size (* 2 1024 1024)) ;; 2MB
+(defvar jsoa/large-file-size (* 2 1024 1024)
+  "Size in bytes past which a buffer is treated as a large file.
+
+Also consulted by `modules/+fci.el', so the fill-column indicator and
+these optimizations agree on what counts as \"large\" rather than each
+carrying its own threshold.")
+
+(defvar-local jsoa/large-file-mode-enabled nil
+  "Non-nil once `jsoa/enable-large-file-mode' has run in this buffer.
+
+Only used to keep it from re-announcing itself: the work below still
+re-runs on every major mode change, because switching major mode turns
+`font-lock-mode' and friends back on and they need disabling again.")
 
 (defun jsoa/large-file-p ()
   (or
@@ -10,7 +22,8 @@
 
 (defun jsoa/enable-large-file-mode ()
   (when (jsoa/large-file-p)
-    (message "⚡ Large file detected: optimizing...")
+    (unless jsoa/large-file-mode-enabled
+      (message "⚡ Large file detected: optimizing..."))
 
     (when (bound-and-true-p lsp-mode)
       (lsp-disconnect))
@@ -41,7 +54,13 @@
     ;; Optional: read-only (prevents accidental edits)
     ;; (read-only-mode 1)
 
-    (message "⚡ Large file mode enabled")))
+    (unless jsoa/large-file-mode-enabled
+      (setq jsoa/large-file-mode-enabled t)
+      (message "⚡ Large file mode enabled"))))
 
 (add-hook 'find-file-hook #'jsoa/enable-large-file-mode)
+
+;; Also on major mode changes, not just on open: a new major mode turns
+;; `font-lock-mode', line numbers, and the fill-column indicator back on,
+;; so they need disabling again each time.
 (add-hook 'after-change-major-mode-hook #'jsoa/enable-large-file-mode)

@@ -1471,7 +1471,19 @@ lookup, but quadratic here across a multi-line range."
 (defun expose-review-region-show-item-hover ()
   "Show review item hover at point."
 
-  (when-let* ((item
+  (when-let* (;; Re-checked here, not just where this was scheduled:
+              ;; Corfu's own popup is itself on a delay
+              ;; (`corfu-auto-delay', 0.2 by default here), so at
+              ;; schedule time -- right after the keystroke -- its frame
+              ;; usually isn't visible yet and the scheduling check
+              ;; passes. This hover runs on `expose-hover-delay' (0.25),
+              ;; so it always lands *after* Corfu has appeared and would
+              ;; render right on top of it. Mirrors `expose-hover-show',
+              ;; which re-checks via `expose-hover-suppressed-p' for
+              ;; exactly this reason.
+              ((not (expose-hover-corfu-active-p)))
+
+              (item
                (expose-review-region-item-at-point))
 
               (session

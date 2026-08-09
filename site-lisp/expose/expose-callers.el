@@ -608,17 +608,37 @@ plain `path(..., View.as_view(), name=...)'."
               (when-let ((derived (expose-callers-drf-default-basename symbol)))
                 (push derived names))))
 
-          ;; path("...", View.as_view(), name="thing")
+          ;; Plain Django, which needs no DRF at all:
+          ;;   path("x/", views.home, name="home")            function view
+          ;;   path("x/", HomeView.as_view(), name="home")    class-based
+          ;;   path("x/", V.as_view(url="/"), name="home")    with arguments
+          ;;   url(r"^x$", view, name="home")                 pre-2.0
+          ;;
+          ;; `as_view' takes arguments often enough -- RedirectView and
+          ;; DRF-Spectacular's views both do -- that requiring empty
+          ;; parentheses silently found nothing for them.
           (goto-char (point-min))
           (while (re-search-forward
-                  (concat "\\(?:re_\\)?path([ \t\n]*[^,]+,[ \t\n]*"
+                  (concat "\\(?:re_path\\|path\\|url\\)([ \t\n]*[^,]+,[ \t\n]*"
                           "\\(?:[A-Za-z_][A-Za-z0-9_.]*\\.\\)?"
                           "\\([A-Za-z_][A-Za-z0-9_]*\\)"
-                          "\\(?:\\.as_view()\\)?[ \t\n]*,[ \t\n]*"
+                          "\\(?:\\.as_view([^)]*)\\)?[ \t\n]*,[ \t\n]*"
                           "name[ \t\n]*=[ \t\n]*[\"']\\([^\"']+\\)[\"']")
                   nil t)
             (when (equal (match-string 1) symbol)
-              (push (match-string 2) names)))))
+              (push (match-string 2) names)))
+
+          ;; `app_name = "x"' namespaces every name in this file, so tests
+          ;; reverse "x:home" rather than "home". Both forms are kept: which
+          ;; one applies depends on how the module is include()d, which
+          ;; isn't visible from here.
+          (goto-char (point-min))
+          (when (re-search-forward
+                 "^[ \t]*app_name[ \t]*=[ \t]*[\"']\\([^\"']+\\)[\"']" nil t)
+            (let ((namespace (match-string 1)))
+              (dolist (name (copy-sequence names))
+                (unless (string-match-p ":" name)
+                  (push (concat namespace ":" name) names)))))))
 
       (delete-dups (nreverse names)))))
 

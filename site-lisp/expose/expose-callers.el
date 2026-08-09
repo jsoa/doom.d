@@ -557,6 +557,108 @@ thing."
              :test #'equal
              :key #'expose-callers-node-key)))))))
 
+(defun expose-callers-url-names (symbol)
+  "Return the URL names that route to SYMBOL, from the project's urls.py files.
+
+The genuinely exact link between a Django test and the view it exercises
+is the URL name: the test says `reverse(\"user-event-list\")' and never
+names the view, so nothing else here can connect the two with certainty.
+
+Parsed rather than obtained from `manage.py show_urls', which would be
+authoritative but needs Django settings, an importable app registry and
+usually a database -- in a Dockerised project that means a running
+container, and this has to work when it isn't. What it costs is the
+dynamic cases: `include()' namespaces and routers built in a loop are
+not followed.
+
+Handles DRF `router.register(prefix, ViewSet, basename=...)' -- the
+basename, from which DRF derives `-list', `-detail' and friends -- and
+plain `path(..., View.as_view(), name=...)'."
+
+  (when-let* ((project (project-current nil))
+              (root (expand-file-name (project-root project))))
+
+    (let ((names nil)
+          (files (ignore-errors
+                   (directory-files-recursively root "\\`urls\\.py\\'"))))
+
+      (dolist (file files)
+        (with-temp-buffer
+          (insert-file-contents file)
+
+          ;; router.register(prefix, ViewSet, basename="name") -- often
+          ;; split across lines, so whitespace is matched permissively.
+          (goto-char (point-min))
+          (while (re-search-forward
+                  (concat "router\\.register([ \t\n]*[^,]+,[ \t\n]*"
+                          "\\([A-Za-z_][A-Za-z0-9_]*\\)[ \t\n]*,[ \t\n]*"
+                          "basename[ \t\n]*=[ \t\n]*[\"']\\([^\"']+\\)[\"']")
+                  nil t)
+            (when (equal (match-string 1) symbol)
+              (push (match-string 2) names)))
+
+          ;; path("...", View.as_view(), name="thing")
+          (goto-char (point-min))
+          (while (re-search-forward
+                  (concat "\\(?:re_\\)?path([ \t\n]*[^,]+,[ \t\n]*"
+                          "\\(?:[A-Za-z_][A-Za-z0-9_.]*\\.\\)?"
+                          "\\([A-Za-z_][A-Za-z0-9_]*\\)"
+                          "\\(?:\\.as_view()\\)?[ \t\n]*,[ \t\n]*"
+                          "name[ \t\n]*=[ \t\n]*[\"']\\([^\"']+\\)[\"']")
+                  nil t)
+            (when (equal (match-string 1) symbol)
+              (push (match-string 2) names)))))
+
+      (delete-dups (nreverse names)))))
+
+(defun expose-callers-test-routes (symbol)
+  "Return test nodes that reach SYMBOL through `reverse(URL-NAME)'.
+
+The strongest of the non-call signals: unlike a name match, this is an
+actual resolution -- the URL name really does route to this view."
+
+  (when-let ((names (expose-callers-url-names symbol)))
+
+    (when-let* ((project (project-current nil))
+                (root (expand-file-name (project-root project))))
+
+      (let (nodes)
+        (dolist (name names)
+          (with-temp-buffer
+            (let ((status
+                   (ignore-errors
+                     (call-process
+                      "grep" nil t nil
+                      "-rnE"
+                      "--include=test_*.py" "--include=*_test.py"
+                      "--include=conftest.py"
+                      "--"
+                      ;; `-list', `-detail' and custom actions all hang off
+                      ;; the basename, so match it as a prefix.
+                      (format "reverse\\([\"']%s(-[A-Za-z0-9_-]+)?[\"']"
+                              (regexp-quote name))
+                      root))))
+
+              (when (memq status '(0 1))
+                (goto-char (point-min))
+                (while (re-search-forward "^\\(.+?\\):\\([0-9]+\\):" nil t)
+                  (let* ((file (match-string 1))
+                         (line (string-to-number (match-string 2)))
+                         (enclosing (expose-callers-enclosing-defun file line)))
+
+                    (push (list :name (or enclosing (file-name-nondirectory file))
+                                :file file
+                                :line line
+                                :kind 'route
+                                :route name
+                                :module (null enclosing))
+                          nodes)))))))
+
+        (cl-remove-duplicates
+         (nreverse nodes)
+         :test #'equal
+         :key #'expose-callers-node-key)))))
+
 (defun expose-callers-test-reachable (nodes edges root-key)
   "Return the subset of node keys that lie on a path from a test to ROOT-KEY.
 
@@ -661,6 +763,15 @@ KEEP is the set of node keys from `expose-callers-test-reachable'."
               (format "  %s -> %s [style=dashed,label=\"references\",color=\"#a2792f\",fontcolor=\"#a2792f\"];"
                       from to))
 
+             ;; A resolved route: the URL name really does map to this
+             ;; view, so this is evidence on a par with a call, and
+             ;; labelled with the name that proves it.
+             ('route
+              (format "  %s -> %s [label=\"reverse(%s)\",color=\"#4f9d69\",fontcolor=\"#4f9d69\"];"
+                      from to
+                      (expose-callers-escape
+                       (or (plist-get (gethash (nth 0 edge) nodes) :route) "url"))))
+
              ('mention
               (format "  %s -> %s [style=dotted,label=\"mentions\",color=\"#8b94a3\",fontcolor=\"#8b94a3\"];"
                       from to))
@@ -720,11 +831,15 @@ graph."
       ;; to follow -- but without them this reports "untested" for the
       ;; large share of Django tests that go through the test client or
       ;; patch by string.
-      (dolist (mention (expose-callers-test-mentions (plist-get root :name)))
-        (let ((key (expose-callers-node-key mention)))
+      ;; Routes first: a test found both ways should be recorded by the
+      ;; stronger signal, and `cl-pushnew' keeps whichever landed first.
+      (dolist (extra (append (expose-callers-test-routes (plist-get root :name))
+                             (expose-callers-test-mentions (plist-get root :name))))
+        (let ((key (expose-callers-node-key extra)))
           (unless (or (equal key root-key) (gethash key nodes))
-            (puthash key mention nodes)
-            (cl-pushnew (list key root-key 'mention) edges :test #'equal))))
+            (puthash key extra nodes)
+            (cl-pushnew (list key root-key (plist-get extra :kind))
+                        edges :test #'equal))))
 
       (let* ((keep (expose-callers-test-reachable nodes edges root-key))
              (rendered (expose-callers-tests-to-dot nodes edges root keep)))

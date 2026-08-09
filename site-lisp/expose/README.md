@@ -361,7 +361,18 @@ Routing is included only when the URL configuration is in the code being looked 
 
 Data flow is the other inference-heavy one: it labels each edge with the operation, and states "mutated in place" explicitly, because rebinding a name and mutating the object behind it look nearly identical in source and behave nothing alike. That distinction is the reason to draw it, and also the thing most worth checking against the source.
 
-**The tests graph** answers "is this tested, and by what" -- not a coverage percentage. It is the reverse call graph with its filter inverted: that one excludes tests so production paths stay readable, and this keeps only the half it discards. Callers no test goes through are pruned, so what remains is the routes tests take to reach the code, intermediate functions included. Static call paths alone would badly under-report on a Django project: a test calling `self.client.post(url)` reaches the view through runtime URL resolution, and `@patch("app.tasks.send_email")` names its target in a string — neither produces a call edge or even a reference. So test files are also grepped for the symbol name, and those appear as dotted "mentions" edges. Three strengths of evidence, drawn differently: a resolved call, a reference, and a textual mention.
+**The tests graph** answers "is this tested, and by what" -- not a coverage percentage. It is the reverse call graph with its filter inverted: that one excludes tests so production paths stay readable, and this keeps only the half it discards. Callers no test goes through are pruned, so what remains is the routes tests take to reach the code, intermediate functions included. Static call paths alone would badly under-report on a Django project, so three weaker signals are added, each drawn differently so you can tell what you are looking at:
+
+| Signal | Evidence | Drawn |
+|--------|----------|-------|
+| Call | The language server resolved a call | Solid |
+| Reference | A real symbol usage, not a call | Dashed, amber |
+| **Route** | A `reverse(...)` whose URL name resolves to this view | Solid, green, labelled with the name |
+| Mention | The name appears in a test file's text | Dotted, grey |
+
+The route is the important one for Django. A test calling `self.client.get(reverse("user-event-list"))` never names the view at all — the only true link is the URL name, which `urls.py` maps back to the viewset. Expose parses that mapping (DRF `router.register(..., basename=...)` and `path(..., View.as_view(), name=...)`) rather than running `manage.py show_urls`, which would be authoritative but needs settings, an app registry and usually a database — a running container, in a Dockerised project. The cost is the dynamic cases: `include()` namespaces and routers built in a loop are not followed.
+
+Mentions also catch `@patch("app.tasks.send_email")`, which names its target in a string, and the `<Symbol>Test` naming convention.
 
 When nothing at all reaches it, that is stated plainly rather than drawn as an empty graph.
 

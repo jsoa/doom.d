@@ -1783,7 +1783,17 @@ by either.")
       (when (and
              expose-watch-mode
              (= position
-                (point)))
+                (point))
+
+             ;; Re-checked here, not just where this was scheduled:
+             ;; Corfu's own popup is itself on a delay
+             ;; (`corfu-auto-delay'), so at schedule time -- right after
+             ;; the keystroke -- its frame usually isn't visible yet,
+             ;; and the scheduling check passes. By the time this fires
+             ;; it is showing, and without this we'd render right on top
+             ;; of it. This mirrors `expose-hover-show', which re-checks
+             ;; via `expose-hover-suppressed-p' for exactly this reason.
+             (not (expose-hover-corfu-active-p)))
 
         (when-let ((overlay
                     (expose-watch-source-item-overlay-at-point)))

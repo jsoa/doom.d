@@ -370,7 +370,18 @@ Data flow is the other inference-heavy one: it labels each edge with the operati
 | **Route** | A `reverse(...)` whose URL name resolves to this view | Solid, green, labelled with the name |
 | Mention | The name appears in a test file's text | Dotted, grey |
 
-The route is the important one for Django. A test calling `self.client.get(reverse("user-event-list"))` never names the view at all — the only true link is the URL name, which `urls.py` maps back to the viewset. Expose parses that mapping rather than running `manage.py show_urls`, which would be authoritative but needs settings, an app registry and usually a database — a running container, in a Dockerised project. It handles DRF `router.register(..., basename=...)`, plain `path(..., View.as_view(), name=...)`, and registrations with **no** basename, where DRF derives one from the viewset's queryset model (`EventHost` → `eventhost`, lowercased with no separators).
+The route is the important one for Django. A test calling `self.client.get(reverse("user-event-list"))` never names the view at all — the only true link is the URL name, which `urls.py` maps back to the viewset. Expose parses that mapping rather than running `manage.py show_urls`, which would be authoritative but needs settings, an app registry and usually a database — a running container, in a Dockerised project. DRF is not required — plain Django works the same way:
+
+| Pattern | Example |
+|---------|---------|
+| Function view | `path("", views.post_list, name="post-list")` |
+| Class-based view | `path("p/", PostDetailView.as_view(), name="post-detail")` |
+| …with arguments | `path("a/", ArchiveView.as_view(paginate_by=10), name="archive")` |
+| `re_path` / legacy `url()` | `url(r"^old/$", views.legacy, name="legacy")` |
+| DRF router | `router.register("event", EventViewSet, basename="event")` |
+| DRF router, no basename | derived from the queryset model — `EventHost` → `eventhost` |
+
+`app_name = "shop"` namespaces are handled too: both `item-list` and `shop:item-list` are matched, since which one applies depends on how the module is `include()`d and that isn't visible from the file itself.
 
 Note that the full route name is never written down anywhere: only the basename is, and DRF generates `-list`, `-detail` and any custom `@action` names from it. Expose reconstructs that rule rather than looking the names up, which is why custom actions are matched without knowing they exist.
 

@@ -204,6 +204,7 @@ Expose installs bindings under `SPC c h` by default.
 | `SPC c h L` | `expose-log-clear`                  | Clear Expose log                             |
 | `SPC c h ?` | `expose-hover-debug-current-buffer` | Debug current buffer hover state             |
 | `SPC c h h` | Thing at Point prefix               | Focused code-context actions                 |
+| `SPC c h G` | Diagrams prefix                     | Rendered flow, ER and call graphs            |
 | `SPC c h R` | Full Review prefix                  | Persistent branch/session reviews            |
 | `SPC c h M` | Region Review prefix                | Persistent selected-region reviews           |
 | `SPC c h W` | Watch prefix                        | Background review for watched source buffers |
@@ -241,6 +242,7 @@ These actions use the active region when one is selected, falling back to the po
 |---------------|-------------------------------------|------------------------------------------|
 | `SPC c h G c` | `expose-run-control-flow-diagram`   | Control flow of the code at point        |
 | `SPC c h G C` | `expose-run-call-flow-diagram`      | What the code at point calls             |
+| `SPC c h G d` | `expose-run-data-flow-diagram`      | How values move through the code         |
 | `SPC c h G e` | `expose-run-er-diagram`             | Models and their relationships           |
 | `SPC c h G r` | `expose-run-reverse-call-graph`     | What calls the function at point         |
 
@@ -324,6 +326,7 @@ Four graphs, rendered with Graphviz and shown as an SVG image in a full-frame bu
 |--------------------|----------------------------------------------------|------------|
 | Control flow       | Which paths run through this code                  | Provider   |
 | Call flow          | What this code calls, and what those call          | Provider   |
+| Data flow          | Where values come from, and where they end up      | Provider   |
 | Entity relations   | Which models exist and how they relate             | Provider   |
 | Reverse call graph | What calls this, transitively                      | LSP / xref |
 
@@ -345,6 +348,8 @@ Nodes are colored by what they represent — entry, condition, error, exit, exte
 ### How far to trust them
 
 The first three are provider-generated and advisory, like the rest of Expose. A picture reads as more authoritative than a paragraph, so `s` is worth using: it shows the exact DOT the image was built from. The ER diagram is the most reliable of the three — relationships are declared in the source rather than inferred. Call flow is the least, since a model asked what something "calls" will readily describe a dependency it was never shown; callees it cannot see are drawn dashed.
+
+Data flow is the other inference-heavy one: it labels each edge with the operation, and states "mutated in place" explicitly, because rebinding a name and mutating the object behind it look nearly identical in source and behave nothing alike. That distinction is the reason to draw it, and also the thing most worth checking against the source.
 
 **The reverse call graph has no AI in it.** Finding callers needs whole-project knowledge that no provider has, and a fabricated answer to "is it safe to change this?" is worse than none, so its edges come from LSP call hierarchy — or `xref` when the server can't answer, which the graph says on its title since references are not the same as calls.
 

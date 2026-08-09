@@ -383,6 +383,57 @@ actually present in the provided code, and asks for an explicit
 
    'raw))
 
+(defun expose-request-data-flow-diagram (context)
+  "Build a data-flow diagram request.
+
+The third axis alongside `expose-request-control-flow-diagram' (when
+things run) and `expose-request-call-flow-diagram' (what gets invoked):
+where values come from, what reshapes them, and where they end up.
+
+Edges carry the operation rather than nodes carrying a category, so
+in-place mutation stays visible. Rebinding a name and mutating the
+object it points at look almost identical in source and behave nothing
+alike, and that distinction is the main thing this diagram exists to
+surface."
+
+  (expose-request-create
+   'data-flow-diagram
+   'xml
+
+   (string-join
+    (list
+     "Produce a DATA FLOW graph of the current code as Graphviz DOT."
+     ""
+     "Rules:"
+     "- Output a single `digraph' and nothing else. No prose, no Markdown, no code fences."
+     "- Model how VALUES move: where each significant value originates, what derives or reshapes it, and where it finally goes. Not the branching, and not the call graph."
+     "- Shapes carry meaning, so use exactly these:"
+     "  `ellipse' for a value entering -- a parameter, or something read from outside the function;"
+     "  `box' for a value derived inside this code;"
+     "  `component' for a reshaping done by a third-party or standard library call;"
+     "  `cylinder' for a destination that leaves the process -- database write, network send, file, cache, queue;"
+     "  `doubleoctagon' for a value returned to the caller."
+     "- Label a node with the value's name, and briefly what it holds when that isn't obvious."
+     "- Label every edge with the operation that produces the target from the source: \"assigned\", \"mutated in place\", \"encoded\", \"saved\", \"passed to\", and so on."
+     "- Say \"mutated in place\" explicitly when an existing object is modified rather than a new value being bound. Rebinding and mutation read alike in source and behave differently; making that visible is the point of this diagram."
+     "- Only values and operations visible in the provided code. If a called function's body isn't shown, treat it as one step and don't invent what it does to the value."
+     "- Quote every label, and escape any embedded double quotes. A label is a single quoted string: never place text after the closing quote."
+     "- Set `rankdir=LR' and give the graph a short `label' naming what it depicts.")
+    "\n")
+
+   (expose-request-select
+    context
+    :project
+    :language
+    :file
+    :imports
+    :focus
+    :scope
+    :parent-scope
+    :code)
+
+   'raw))
+
 (defun expose-request-er-diagram (context)
   "Build an entity-relationship diagram request.
 
@@ -701,6 +752,9 @@ entire node."
 
       ('er-diagram
        (expose-request-er-diagram context))
+
+      ('data-flow-diagram
+       (expose-request-data-flow-diagram context))
 
       ('usage
        (expose-request-usage context))

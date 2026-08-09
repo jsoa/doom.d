@@ -347,14 +347,22 @@ as well as the node's own identifier, because providers name nodes
 inconsistently -- sometimes the model, sometimes a snake_case variant."
 
   (when (and focus (not (string-empty-p focus)))
-    (let ((label (or (expose-diagram-attribute attrs "label") "")))
+    (let* ((label (or (expose-diagram-attribute attrs "label") ""))
+
+           ;; Labels routinely carry a second line -- `name\\nfile' in the
+           ;; reverse call graph, `name\\ndescription' in data flow -- so
+           ;; comparing the whole thing never matches. Take the first
+           ;; segment, splitting on DOT's own line escapes.
+           (first-line
+            (string-trim (car (split-string label "\\\\[nlr]" t)))))
+
       (or
        (string-equal-ignore-case name focus)
        ;; `{ModelName|field...' -- the record label's header cell.
        (and (string-match "\\`{[ \t]*\\([A-Za-z_][A-Za-z0-9_.]*\\)" label)
             (string-equal-ignore-case (match-string 1 label) focus))
-       ;; Plain (non-record) label that is exactly the model name.
-       (string-equal-ignore-case (string-trim label) focus)))))
+       ;; Plain label, or the first line of a multi-line one.
+       (string-equal-ignore-case first-line focus)))))
 
 (defun expose-diagram-style-statement (arrow name attrs &optional focus)
   "Return a restyled `NAME [ATTRS]' statement, or nil to leave it alone.

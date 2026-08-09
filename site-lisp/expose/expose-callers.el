@@ -91,6 +91,22 @@ directory pattern catches everything beneath it."
   :type '(repeat regexp)
   :group 'expose-callers)
 
+(defcustom expose-callers-graph-direction "LR"
+  "Graphviz `rankdir' for the caller and test graphs.
+
+`LR' rather than `BT', which reads more naturally for \"callers above,
+callee below\" but lays out terribly for the shape these graphs actually
+have. Both fan in: many callers converge on one target, and every one of
+them lands in the same rank. With `BT' that rank runs along the X axis,
+so eighteen tests produced a graph 6686 points wide and 136 tall -- a
+ribbon too flat to read at any zoom. The same graph in `LR' is 674 by
+998, because the fan becomes a column."
+  :type '(choice (const :tag "Left to right" "LR")
+                 (const :tag "Bottom to top" "BT")
+                 (const :tag "Top to bottom" "TB")
+                 (const :tag "Right to left" "RL"))
+  :group 'expose-callers)
+
 ;;; ---------------------------------------------------------------------------
 ;;; Nodes
 ;;; ---------------------------------------------------------------------------
@@ -430,7 +446,7 @@ resolved call list."
          (lines nil))
 
     (push "digraph reverse_calls {" lines)
-    (push "  rankdir=BT;" lines)
+    (push (format "  rankdir=%s;" expose-callers-graph-direction) lines)
     (push (format "  label=\"callers of %s%s\";"
                   (expose-callers-escape (plist-get root :name))
                   (if exact "" "  (from references -- may include non-calls)"))
@@ -790,7 +806,7 @@ KEEP is the set of node keys from `expose-callers-test-reachable'."
      nodes)
 
     (push "digraph tests {" lines)
-    (push "  rankdir=BT;" lines)
+    (push (format "  rankdir=%s;" expose-callers-graph-direction) lines)
     (push (format "  label=\"%d test%s reaching %s\";"
                   test-count
                   (if (= test-count 1) "" "s")

@@ -567,11 +567,19 @@ the graph header can't be located."
            (edge-label (cdr (assq 'edge-label expose-diagram-palette)))
            (normal (expose-diagram-color 'normal))
 
+           ;; Case-sensitively: this removes the *graph* attribute, which
+           ;; DOT writes lowercase, and must not touch the `BGCOLOR' of
+           ;; an HTML-like label's table cells, which is how the
+           ;; migration diagram colours individual fields. With
+           ;; `case-fold-search' left at its default this stripped those
+           ;; too, silently discarding the only thing that made those
+           ;; tables readable.
            (stripped
-            (replace-regexp-in-string
-             "[ \t]*bgcolor[ \t]*=[ \t]*\"?[^\";,]*\"?[ \t]*;?"
-             ""
-             dot))
+            (let ((case-fold-search nil))
+              (replace-regexp-in-string
+               "[ \t]*bgcolor[ \t]*=[ \t]*\"?[^\";,]*\"?[ \t]*;?"
+               ""
+               dot)))
 
            ;; Color the individual statements first: doing it after the
            ;; defaults are injected would mean re-matching those very

@@ -597,6 +597,17 @@ plain `path(..., View.as_view(), name=...)'."
             (when (equal (match-string 1) symbol)
               (push (match-string 2) names)))
 
+          ;; router.register(prefix, ViewSet) with no basename: DRF derives
+          ;; one from the model, so the name exists but is written nowhere.
+          (goto-char (point-min))
+          (while (re-search-forward
+                  (concat "router\\.register([ \t\n]*[^,]+,[ \t\n]*"
+                          "\\([A-Za-z_][A-Za-z0-9_]*\\)[ \t\n]*,?[ \t\n]*)")
+                  nil t)
+            (when (equal (match-string 1) symbol)
+              (when-let ((derived (expose-callers-drf-default-basename symbol)))
+                (push derived names))))
+
           ;; path("...", View.as_view(), name="thing")
           (goto-char (point-min))
           (while (re-search-forward
@@ -610,6 +621,53 @@ plain `path(..., View.as_view(), name=...)'."
               (push (match-string 2) names)))))
 
       (delete-dups (nreverse names)))))
+
+(defun expose-callers-drf-default-basename (symbol)
+  "Return the basename DRF derives for viewset SYMBOL, or nil.
+
+When `router.register' is called without `basename', DRF falls back to
+`queryset.model._meta.object_name.lower()' -- the model's name,
+lowercased, with no separators, so `EventHost' becomes `eventhost' and
+not `event-host'. Reproducing that exactly matters: guessing a
+hyphenated form would silently match nothing.
+
+Found by locating the class and reading the `queryset' assignment in its
+body, stopping at the next top-level definition so a later class's
+queryset can't be misattributed."
+
+  (when-let* ((project (project-current nil))
+              (root (expand-file-name (project-root project))))
+
+    (with-temp-buffer
+      (let ((status
+             (ignore-errors
+               (call-process
+                "grep" nil t nil "-rnE" "--include=*.py" "--"
+                (format "^class %s\\b" (regexp-quote symbol))
+                root))))
+
+        (when (and (eq status 0)
+                   (progn (goto-char (point-min))
+                          (re-search-forward "^\\(.+?\\):\\([0-9]+\\):" nil t)))
+
+          (let ((file (match-string 1))
+                (line (string-to-number (match-string 2))))
+
+            (with-temp-buffer
+              (insert-file-contents file)
+              (goto-char (point-min))
+              (forward-line (1- line))
+
+              (let ((bound (save-excursion
+                             (forward-line 1)
+                             (if (re-search-forward "^\\(class\\|def\\)\\s-" nil t)
+                                 (match-beginning 0)
+                               (point-max)))))
+
+                (when (re-search-forward
+                       "^[ \t]+queryset[ \t]*=[ \t]*\\([A-Za-z_][A-Za-z0-9_]*\\)\\.objects"
+                       bound t)
+                  (downcase (match-string 1)))))))))))
 
 (defun expose-callers-test-routes (symbol)
   "Return test nodes that reach SYMBOL through `reverse(URL-NAME)'.

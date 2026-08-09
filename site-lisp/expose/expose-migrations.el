@@ -549,14 +549,15 @@ which withholds it when almost every field changed."
             (_ nil)))
          (cell (if background (format " BGCOLOR=\"%s\"" background) ""))
          (lines
-          (cond
-           ;; Context, not news: carried forward from the migration before.
-           ((not (and highlight expand))
-            (list (expose-migrations-truncate type)))
-           ;; Nothing would be cut, so nothing needs its own row.
-           ((<= (length (or type "")) expose-migrations-max-definition-width)
-            (list type))
-           (t (expose-migrations-detail-lines type)))))
+          (if (and highlight expand)
+              ;; Always split, even when the whole definition would have
+              ;; fitted. Splitting only the long ones made a one-property
+              ;; change read differently from a four-property change, so
+              ;; the same edit looked like two different kinds of thing
+              ;; depending on how much text it happened to carry.
+              (expose-migrations-detail-lines type)
+            ;; Context, not news: carried forward from the migration before.
+            (list (expose-migrations-truncate type)))))
 
     (mapconcat
      (lambda (line)

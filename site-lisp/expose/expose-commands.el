@@ -1193,43 +1193,54 @@ rendering, display, and both failure paths are identical."
      title
 
      (lambda (view)
-       (let* ((response
-               (expose-commands-view-body-text view))
+       ;; Deferred out of the provider's process sentinel, which is where
+       ;; this callback runs. Rendering shells out to `dot', and starting
+       ;; a synchronous subprocess from inside a sentinel can collide with
+       ;; whatever else holds a process lock -- native compilation, most
+       ;; visibly, which reports "Attempt to accept output from process
+       ;; Compiling: ... locked to thread". A zero-delay timer runs the
+       ;; same work from the command loop instead, once the sentinel has
+       ;; returned.
+       (run-at-time
+        0 nil
+        (lambda ()
+          (let* ((response
+                  (expose-commands-view-body-text view))
 
-              (dot
-               (expose-diagram-extract-dot response)))
+                 (dot
+                  (expose-diagram-extract-dot response)))
 
-         (if (not dot)
-             (progn
-               (expose-log
-                "Commands"
-                "%s diagram: no DOT found in response (%d bytes)."
-                type
-                (length (or response "")))
+            (if (not dot)
+                (progn
+                  (expose-log
+                   "Commands"
+                   "%s diagram: no DOT found in response (%d bytes)."
+                   type
+                   (length (or response "")))
 
-               (expose-diagram-display-failure
-                response
-                "No Graphviz DOT graph found in the provider's response."
-                title)
+                  (expose-diagram-display-failure
+                   response
+                   "No Graphviz DOT graph found in the provider's response."
+                   title)
 
-               (message "Expose %s diagram: no DOT in response" (downcase title)))
+                  (message "Expose %s diagram: no DOT in response" (downcase title)))
 
-           (let ((result
-                  (expose-diagram-render-svg dot focus)))
+              (let ((result
+                     (expose-diagram-render-svg dot focus)))
 
-             (if (car result)
-                 (progn
-                   (expose-diagram-display (cdr result) dot title origin)
-                   (message "Expose %s diagram: done" (downcase title)))
+                (if (car result)
+                    (progn
+                      (expose-diagram-display (cdr result) dot title origin)
+                      (message "Expose %s diagram: done" (downcase title)))
 
-               (expose-log
-                "Commands"
-                "%s diagram: dot failed: %s"
-                type
-                (cdr result))
+                  (expose-log
+                   "Commands"
+                   "%s diagram: dot failed: %s"
+                   type
+                   (cdr result))
 
-               (expose-diagram-display-failure dot (cdr result) title)
-               (message "Expose %s diagram: dot failed" (downcase title))))))))))
+                  (expose-diagram-display-failure dot (cdr result) title)
+                  (message "Expose %s diagram: dot failed" (downcase title))))))))))))
 
 ;;;###autoload
 (defun expose-run-control-flow-diagram ()

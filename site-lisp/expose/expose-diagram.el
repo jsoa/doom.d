@@ -357,8 +357,19 @@ inconsistently -- sometimes the model, sometimes a snake_case variant."
            ;; reverse call graph, `name\\ndescription' in data flow -- so
            ;; comparing the whole thing never matches. Take the first
            ;; segment, splitting on DOT's own line escapes.
+           ;;
+           ;; `car' can be nil here, and was: an HTML-like label
+           ;; (`label=<<TABLE ...>>', which the migration tables use) is
+           ;; neither quoted nor bare, so `expose-diagram-attribute' reads
+           ;; no value and the label defaults to "". Splitting "" with
+           ;; OMIT-NULLS yields no elements at all, and `string-trim' of
+           ;; nil signalled. It only surfaced for tables containing no
+           ;; brackets, because a `choices=[...]' anywhere in the label
+           ;; stops the statement regex matching the node in the first
+           ;; place -- so whether this crashed depended on whether the
+           ;; model happened to have a field with choices.
            (first-line
-            (string-trim (car (split-string label "\\\\[nlr]" t)))))
+            (string-trim (or (car (split-string label "\\\\[nlr]" t)) ""))))
 
       (or
        (string-equal-ignore-case name focus)

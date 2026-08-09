@@ -100,6 +100,10 @@
                 :desc "Tests"            "t" #'expose-run-tests
                 :desc "Edge Cases"       "x" #'expose-run-edge-cases
                 :desc "Flow"             "F" #'expose-run-flow
+                :desc "Control Flow Diagram" "G" #'expose-run-control-flow-diagram
+                :desc "Call Flow Diagram"    "C" #'expose-run-call-flow-diagram
+                :desc "ER Diagram"           "E" #'expose-run-er-diagram
+                :desc "Reverse Call Graph"   "b" #'expose-run-reverse-call-graph
                 :desc "Usage"            "u" #'expose-run-usage
                 :desc "Docstring"        "D" #'expose-run-docstring
                 :desc "Summary"          "S" #'expose-run-summary

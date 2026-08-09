@@ -14,6 +14,7 @@
 ;; front: it pulls in `xref' and only matters if that one command is
 ;; used.
 (declare-function expose-callers-build-dot "expose-callers" ())
+(declare-function expose-imports-build-dot "expose-imports" (&optional show-externals))
 
 (defcustom expose-provider-default
   'codex
@@ -1347,6 +1348,55 @@ the buffer, not a judgement call."
           (unwind-protect
               (expose-run-diagram 'er-diagram "ER" #'expose-run-er-diagram focus)
             (deactivate-mark)))))))
+
+;;;###autoload
+(defun expose-run-import-graph (&optional show-externals)
+  "Graph what this file imports, transitively.
+
+Computed from the source, not generated: imports are trivially
+parseable, so asking a provider to describe them would trade an exact
+answer for a plausible one. The other diagram this applies to is
+`expose-run-reverse-call-graph', for the same reason.
+
+Follows project-local imports and stops at the boundary -- third-party
+and standard library packages are leaves, since walking into
+site-packages isn't the point. With a prefix argument they're drawn as
+external nodes; by default they're omitted, which usually makes the
+project's own shape far easier to read.
+
+Import cycles are detected and drawn in red. That's the main reason to
+render this at all: a cycle is invisible in any single file, and in
+Python it's a real failure rather than a style problem.
+
+Python and TypeScript/JavaScript. Tests, migrations and node_modules are
+excluded (`expose-imports-exclude-regexps'); bounded by
+`expose-imports-max-depth' and `expose-imports-max-nodes'."
+
+  (interactive "P")
+
+  (unless (executable-find expose-diagram-dot-executable)
+    (user-error
+     "Graphviz `%s' not found on PATH; needed to render Expose diagrams"
+     expose-diagram-dot-executable))
+
+  (require 'expose-imports)
+
+  (message "Expose import graph: scanning...")
+
+  (let* ((origin (list (current-buffer) (point) #'expose-run-import-graph))
+         (built (expose-imports-build-dot show-externals))
+         (dot (car built))
+         (label (cdr built))
+         (result (expose-diagram-render-svg dot label)))
+
+    (if (car result)
+        (progn
+          (expose-diagram-display (cdr result) dot "Import Graph" origin)
+          (message "Expose import graph: done"))
+
+      (expose-log "Commands" "Import graph: dot failed: %s" (cdr result))
+      (expose-diagram-display-failure dot (cdr result) "Import Graph")
+      (message "Expose import graph: dot failed"))))
 
 ;;;###autoload
 (defun expose-run-request-flow-diagram ()

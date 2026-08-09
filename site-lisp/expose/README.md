@@ -244,6 +244,7 @@ These actions use the active region when one is selected, falling back to the po
 | `SPC c h G C` | `expose-run-call-flow-diagram`      | What the code at point calls             |
 | `SPC c h G d` | `expose-run-data-flow-diagram`      | How values move through the code         |
 | `SPC c h G R` | `expose-run-request-flow-diagram`   | Django request pipeline for a view       |
+| `SPC c h G m` | `expose-run-import-graph`           | What this file imports, transitively     |
 | `SPC c h G e` | `expose-run-er-diagram`             | Models and their relationships           |
 | `SPC c h G r` | `expose-run-reverse-call-graph`     | What calls the function at point         |
 
@@ -329,6 +330,7 @@ Four graphs, rendered with Graphviz and shown as an SVG image in a full-frame bu
 | Call flow          | What this code calls, and what those call          | Provider   |
 | Data flow          | Where values come from, and where they end up      | Provider   |
 | Request flow       | A Django request through its pipeline layers       | Provider   |
+| Import graph       | What this file imports, and its cycles             | Parsed     |
 | Entity relations   | Which models exist and how they relate             | Provider   |
 | Reverse call graph | What calls this, transitively                      | LSP / xref |
 
@@ -356,6 +358,10 @@ Request flow groups the same territory as call flow into the layers a request pa
 Routing is included only when the URL configuration is in the code being looked at, which from a views module it usually isn't. Rather than inventing a plausible route, it starts at the view -- use the reverse call graph to find what actually routes there, which reports the `urls.py` reference as a module-level usage.
 
 Data flow is the other inference-heavy one: it labels each edge with the operation, and states "mutated in place" explicitly, because rebinding a name and mutating the object behind it look nearly identical in source and behave nothing alike. That distinction is the reason to draw it, and also the thing most worth checking against the source.
+
+**The import graph has no AI in it either**, for the same reason: imports are trivially parseable, so asking a provider to describe them would trade an exact answer for a plausible one. It follows project-local imports and stops at the boundary — third-party and standard library packages are leaves, shown only with a prefix argument, since hiding them usually makes the project's own shape far easier to read. Python and TypeScript/JavaScript; tests, migrations and `node_modules` are excluded by `expose-imports-exclude-regexps`.
+
+Its main reason to exist is **cycle detection**, drawn in red: an import cycle is invisible in any single file and in Python is a real failure rather than a style problem.
 
 **The reverse call graph has no AI in it.** Finding callers needs whole-project knowledge that no provider has, and a fabricated answer to "is it safe to change this?" is worse than none, so its edges come from LSP call hierarchy — or `xref` when the server can't answer, which the graph says on its title since references are not the same as calls.
 

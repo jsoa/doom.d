@@ -8,6 +8,15 @@
 (require 'expose-hover)
 (require 'expose-transport)
 (require 'expose-provider)
+(require 'expose-diagram)
+
+;; Loaded on demand by `expose-run-reverse-call-graph' rather than up
+;; front: it pulls in `xref' and only matters if that one command is
+;; used.
+(declare-function expose-callers-build-dot "expose-callers" ())
+(declare-function expose-callers-build-tests-dot "expose-callers" ())
+(declare-function expose-imports-build-dot "expose-imports" (&optional show-externals))
+(declare-function expose-migrations-build-dot "expose-migrations" ())
 
 (defcustom expose-provider-default
   'codex
@@ -1153,6 +1162,456 @@ placeholder with the generated result (or an error message)."
        (message
         "Expose commit message failed: %s"
         (error-message-string error-data))))))
+
+(defun expose-run-diagram (type title command &optional focus direction)
+  "Request a TYPE diagram, render it, and display it under TITLE.
+
+COMMAND is the interactive command that produced this, recorded so the
+diagram buffer's `g' can re-run the right one. FOCUS, when given, names
+the node to emphasize -- the model the command was invoked from.
+
+Shared by every diagram command: the only thing that differs between
+them is the request type and what the result is called -- extraction,
+rendering, display, and both failure paths are identical."
+
+  (unless (executable-find expose-diagram-dot-executable)
+    (user-error
+     "Graphviz `%s' not found on PATH; needed to render Expose diagrams"
+     expose-diagram-dot-executable))
+
+  (expose-log
+   "Commands"
+   "Generating %s diagram using provider %s."
+   type
+   expose-provider-default)
+
+  (message "Expose %s diagram: generating..." (downcase title))
+
+  (let ((origin (list (current-buffer) (point) command)))
+
+    (expose-send-view-action-async
+     type
+     title
+
+     (lambda (view)
+       ;; Deferred out of the provider's process sentinel, which is where
+       ;; this callback runs. Rendering shells out to `dot', and starting
+       ;; a synchronous subprocess from inside a sentinel can collide with
+       ;; whatever else holds a process lock -- native compilation, most
+       ;; visibly, which reports "Attempt to accept output from process
+       ;; Compiling: ... locked to thread". A zero-delay timer runs the
+       ;; same work from the command loop instead, once the sentinel has
+       ;; returned.
+       (run-at-time
+        0 nil
+        (lambda ()
+          (let* ((response
+                  (expose-commands-view-body-text view))
+
+                 (dot
+                  (expose-diagram-extract-dot response)))
+
+            (if (not dot)
+                (progn
+                  (expose-log
+                   "Commands"
+                   "%s diagram: no DOT found in response (%d bytes)."
+                   type
+                   (length (or response "")))
+
+                  (expose-diagram-display-failure
+                   response
+                   "No Graphviz DOT graph found in the provider's response."
+                   title)
+
+                  (message "Expose %s diagram: no DOT in response" (downcase title)))
+
+              (let ((result
+                     (expose-diagram-render-svg dot focus direction)))
+
+                (if (car result)
+                    (progn
+                      (expose-diagram-display (cdr result) dot title origin)
+                      (message "Expose %s diagram: done" (downcase title)))
+
+                  (expose-log
+                   "Commands"
+                   "%s diagram: dot failed: %s"
+                   type
+                   (cdr result))
+
+                  (expose-diagram-display-failure dot (cdr result) title)
+                  (message "Expose %s diagram: dot failed" (downcase title))))))))))))
+
+;;;###autoload
+(defun expose-run-control-flow-diagram ()
+  "Render a control-flow graph of the code at point as an image.
+
+The graph counterpart of `expose-run-flow' (which answers the same
+question in prose): branches, loops, early returns, and the exception
+paths between them, within this one unit of code. For what it calls
+outward instead, see `expose-run-call-flow-diagram'.
+
+Advisory, like everything else in Expose -- the graph is the model's
+reading of code it can only partly see, and a picture reads as more
+authoritative than a paragraph. Press `s' in the diagram buffer to check
+it against the DOT source.
+
+When `dot' rejects the generated source -- common enough with generated
+DOT to be a normal path, not an exceptional one -- the source and
+Graphviz's own complaint are shown together instead, so it can be
+corrected by hand."
+
+  (interactive)
+
+  (expose-run-diagram
+   'control-flow-diagram
+   "Control Flow"
+   #'expose-run-control-flow-diagram))
+
+;;;###autoload
+(defun expose-run-reverse-call-graph ()
+  "Graph what calls the function at point, and what calls those.
+
+The one Expose diagram with no AI in it. The others describe the code
+in front of them; this needs the whole project, which no provider can
+see -- asked anyway it invents callers, and a fabricated answer to \"is
+it safe to change this?\" is worse than none. Edges come from the
+language server's call hierarchy, or `xref' when it can't answer, so
+they're the same ones navigation uses.
+
+Test files are left out (`expose-callers-exclude-regexps'): tests call
+everything, and including them buries the production paths that
+actually answer the question. Bounded by
+`expose-callers-max-depth' and `expose-callers-max-nodes'; anything
+trimmed by those is marked on the graph rather than dropped silently.
+
+Renders through the same pipeline as the other diagrams, so zoom, pan,
+export and the source view all work identically."
+
+  (interactive)
+
+  (unless (executable-find expose-diagram-dot-executable)
+    (user-error
+     "Graphviz `%s' not found on PATH; needed to render Expose diagrams"
+     expose-diagram-dot-executable))
+
+  (require 'expose-callers)
+
+  (message "Expose reverse call graph: searching...")
+
+  (let* ((origin (list (current-buffer) (point) #'expose-run-reverse-call-graph))
+         (built (expose-callers-build-dot))
+         (dot (car built))
+         (root (cdr built))
+         (result (expose-diagram-render-svg dot root)))
+
+    (if (car result)
+        (progn
+          (expose-diagram-display (cdr result) dot "Reverse Call Graph" origin)
+          (message "Expose reverse call graph: done"))
+
+      (expose-log "Commands" "Reverse call graph: dot failed: %s" (cdr result))
+      (expose-diagram-display-failure dot (cdr result) "Reverse Call Graph")
+      (message "Expose reverse call graph: dot failed"))))
+
+;;;###autoload
+(defun expose-run-er-diagram ()
+  "Render an entity-relationship diagram of the models in this buffer.
+
+Unlike the flow diagrams, this is about a whole file rather than the
+code at point: a schema is only legible with every model in it. With no
+region active, the whole buffer is used -- Expose already prefers an
+active region for `:code', so this just widens that to everything.
+Select a region first to diagram only part of a large `models.py'.
+
+The most trustworthy of the diagram commands: relationships are
+declared in the source rather than inferred, so there is much less room
+for invention than in `expose-run-call-flow-diagram'. Models from
+outside the file are drawn as external, abstract bases dashed, and each
+relationship colored by kind (foreign key, many-to-many, one-to-one).
+
+The model point was inside when this ran is emphasized, so a schema of
+thirty models still tells you where you came from. That name is
+resolved here rather than asked of the provider -- it's a fact about
+the buffer, not a judgement call."
+
+  (interactive)
+
+  (let ((focus
+         (or (expose-context-scope-name)
+             (expose-context-parent-scope-name))))
+
+    (if (use-region-p)
+        (expose-run-diagram 'er-diagram "ER" #'expose-run-er-diagram focus)
+
+    ;; Context is built synchronously inside `expose-run-diagram', before
+    ;; anything is sent, so a region marked for the duration of that call
+    ;; is enough -- and it's undone immediately either way.
+    ;;
+    ;; `transient-mark-mode' is bound rather than assumed: Expose detects
+    ;; a selection with `use-region-p', which returns nil when that mode
+    ;; is off no matter what `push-mark' did -- the widening would then
+    ;; silently do nothing and the diagram would cover only the code at
+    ;; point.
+      (save-mark-and-excursion
+        (let ((transient-mark-mode t))
+          (push-mark (point-min) t t)
+          (goto-char (point-max))
+          (unwind-protect
+              (expose-run-diagram 'er-diagram "ER" #'expose-run-er-diagram focus)
+            (deactivate-mark)))))))
+
+;;;###autoload
+(defun expose-run-test-graph ()
+  "Graph which tests reach the function at point, and how.
+
+Answers \"is this tested, and by what\" -- not a coverage percentage.
+The reverse call graph deliberately excludes tests so production paths
+stay readable; this is the half it throws away, and only that half:
+callers no test goes through are pruned, so what's left is the routes
+tests take to get here, intermediate functions included.
+
+Computed, not generated -- LSP call hierarchy, falling back to `xref',
+same as `expose-run-reverse-call-graph'. Non-call references count too,
+since a function registered rather than called is still exercised.
+
+When nothing reaches it, that's stated plainly instead of drawn as an
+empty graph. Worth knowing what that does and doesn't mean: it says no
+test reaches this within `expose-callers-max-depth' levels, not that the
+code is untested by every possible route."
+
+  (interactive)
+
+  (unless (executable-find expose-diagram-dot-executable)
+    (user-error
+     "Graphviz `%s' not found on PATH; needed to render Expose diagrams"
+     expose-diagram-dot-executable))
+
+  (require 'expose-callers)
+
+  (message "Expose test graph: searching...")
+
+  (let* ((origin (list (current-buffer) (point) #'expose-run-test-graph))
+         (built (expose-callers-build-tests-dot))
+         (dot (nth 0 built))
+         (root (nth 1 built))
+         (count (nth 2 built))
+         (result (expose-diagram-render-svg dot root)))
+
+    (if (car result)
+        (progn
+          (expose-diagram-display (cdr result) dot "Tests" origin)
+          (message "Expose test graph: %d test%s reach %s"
+                   count (if (= count 1) "" "s") root))
+
+      (expose-log "Commands" "Test graph: dot failed: %s" (cdr result))
+      (expose-diagram-display-failure dot (cdr result) "Tests")
+      (message "Expose test graph: dot failed"))))
+
+;;;###autoload
+(defun expose-run-migration-history ()
+  "Graph how the Django model at point was shaped by its migrations.
+
+Every operation that touched it, oldest first: created, fields added,
+retyped, renamed, dropped. Colored by what each does to existing data --
+additive green, altering amber, renaming violet, destructive red -- so
+the edits that lost or reshaped data stand out from the ones that only
+added.
+
+Computed by parsing the migration files, not generated. They are
+mechanically regular and there are usually dozens of them, which makes
+this exactly the tedious exact work a parser does better; and asking
+when a field became nullable is a question where a plausible answer is
+worth nothing.
+
+Reading any single migration shows one edit. What this adds is the
+ordering: a field added in 0004, retyped in 0011 and dropped in 0032
+lives in three files named after whatever else they happened to
+contain."
+
+  (interactive)
+
+  (unless (executable-find expose-diagram-dot-executable)
+    (user-error
+     "Graphviz `%s' not found on PATH; needed to render Expose diagrams"
+     expose-diagram-dot-executable))
+
+  (require 'expose-migrations)
+
+  (message "Expose migration history: reading migrations...")
+
+  (let* ((origin (list (current-buffer) (point) #'expose-run-migration-history))
+         (built (expose-migrations-build-dot))
+         (dot (car built))
+         (model (cdr built))
+         (result (expose-diagram-render-svg dot model "LR")))
+
+    (if (car result)
+        (progn
+          (expose-diagram-display (cdr result) dot "Migration History" origin)
+          (message "Expose migration history: done"))
+
+      (expose-log "Commands" "Migration history: dot failed: %s" (cdr result))
+      (expose-diagram-display-failure dot (cdr result) "Migration History")
+      (message "Expose migration history: dot failed"))))
+
+;;;###autoload
+(defun expose-run-import-graph (&optional show-externals)
+  "Graph what this file imports, transitively.
+
+Computed from the source, not generated: imports are trivially
+parseable, so asking a provider to describe them would trade an exact
+answer for a plausible one. The other diagram this applies to is
+`expose-run-reverse-call-graph', for the same reason.
+
+Follows project-local imports and stops at the boundary -- third-party
+and standard library packages are leaves, since walking into
+site-packages isn't the point. With a prefix argument they're drawn as
+external nodes; by default they're omitted, which usually makes the
+project's own shape far easier to read.
+
+Import cycles are detected and drawn in red. That's the main reason to
+render this at all: a cycle is invisible in any single file, and in
+Python it's a real failure rather than a style problem.
+
+Python and TypeScript/JavaScript. Tests, migrations and node_modules are
+excluded (`expose-imports-exclude-regexps'); bounded by
+`expose-imports-max-depth' and `expose-imports-max-nodes'."
+
+  (interactive "P")
+
+  (unless (executable-find expose-diagram-dot-executable)
+    (user-error
+     "Graphviz `%s' not found on PATH; needed to render Expose diagrams"
+     expose-diagram-dot-executable))
+
+  (require 'expose-imports)
+
+  (message "Expose import graph: scanning...")
+
+  (let* ((origin (list (current-buffer) (point) #'expose-run-import-graph))
+         (built (expose-imports-build-dot show-externals))
+         (dot (car built))
+         (label (cdr built))
+         (result (expose-diagram-render-svg dot label)))
+
+    (if (car result)
+        (progn
+          (expose-diagram-display (cdr result) dot "Import Graph" origin)
+          (message "Expose import graph: done"))
+
+      (expose-log "Commands" "Import graph: dot failed: %s" (cdr result))
+      (expose-diagram-display-failure dot (cdr result) "Import Graph")
+      (message "Expose import graph: dot failed"))))
+
+;;;###autoload
+(defun expose-run-side-effects-diagram ()
+  "Render what the code at point changes outside itself.
+
+Rows written, mail sent, jobs queued, services called -- including
+effects several frames down, where the body is visible. Where call flow
+shows what gets invoked and data flow where values go, this is about
+consequences that outlive the call.
+
+Effects inside a transaction are grouped in their own box, because the
+useful question is usually which of them survive a rollback: mail and
+queued tasks do, and a failure after that point leaves a notification
+about a row that no longer exists. They keep their own shape inside the
+transaction box rather than being redrawn as writes, so that stays
+visible.
+
+Provider-generated and inference-heavy, so worth checking: `s' shows the
+DOT it was built from."
+
+  (interactive)
+
+  (expose-run-diagram
+   'side-effects-diagram
+   "Side Effects"
+   #'expose-run-side-effects-diagram
+   nil
+   ;; Vertical: effects fan out from one entry point, and laid out
+   ;; left-to-right that fan runs along the X axis into a ribbon.
+   "TB"))
+
+;;;###autoload
+(defun expose-run-request-flow-diagram ()
+  "Render a Django request-flow diagram of the view at point.
+
+Traces one request through the code -- view, permission and validation
+gates, domain calls, ORM and cache access, response -- grouped into
+labelled pipeline layers. Where `expose-run-call-flow-diagram' draws a
+flat call tree, this one is about order and layering, so a missing layer
+reads as an absence: a view with no permission gate, or one reaching
+straight into the ORM, is visible as a gap rather than something you
+have to notice isn't there.
+
+Gates that can reject the request are drawn as conditions and their
+failure paths are requested explicitly, since a gate shown with only its
+success edge is worse than not drawing it.
+
+Routing is included only when the URL configuration is in the code being
+looked at, which from a views module it usually isn't -- rather than
+inventing a plausible route. To find what actually routes here, use
+`expose-run-reverse-call-graph', which reports the `urls.py' reference
+as a module-level usage."
+
+  (interactive)
+
+  (expose-run-diagram
+   'request-flow-diagram
+   "Request Flow"
+   #'expose-run-request-flow-diagram))
+
+;;;###autoload
+(defun expose-run-data-flow-diagram ()
+  "Render a data-flow graph of the code at point as an image.
+
+The third axis: `expose-run-control-flow-diagram' shows when things
+run, `expose-run-call-flow-diagram' shows what gets invoked, and this
+shows where values come from, what reshapes them, and where they end
+up. Inputs, derived values, third-party transforms, sinks that leave
+the process, and returns are colored differently.
+
+Edges carry the operation, so in-place mutation is stated rather than
+implied -- rebinding a name and mutating the object behind it look
+nearly identical in source and behave nothing alike, which is the thing
+this is worth drawing for.
+
+Inference-heavy, so the most worth checking of the provider-generated
+diagrams: aliasing and mutation are exactly where a plausible reading
+can be wrong. Press `s' to see the DOT it was built from."
+
+  (interactive)
+
+  (expose-run-diagram
+   'data-flow-diagram
+   "Data Flow"
+   #'expose-run-data-flow-diagram))
+
+;;;###autoload
+(defun expose-run-call-flow-diagram ()
+  "Render a call-flow graph of the code at point as an image.
+
+Maps outward -- what this code calls, and what those call in turn --
+where `expose-run-control-flow-diagram' maps the branching inside it.
+Callees are colored by kind: local code, third-party library, and I/O
+\(database, network, filesystem) each read differently, since the last
+two are where the surprises usually are.
+
+Worth more skepticism than the control-flow graph: a model asked what
+something \"calls\" will readily describe the insides of a dependency it
+was never shown. The request pins it to visible call sites and asks for
+anything it can't see to be marked \"(unresolved)\" rather than guessed,
+but `s' to check against the DOT source is the real safeguard."
+
+  (interactive)
+
+  (expose-run-diagram
+   'call-flow-diagram
+   "Call Flow"
+   #'expose-run-call-flow-diagram))
 
 (defun expose-run-changelog ()
   "Run the registered Expose changelog action."

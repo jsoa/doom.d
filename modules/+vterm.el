@@ -16,13 +16,6 @@
 
     default-directory))
 
-(defun jsoa/project-name ()
-  "Return the current project name."
-
-  (file-name-nondirectory
-   (directory-file-name
-    (jsoa/project-root))))
-
 (defun jsoa/vterm-buffer-live-p (buffer)
   "Return non-nil if BUFFER has a live process."
 
@@ -32,12 +25,21 @@
     (process-live-p process)))
 
 (defun jsoa/project-terminal-buffer-name (tool)
-  "Return the project vterm buffer name for TOOL."
+  "Return the project vterm buffer name for TOOL.
+
+Keyed on the full project root rather than just its basename, so that
+two different projects sharing a directory basename (e.g. ~/work/api
+and ~/side/api) don't collide onto the same terminal buffer -- which
+would otherwise hand you the *other* project's shell, already `cd'd
+somewhere else, and `jsoa/kill-project-terminal' would kill the wrong
+one."
 
   (format
    "*%s:%s*"
    tool
-   (jsoa/project-name)))
+   (abbreviate-file-name
+    (directory-file-name
+     (jsoa/project-root)))))
 
 (defun jsoa/window-left-right-pair ()
   "Return (LEFT . RIGHT) if the selected frame has exactly two windows
@@ -72,7 +74,9 @@ window off to the right of it (there being nothing further right of
 the rightmost window otherwise). With any other window layout, this
 reuses or creates a window to the right of the current one instead --
 splitting when there's only a single window, matching the two-window
-case for any layout more complex than that.
+case for any layout more complex than that. Failing that (a frame too
+narrow to split at all), BUFFER takes over the current window rather
+than erroring.
 
 Reusing an existing window replaces whatever buffer it was showing,
 same as the two-window case above; `display-buffer-in-direction' looks
@@ -80,11 +84,12 @@ like the built-in tool for that, but its own notion of \"reuse\" only
 kicks in when that window already shows this exact BUFFER, splitting
 instead of replacing for any other buffer.
 
-Also closes any OTHER window already showing BUFFER: creating a vterm
-buffer runs it through `display-buffer', and Doom's popup rules (e.g.
-for terminal-like buffers) can already have placed it somewhere -- a
-bottom popup, typically -- before this function gets a chance to
-position it, leaving it visible in two places at once otherwise."
+Also closes any OTHER window on this frame already showing BUFFER:
+creating a vterm buffer runs it through `display-buffer', and Doom's
+popup rules (e.g. for terminal-like buffers) can already have placed
+it somewhere -- a bottom popup, typically -- before this function gets
+a chance to position it, leaving it visible in two places at once
+otherwise. Windows on OTHER frames are left alone."
 
   (let* ((source-window
           (selected-window))
@@ -115,11 +120,29 @@ position it, leaving it visible in two places at once otherwise."
                 right)
 
             (or (window-in-direction 'right)
-                (split-window-right)))))
+
+                ;; The frame can be too narrow to split (or already
+                ;; split past `window-min-width'), which signals rather
+                ;; than returning nil. `jsoa/project-terminal' has
+                ;; already created the vterm process by the time it
+                ;; calls this, so letting that error propagate would
+                ;; leave the terminal orphaned: never displayed, never
+                ;; sent its start command, and -- being live -- reused
+                ;; by the next invocation, which retries the same
+                ;; failing split instead of recreating it. Fall back to
+                ;; taking over the current window instead.
+                (ignore-errors
+                  (split-window-right))
+
+                source-window))))
 
     (set-window-buffer window buffer)
 
-    (dolist (other (get-buffer-window-list buffer nil t))
+    ;; Selected frame only (ALL-FRAMES nil, not t): this function
+    ;; positions BUFFER relative to the *current* frame's layout, so a
+    ;; window showing it on another frame -- e.g. deliberately parked on
+    ;; a second monitor -- isn't a stray duplicate to clean up here.
+    (dolist (other (get-buffer-window-list buffer nil nil))
       (unless (eq other window)
         (ignore-errors
           (delete-window other))))

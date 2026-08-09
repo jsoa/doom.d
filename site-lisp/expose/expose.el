@@ -21,6 +21,7 @@
 (require 'expose-hover)
 (require 'expose-commands)
 (require 'expose-review-source)
+(require 'expose-orm)
 
 ;;; ---------------------------------------------------------------------------
 ;;; Keybindings
@@ -77,6 +78,12 @@
                :desc "Commit Message"    "g" #'expose-run-commit-message
                :desc "Changelog"         "n" #'expose-run-changelog
 
+               ;; Not `q': that closes the popup, and rebinding it would
+               ;; break a key used constantly. The query *plan* is not here
+               ;; at all -- it draws a picture, so it lives with the
+               ;; diagrams, same as everything else that does.
+               :desc "Queryset SQL"      "s" #'expose-orm-inspect
+
                :desc "Popup scroll down" "j" #'expose-popup-scroll-down
                :desc "Popup scroll up"   "k" #'expose-popup-scroll-up
                :desc "Popup quit"        "q" #'expose-popup-hide
@@ -110,6 +117,24 @@
                 :desc "Why"              "y" #'expose-run-why
                 :desc "Mental Model"     "m" #'expose-run-mental-model
                 :desc "Debug Buffer"     "?" #'expose-hover-debug-current-buffer)
+
+               ;; Rendered diagrams. Their own group rather than more
+               ;; entries under "Thing at Point": they answer with a
+               ;; picture in a dedicated buffer instead of popup text,
+               ;; and the reverse call graph isn't a provider action at
+               ;; all.
+               (:prefix-map ("G" . "Diagrams")
+                :desc "Control flow"      "c" #'expose-run-control-flow-diagram
+                :desc "Call flow"         "C" #'expose-run-call-flow-diagram
+                :desc "Data flow"         "d" #'expose-run-data-flow-diagram
+                :desc "Request flow"      "R" #'expose-run-request-flow-diagram
+                :desc "Side effects"      "s" #'expose-run-side-effects-diagram
+                :desc "Import graph"      "m" #'expose-run-import-graph
+                :desc "Migration history" "h" #'expose-run-migration-history
+                :desc "Tests for this"    "t" #'expose-run-test-graph
+                :desc "Entity relations"  "e" #'expose-run-er-diagram
+                :desc "Reverse call graph" "r" #'expose-run-reverse-call-graph
+                :desc "Query plan"        "p" #'expose-orm-explain)
 
                (:prefix-map ("R" . "Full Review")
                 :desc "Open/start review" "r" #'expose-review-open-or-start

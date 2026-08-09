@@ -485,6 +485,66 @@ resolved call list."
 ;;; Tests reaching a symbol
 ;;; ---------------------------------------------------------------------------
 
+(defcustom expose-callers-test-mention-limit 40
+  "Maximum textual mentions of a symbol to collect from test files."
+  :type 'integer
+  :group 'expose-callers)
+
+(defun expose-callers-test-mentions (name)
+  "Return test-file nodes that mention NAME textually.
+
+Static analysis misses most of how Django code is actually tested. A
+test calling `self.client.post(url)' reaches the view through runtime
+URL resolution, and `@patch(\"app.utils.thing\")' names its target in a
+string -- neither produces a call edge or even a reference, so a graph
+built only from the language server reports untested code that is
+thoroughly tested.
+
+A word-boundary grep over test files finds both. It's weaker evidence
+than a call -- a mention could be a comment -- so these are rendered
+distinctly rather than counted as the same thing."
+
+  (when-let* ((project (project-current nil))
+              (root (expand-file-name (project-root project))))
+
+    (with-temp-buffer
+      (let ((status
+             (ignore-errors
+               (call-process
+                "grep" nil t nil
+                "-rnw"
+                "--include=test_*.py" "--include=*_test.py"
+                "--include=*.spec.ts" "--include=*.test.ts"
+                "--include=*.spec.js" "--include=*.test.js"
+                "--include=conftest.py"
+                "--" name root))))
+
+        ;; grep exits 1 for "no matches", which is not an error here.
+        (when (memq status '(0 1))
+          (let (nodes (count 0))
+            (goto-char (point-min))
+
+            (while (and (< count expose-callers-test-mention-limit)
+                        (re-search-forward "^\\(.+?\\):\\([0-9]+\\):" nil t))
+              (let* ((file (match-string 1))
+                     (line (string-to-number (match-string 2)))
+                     (enclosing (expose-callers-enclosing-defun file line)))
+
+                (setq count (1+ count))
+
+                (push (list :name (or enclosing (file-name-nondirectory file))
+                            :file file
+                            :line line
+                            :kind 'mention
+                            :module (null enclosing))
+                      nodes)))
+
+            ;; One node per test function, not per occurrence.
+            (cl-remove-duplicates
+             (nreverse nodes)
+             :test #'equal
+             :key #'expose-callers-node-key)))))))
+
 (defun expose-callers-test-reachable (nodes edges root-key)
   "Return the subset of node keys that lie on a path from a test to ROOT-KEY.
 
@@ -577,15 +637,24 @@ KEEP is the set of node keys from `expose-callers-test-reachable'."
     (dolist (edge edges)
       (when (and (gethash (nth 0 edge) keep)
                  (gethash (nth 1 edge) keep))
-        (push
-         (if (eq (nth 2 edge) 'reference)
-             (format "  %s -> %s [style=dashed,label=\"references\",color=\"#a2792f\",fontcolor=\"#a2792f\"];"
-                     (expose-callers-node-id (nth 0 edge))
-                     (expose-callers-node-id (nth 1 edge)))
-           (format "  %s -> %s;"
-                   (expose-callers-node-id (nth 0 edge))
-                   (expose-callers-node-id (nth 1 edge))))
-         lines)))
+        (let ((from (expose-callers-node-id (nth 0 edge)))
+              (to (expose-callers-node-id (nth 1 edge))))
+
+          (push
+           (pcase (nth 2 edge)
+             ;; Each weaker than the last, and drawn so: a call is
+             ;; resolved, a reference is a real symbol usage, a mention is
+             ;; only text that matched.
+             ('reference
+              (format "  %s -> %s [style=dashed,label=\"references\",color=\"#a2792f\",fontcolor=\"#a2792f\"];"
+                      from to))
+
+             ('mention
+              (format "  %s -> %s [style=dotted,label=\"mentions\",color=\"#8b94a3\",fontcolor=\"#8b94a3\"];"
+                      from to))
+
+             (_ (format "  %s -> %s;" from to)))
+           lines))))
 
     (push "}" lines)
 
@@ -632,23 +701,35 @@ graph."
 
            (nodes (car graph))
            (edges (cdr graph))
-           (keep (expose-callers-test-reachable
-                  nodes edges (expose-callers-node-key root)))
-           (rendered (expose-callers-tests-to-dot nodes edges root keep)))
+           (root-key (expose-callers-node-key root)))
 
-      (expose-log "Callers" "Tests reaching %s: %d (from %d callers)."
-                  (plist-get root :name) (cdr rendered) (hash-table-count nodes))
+      ;; Textual mentions, added as direct edges to the root. They can't
+      ;; be walked -- a mention isn't a call, so there's no chain above it
+      ;; to follow -- but without them this reports "untested" for the
+      ;; large share of Django tests that go through the test client or
+      ;; patch by string.
+      (dolist (mention (expose-callers-test-mentions (plist-get root :name)))
+        (let ((key (expose-callers-node-key mention)))
+          (unless (or (equal key root-key) (gethash key nodes))
+            (puthash key mention nodes)
+            (cl-pushnew (list key root-key 'mention) edges :test #'equal))))
 
-      (when (zerop (cdr rendered))
-        (user-error
-         "Nothing under %s reaches %s%s"
-         (if use-lsp "test/" "test/")
-         (plist-get root :name)
-         (if use-lsp
-             ""
-           " (searched references only; try again once LSP is running)")))
+      (let* ((keep (expose-callers-test-reachable nodes edges root-key))
+             (rendered (expose-callers-tests-to-dot nodes edges root keep)))
 
-      (list (car rendered) (plist-get root :name) (cdr rendered)))))
+        (expose-log "Callers" "Tests reaching %s: %d (from %d nodes)."
+                    (plist-get root :name) (cdr rendered) (hash-table-count nodes))
+
+        (when (zerop (cdr rendered))
+          (user-error
+           (concat "No test reaches %s: no call path, no reference, "
+                   "and no test file mentions it%s")
+           (plist-get root :name)
+           (if use-lsp
+               ""
+             " (LSP unavailable, so call paths were not searched)")))
+
+        (list (car rendered) (plist-get root :name) (cdr rendered))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Entry

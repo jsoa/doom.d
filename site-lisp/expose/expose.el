@@ -21,6 +21,7 @@
 (require 'expose-hover)
 (require 'expose-commands)
 (require 'expose-review-source)
+(require 'expose-orm)
 
 ;;; ---------------------------------------------------------------------------
 ;;; Keybindings
@@ -127,6 +128,10 @@
                 :desc "Tests for this"    "t" #'expose-run-test-graph
                 :desc "Entity relations"  "e" #'expose-run-er-diagram
                 :desc "Reverse call graph" "r" #'expose-run-reverse-call-graph)
+
+               ;; Not a diagram and not a provider action: the project's
+               ;; own Python answers this one exactly.
+               :desc "Queryset SQL"      "q" #'expose-orm-inspect
 
                (:prefix-map ("R" . "Full Review")
                 :desc "Open/start review" "r" #'expose-review-open-or-start

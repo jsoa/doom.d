@@ -4,12 +4,18 @@
 (require 'subr-x)
 
 (defun jsoa/prepend-path (dir)
-  "Prepend DIR to PATH and exec-path if it exists."
+  "Prepend DIR to PATH and `exec-path' if it exists.
+
+Both are guarded against re-adding DIR: this runs again on every
+`doom/reload', and only `exec-path' used to be checked, so PATH grew
+another copy of the same directory each time."
   (when (file-directory-p dir)
     (unless (member dir exec-path)
       (add-to-list 'exec-path dir))
-    (setenv "PATH"
-            (concat dir path-separator (getenv "PATH")))))
+
+    (let ((path (or (getenv "PATH") "")))
+      (unless (member dir (split-string path path-separator t))
+        (setenv "PATH" (concat dir path-separator path))))))
 
 (defun jsoa/setup-node-path-nvm-async ()
   "Resolve NVM's active `npx' directory asynchronously and prepend it.

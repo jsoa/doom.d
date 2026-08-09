@@ -244,6 +244,7 @@ These actions use the active region when one is selected, falling back to the po
 | `SPC c h G C` | `expose-run-call-flow-diagram`      | What the code at point calls             |
 | `SPC c h G d` | `expose-run-data-flow-diagram`      | How values move through the code         |
 | `SPC c h G R` | `expose-run-request-flow-diagram`   | Django request pipeline for a view       |
+| `SPC c h G s` | `expose-run-side-effects-diagram`   | What this changes outside itself         |
 | `SPC c h G m` | `expose-run-import-graph`           | What this file imports, transitively     |
 | `SPC c h G t` | `expose-run-test-graph`             | Which tests reach the code at point      |
 | `SPC c h G e` | `expose-run-er-diagram`             | Models and their relationships           |
@@ -331,6 +332,7 @@ Four graphs, rendered with Graphviz and shown as an SVG image in a full-frame bu
 | Call flow          | What this code calls, and what those call          | Provider   |
 | Data flow          | Where values come from, and where they end up      | Provider   |
 | Request flow       | A Django request through its pipeline layers       | Provider   |
+| Side effects       | What this changes outside itself, and what survives a rollback | Provider |
 | Import graph       | What this file imports, and its cycles             | Parsed     |
 | Tests              | Which tests reach this code, and how               | LSP / xref |
 | Entity relations   | Which models exist and how they relate             | Provider   |
@@ -358,6 +360,8 @@ The first three are provider-generated and advisory, like the rest of Expose. A 
 Request flow groups the same territory as call flow into the layers a request passes through -- view, permissions, validation, domain, data, response -- drawn as labelled boxes. Order and layering are the point: a missing layer reads as an absence, so a view with no permission gate, or one reaching straight into the ORM, is visible as a gap rather than something you have to notice isn't there. Gates that can reject the request are drawn as conditions and their failure paths are asked for explicitly, since a gate shown with only its success edge is worse than not drawing it.
 
 Routing is included only when the URL configuration is in the code being looked at, which from a views module it usually isn't. Rather than inventing a plausible route, it starts at the view -- use the reverse call graph to find what actually routes there, which reports the `urls.py` reference as a module-level usage.
+
+Side effects answers a question none of the others quite do: if I call this, what happens to the world? Rows written, mail sent, jobs queued, services called — including effects several frames down, where the body is visible. Effects inside `transaction.atomic` are grouped in their own box, because the useful question is usually which of them survive a rollback: mail and queued tasks do, so a failure after that point leaves a notification about a row that no longer exists. Those keep their own shape inside the box rather than being redrawn as writes, so the hazard stays visible.
 
 Data flow is the other inference-heavy one: it labels each edge with the operation, and states "mutated in place" explicitly, because rebinding a name and mutating the object behind it look nearly identical in source and behave nothing alike. That distinction is the reason to draw it, and also the thing most worth checking against the source.
 

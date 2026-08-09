@@ -243,6 +243,7 @@ These actions use the active region when one is selected, falling back to the po
 | `SPC c h G c` | `expose-run-control-flow-diagram`   | Control flow of the code at point        |
 | `SPC c h G C` | `expose-run-call-flow-diagram`      | What the code at point calls             |
 | `SPC c h G d` | `expose-run-data-flow-diagram`      | How values move through the code         |
+| `SPC c h G R` | `expose-run-request-flow-diagram`   | Django request pipeline for a view       |
 | `SPC c h G e` | `expose-run-er-diagram`             | Models and their relationships           |
 | `SPC c h G r` | `expose-run-reverse-call-graph`     | What calls the function at point         |
 
@@ -327,6 +328,7 @@ Four graphs, rendered with Graphviz and shown as an SVG image in a full-frame bu
 | Control flow       | Which paths run through this code                  | Provider   |
 | Call flow          | What this code calls, and what those call          | Provider   |
 | Data flow          | Where values come from, and where they end up      | Provider   |
+| Request flow       | A Django request through its pipeline layers       | Provider   |
 | Entity relations   | Which models exist and how they relate             | Provider   |
 | Reverse call graph | What calls this, transitively                      | LSP / xref |
 
@@ -348,6 +350,10 @@ Nodes are colored by what they represent — entry, condition, error, exit, exte
 ### How far to trust them
 
 The first three are provider-generated and advisory, like the rest of Expose. A picture reads as more authoritative than a paragraph, so `s` is worth using: it shows the exact DOT the image was built from. The ER diagram is the most reliable of the three — relationships are declared in the source rather than inferred. Call flow is the least, since a model asked what something "calls" will readily describe a dependency it was never shown; callees it cannot see are drawn dashed.
+
+Request flow groups the same territory as call flow into the layers a request passes through -- view, permissions, validation, domain, data, response -- drawn as labelled boxes. Order and layering are the point: a missing layer reads as an absence, so a view with no permission gate, or one reaching straight into the ORM, is visible as a gap rather than something you have to notice isn't there. Gates that can reject the request are drawn as conditions and their failure paths are asked for explicitly, since a gate shown with only its success edge is worse than not drawing it.
+
+Routing is included only when the URL configuration is in the code being looked at, which from a views module it usually isn't. Rather than inventing a plausible route, it starts at the view -- use the reverse call graph to find what actually routes there, which reports the `urls.py` reference as a module-level usage.
 
 Data flow is the other inference-heavy one: it labels each edge with the operation, and states "mutated in place" explicitly, because rebinding a name and mutating the object behind it look nearly identical in source and behave nothing alike. That distinction is the reason to draw it, and also the thing most worth checking against the source.
 

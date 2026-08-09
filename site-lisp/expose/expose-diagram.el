@@ -67,6 +67,10 @@ Graphviz's stock Times-on-white."
     ;; The model the command was invoked from.
     (focus-edge  . "#1f6feb")
 
+    ;; Pipeline layer boxes (request flow).
+    (cluster-border . "#d6dbe2")
+    (cluster-label  . "#7b8794")
+
     ;; (fill . border . text) per semantic class. Muted rather than
     ;; saturated: on a flowchart the color is a category label, not
     ;; emphasis, and a dozen loud nodes stop distinguishing anything.
@@ -438,6 +442,29 @@ than a node declaration."
               ;; Last, so it overrides the border color set just above.
               (or emphasis ""))))))
 
+(defun expose-diagram-style-clusters (dot)
+  "Return DOT with consistent styling applied to each `subgraph cluster'.
+
+Clusters are how the request-flow diagram draws pipeline layers. Graphviz
+has no default-setting statement for them the way it does for nodes and
+edges, so the attributes are injected into each one directly -- otherwise
+they render as hard black rectangles that overpower the nodes inside.
+
+Injected immediately after the opening brace, so anything the provider
+set on a specific cluster still wins."
+
+  (let ((border (cdr (assq 'cluster-border expose-diagram-palette)))
+        (label (cdr (assq 'cluster-label expose-diagram-palette))))
+
+    (replace-regexp-in-string
+     "\\(subgraph[ \t]+cluster[A-Za-z0-9_]*[ \t\n]*{\\)"
+     (lambda (match)
+       (concat match
+               (format
+                " graph [style=rounded,color=\"%s\",fontcolor=\"%s\",fontsize=10,penwidth=1.0,margin=10];"
+                border label)))
+     dot t t)))
+
 (defun expose-diagram-color-statements (dot &optional focus)
   "Return DOT with per-node and error-edge colors applied.
 
@@ -513,7 +540,8 @@ the graph header can't be located."
            ;; defaults are injected would mean re-matching those very
            ;; `node ['/`edge [' lines.
            (colored
-            (expose-diagram-color-statements stripped focus))
+            (expose-diagram-style-clusters
+             (expose-diagram-color-statements stripped focus)))
 
            (defaults
             (mapconcat

@@ -129,9 +129,12 @@
                 :desc "Entity relations"  "e" #'expose-run-er-diagram
                 :desc "Reverse call graph" "r" #'expose-run-reverse-call-graph)
 
-               ;; Not a diagram and not a provider action: the project's
-               ;; own Python answers this one exactly.
-               :desc "Queryset SQL"      "q" #'expose-orm-inspect
+               ;; Their own prefix rather than two more keys here: `q'
+               ;; directly under this prefix already closes the popup, and
+               ;; quietly rebinding it would break a key used constantly.
+               (:prefix-map ("Q" . "Queryset")
+                :desc "SQL"               "s" #'expose-orm-inspect
+                :desc "Query plan"        "p" #'expose-orm-explain)
 
                (:prefix-map ("R" . "Full Review")
                 :desc "Open/start review" "r" #'expose-review-open-or-start

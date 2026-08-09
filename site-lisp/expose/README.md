@@ -93,6 +93,7 @@ Typical local layout:
       expose-migrations.el
 
       expose-orm.el
+      expose-orm-plan.el
       expose-orm.py
 ```
 
@@ -215,6 +216,7 @@ Expose installs bindings under `SPC c h` by default.
 | `SPC c h ?` | `expose-hover-debug-current-buffer` | Debug current buffer hover state             |
 | `SPC c h h` | Thing at Point prefix               | Focused code-context actions                 |
 | `SPC c h G` | Diagrams prefix                     | Rendered flow, ER and call graphs            |
+| `SPC c h Q` | Queryset prefix                     | Django queryset SQL and query plans          |
 | `SPC c h R` | Full Review prefix                  | Persistent branch/session reviews            |
 | `SPC c h M` | Region Review prefix                | Persistent selected-region reviews           |
 | `SPC c h W` | Watch prefix                        | Background review for watched source buffers |
@@ -265,7 +267,8 @@ See [Diagrams](#diagrams-1) for what each one draws and how far to trust it.
 
 | Key           | Command              | Purpose                                     |
 |---------------|----------------------|---------------------------------------------|
-| `SPC c h q`   | `expose-orm-inspect` | SQL a Django queryset compiles to           |
+| `SPC c h Q s` | `expose-orm-inspect` | SQL a Django queryset compiles to           |
+| `SPC c h Q p` | `expose-orm-explain` | Draw its query plan (`C-u` to ANALYZE)      |
 
 See [Queryset SQL](#queryset-sql).
 
@@ -435,7 +438,7 @@ Requires the `dot` binary; the commands say so plainly if it is missing.
 
 ## Queryset SQL
 
-`SPC c h q` (`expose-orm-inspect`) shows the SQL a Django queryset compiles to, and what about it will be slow. It uses the region when there is one, otherwise the whole statement at point — which is what you want for a chain wrapped over several lines, where the line under the cursor is a fragment that wouldn't parse.
+`SPC c h Q s` (`expose-orm-inspect`) shows the SQL a Django queryset compiles to, and what about it will be slow. It uses the region when there is one, otherwise the whole statement at point — which is what you want for a chain wrapped over several lines, where the line under the cursor is a fragment that wouldn't parse.
 
 **No AI, and no reconstruction.** The expression is handed to the project's own Python and compiled by Django itself, so the SQL is the SQL. Guessing at it from source would defeat the purpose: the questions worth asking a queryset — how many joins is this, does that filter hit an index — are worthless answered approximately.
 
@@ -458,6 +461,22 @@ Indexed filters are deliberately *not* listed. Findings only mean something when
 The expression is evaluated in the namespace of the module it was written in, so every import and alias that file already has resolves — `Listing.objects.filter(state=ACTIVE)` works when `Listing` and `ACTIVE` are that module's own names. Every model is also bound by its own name, so an expression naming only a model works even from a file that fails to import.
 
 What that cannot reach is **locals**: `self`, `request`, a loop variable. Those exist only where the code runs, and a queryset built around `request.user` reports the name it couldn't resolve rather than silently substituting a value — a plan for a query you didn't write being worse than no plan. This is the real limit of the approach, and how often it bites depends on how much of your ORM code sits inside view methods.
+
+### Query plans
+
+`SPC c h Q p` (`expose-orm-explain`) draws the plan the database will actually use, as a graph. `C-u SPC c h Q p` runs `EXPLAIN ANALYZE` instead, which **executes the query** and replaces the planner's estimates with what really happened.
+
+This is the one command here that connects — a plan is the planner's opinion and only the planner holds it. It runs against `expose-orm-dsn` if set, otherwise the `expose-orm-database` alias, so you can take plans from a replica rather than whatever `DATABASES["default"]` points at. Either way the transaction is rolled back and `expose-orm-statement-timeout` (10s) bounds it, because explaining a slow query otherwise means waiting out the slow query. Writes are still refused before anything is evaluated.
+
+Drawn bottom to top, the direction rows actually move: scans at the bottom feed joins feed the result at the top. That also suits the shape — plans are deep and narrow, and a deep tree laid out left to right is a ribbon.
+
+**Red is rationed.** A sequential scan is not a problem by itself: over a small table it is the *correct* plan, and colouring every one of them red says only that the query touched a table. Red means the node did something worth looking at:
+
+- **Rows read and then discarded** — the clearest possible statement that an index is missing, and unlike a cost number it needs no interpretation.
+- **A row estimate that was badly wrong** — nearly every bad plan is a good plan chosen from a bad estimate, so this is the first thing to check when the shape looks reasonable but the query is slow. Reported only above `expose-orm-plan-misestimate-floor` rows: a ten-fold error on fifty rows is still fifty rows and cannot change which plan wins, and small tables throw large ratios constantly.
+- **A sort that spilled to disk**, and scans that read more than `expose-orm-plan-large-scan-rows`.
+
+Everything else is coloured structurally — index scans green, joins blue, sorts and hashes amber for the rows they buffer.
 
 ### Setup
 

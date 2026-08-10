@@ -260,7 +260,7 @@ These actions use the active region when one is selected, falling back to the po
 | `SPC c h G s` | `expose-run-side-effects-diagram`   | What this changes outside itself         |
 | `SPC c h G m` | `expose-run-import-graph`           | What this file imports, transitively     |
 | `SPC c h G t` | `expose-run-test-graph`             | Which tests reach the code at point      |
-| `SPC c h G h` | `expose-run-migration-history`      | How a Django model was shaped over time  |
+| `SPC c h G h` | `expose-run-migration-history`      | How a Django model was shaped over time (`C-u` for all) |
 | `SPC c h G e` | `expose-run-er-diagram`             | Models and their relationships           |
 | `SPC c h G r` | `expose-run-reverse-call-graph`     | What calls the function at point         |
 | `SPC c h G p` | `expose-orm-explain`                | Query plan for the queryset at point     |
@@ -453,6 +453,8 @@ Expansion is withheld when a migration changed nearly everything, above `expose-
 Parsed, not generated: migration files are mechanically regular, a project accumulates dozens of them, and "when did this field become nullable" is a question where a plausible answer is worth nothing. Reading any one migration shows a single edit; what this adds is the accumulation, since a field added in `0004`, retyped in `0011` and dropped in `0032` lives in three files named after whatever else they happened to contain.
 
 Long histories are trimmed to the most recent `expose-migrations-max-migrations` (24) — and the diagram says so, reading `last 24 of 301 migrations (277 earlier not shown)`, because a truncated history that looks complete is worse than no history. The newest are kept: the model's current shape is the part you can least afford to lose. The cap counts migrations rather than operations for the same reason it is stated at all — one migration routinely alters a dozen fields, so a budget expressed in operations silently drew five tables out of three hundred migrations.
+
+**With a prefix argument (`C-u SPC c h G h`) it draws the complete history**, however long. The limit is a default, not a ceiling; set `expose-migrations-max-migrations` to nil to make that the normal behaviour. It exists because every table lists every field the model had at that point, so width grows with migrations and height with the model — three hundred of them is a picture to scroll rather than read, and the diagram buffer's zoom (`+`/`-`) is what makes it usable at all.
 
 Django numbers migrations per app, so ordering is exact within an app but not comparable across them — `orders/0003` and `events/0032` carry no relative order in their names. Operations from different apps are therefore grouped rather than interleaved into a timeline that would be invented.
 

@@ -20,6 +20,7 @@
 (declare-function expose-callers-test-xrefs "expose-callers" (tests))
 (declare-function expose-imports-build-dot "expose-imports" (&optional show-externals))
 (declare-function expose-migrations-build-dot "expose-migrations" ())
+(defvar expose-migrations-max-migrations)
 
 (defcustom expose-provider-default
   'codex
@@ -1473,8 +1474,14 @@ code is untested by every possible route."
       (message "Expose test graph: dot failed"))))
 
 ;;;###autoload
-(defun expose-run-migration-history ()
+(defun expose-run-migration-history (&optional complete)
   "Graph how the Django model at point was shaped by its migrations.
+
+With a prefix argument, COMPLETE draws every migration rather than the
+most recent `expose-migrations-max-migrations'. Worth knowing what you
+are asking for: each table lists every field the model had at that
+point, so a few hundred migrations is a picture that has to be scrolled
+rather than read.
 
 Every operation that touched it, oldest first: created, fields added,
 retyped, renamed, dropped. Colored by what each does to existing data --
@@ -1493,7 +1500,7 @@ ordering: a field added in 0004, retyped in 0011 and dropped in 0032
 lives in three files named after whatever else they happened to
 contain."
 
-  (interactive)
+  (interactive "P")
 
   (unless (executable-find expose-diagram-dot-executable)
     (user-error
@@ -1505,6 +1512,9 @@ contain."
   (message "Expose migration history: reading migrations...")
 
   (let* ((origin (list (current-buffer) (point) #'expose-run-migration-history))
+         ;; nil is "no limit" -- see `expose-migrations-max-migrations'.
+         (expose-migrations-max-migrations
+          (if complete nil expose-migrations-max-migrations))
          (built (expose-migrations-build-dot))
          (dot (car built))
          (model (cdr built))

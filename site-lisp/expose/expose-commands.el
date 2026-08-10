@@ -15,6 +15,9 @@
 ;; used.
 (declare-function expose-callers-build-dot "expose-callers" ())
 (declare-function expose-callers-build-tests-dot "expose-callers" ())
+(declare-function expose-callers-collect-tests "expose-callers" ())
+(declare-function expose-callers-tests-in "expose-callers" (nodes keep))
+(declare-function expose-callers-relative-file "expose-callers" (file))
 (declare-function expose-imports-build-dot "expose-imports" (&optional show-externals))
 (declare-function expose-migrations-build-dot "expose-migrations" ())
 
@@ -1361,6 +1364,66 @@ the buffer, not a judgement call."
           (unwind-protect
               (expose-run-diagram 'er-diagram "ER" #'expose-run-er-diagram focus)
             (deactivate-mark)))))))
+
+;;;###autoload
+(defun expose-find-tests ()
+  "List the tests that reach the code at point, and jump to one.
+
+The same question as `expose-run-test-graph' -- is this tested, and by
+what -- answered as a list you pick from rather than a picture. Which
+one you want depends on the question: the graph shows *how* a test gets
+here, through which intermediate functions, while this just takes you to
+the test.
+
+Computed, not generated: LSP call hierarchy falling back to `xref', plus
+non-call references and, for Django, tests that reach a view only by
+`reverse()'-ing its URL name. No provider is asked, because \"which
+tests cover this\" is worthless answered plausibly.
+
+Only tests are listed. The graph keeps the intermediate functions a test
+reaches through, which are worth seeing in a picture and are noise in a
+list of somewhere to go."
+
+  (interactive)
+
+  (require 'expose-callers)
+
+  (message "Expose: finding tests...")
+
+  (let* ((found (expose-callers-collect-tests))
+         (root (plist-get found :root))
+         (name (plist-get root :name))
+         (tests (expose-callers-tests-in (plist-get found :nodes)
+                                         (plist-get found :keep)))
+
+         ;; The location goes in the candidate rather than an annotation:
+         ;; two tests in different files routinely share a name, and a
+         ;; completion table cannot return the one you looked at if the
+         ;; strings are equal.
+         (candidates
+          (mapcar
+           (lambda (node)
+             (cons (format "%s  %s:%d"
+                           (plist-get node :name)
+                           (expose-callers-relative-file (plist-get node :file))
+                           (or (plist-get node :line) 1))
+                   node))
+           tests)))
+
+    (let* ((choice (completing-read
+                    (format "Tests for %s (%d): " name (length tests))
+                    candidates nil t))
+           (node (cdr (assoc choice candidates))))
+
+      (when node
+        ;; So `M-,' comes back here, the same as any other jump.
+        (when (fboundp 'xref-push-marker-stack)
+          (xref-push-marker-stack))
+
+        (find-file (plist-get node :file))
+        (goto-char (point-min))
+        (forward-line (1- (or (plist-get node :line) 1)))
+        (recenter)))))
 
 ;;;###autoload
 (defun expose-run-test-graph ()

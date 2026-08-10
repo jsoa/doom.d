@@ -214,6 +214,7 @@ Expose installs bindings under `SPC c h` by default.
 | `SPC c h l` | `expose-log-open`                   | Open Expose log                              |
 | `SPC c h L` | `expose-log-clear`                  | Clear Expose log                             |
 | `SPC c h s` | `expose-orm-inspect`                | SQL a Django queryset compiles to            |
+| `SPC c h t` | `expose-find-tests`                 | List the tests covering the code at point    |
 | `SPC c h ?` | `expose-hover-debug-current-buffer` | Debug current buffer hover state             |
 | `SPC c h h` | Thing at Point prefix               | Focused code-context actions                 |
 | `SPC c h G` | Diagrams prefix                     | Rendered flow, ER and call graphs            |
@@ -271,6 +272,18 @@ See [Diagrams](#diagrams-1) for what each one draws and how far to trust it.
 | `SPC c h s`   | `expose-orm-inspect` | SQL a Django queryset compiles to           |
 
 See [Queryset SQL](#queryset-sql). The query plan is a drawing, so it sits with the diagrams as `SPC c h G p`.
+
+## Finding Tests
+
+`SPC c h t` (`expose-find-tests`) answers "is this tested, and by what" as a list you pick from, and jumps to the one you choose. `M-,` comes back, the same as any other jump.
+
+The same question as the [test graph](#diagrams-1), and the same computed answer — LSP call hierarchy falling back to `xref`, plus non-call references and, for Django, tests that reach a view only by `reverse()`-ing its URL name. Which one you want depends on what you are asking: the graph shows *how* a test gets here and through which intermediate functions, while this just takes you to the test.
+
+Only tests are listed. The graph keeps the intermediate functions a test arrives through, which are the interesting part of a picture and noise in a list of somewhere to go. Each entry carries its file and line, because two tests in different files routinely share a name.
+
+When nothing reaches it, that is stated plainly rather than shown as an empty list — and it means no test reaches this within `expose-callers-max-depth` levels, not that the code is untested by every possible route.
+
+No AI: "which tests cover this" is worthless answered plausibly.
 
 ### Full Review
 

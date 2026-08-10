@@ -83,6 +83,7 @@
                ;; at all -- it draws a picture, so it lives with the
                ;; diagrams, same as everything else that does.
                :desc "Queryset SQL"      "s" #'expose-orm-inspect
+               :desc "Find tests"        "t" #'expose-find-tests
 
                :desc "Popup scroll down" "j" #'expose-popup-scroll-down
                :desc "Popup scroll up"   "k" #'expose-popup-scroll-up

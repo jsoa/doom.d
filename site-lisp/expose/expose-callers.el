@@ -877,12 +877,35 @@ KEEP is the set of node keys from `expose-callers-test-reachable'."
 
     (cons (mapconcat #'identity (nreverse lines) "\n") test-count)))
 
-(defun expose-callers-build-tests-dot ()
-  "Return (DOT ROOT-NAME TEST-COUNT) for the tests reaching the symbol at point.
+(defun expose-callers-tests-in (nodes keep)
+  "Return the nodes of NODES in KEEP that are themselves tests, sorted.
 
-Signals a `user-error' naming the symbol when nothing tests it -- that
-being the answer worth stating plainly rather than drawing an empty
-graph."
+The graph keeps the intermediate functions a test reaches through, which
+are worth drawing but are not themselves an answer to \"what tests
+this\" -- so listing them is a different question from graphing them,
+answered from the same walk."
+
+  (let ((tests nil))
+    (maphash
+     (lambda (key node)
+       (when (and (gethash key keep)
+                  (expose-callers-test-p (plist-get node :file)))
+         (push node tests)))
+     nodes)
+
+    (sort tests
+          (lambda (a b)
+            (let ((file-a (or (plist-get a :file) ""))
+                  (file-b (or (plist-get b :file) "")))
+              (if (string= file-a file-b)
+                  (< (or (plist-get a :line) 0) (or (plist-get b :line) 0))
+                (string< file-a file-b)))))))
+
+(defun expose-callers-collect-tests ()
+  "Return a plist of the tests reaching the symbol at point.
+
+Keys are `:root', `:nodes', `:edges' and `:keep'. Shared by the test
+graph and the test list, which differ only in what they do with it."
 
   (let* ((use-lsp (expose-callers-lsp-available-p))
 
@@ -935,13 +958,14 @@ graph."
             (cl-pushnew (list key root-key (plist-get extra :kind))
                         edges :test #'equal))))
 
-      (let* ((keep (expose-callers-test-reachable nodes edges root-key))
-             (rendered (expose-callers-tests-to-dot nodes edges root keep)))
+      (let ((keep (expose-callers-test-reachable nodes edges root-key)))
 
         (expose-log "Callers" "Tests reaching %s: %d (from %d nodes)."
-                    (plist-get root :name) (cdr rendered) (hash-table-count nodes))
+                    (plist-get root :name)
+                    (length (expose-callers-tests-in nodes keep))
+                    (hash-table-count nodes))
 
-        (when (zerop (cdr rendered))
+        (when (null (expose-callers-tests-in nodes keep))
           (user-error
            (concat "No test reaches %s: no call path, no reference, "
                    "and no test file mentions it%s")
@@ -950,7 +974,24 @@ graph."
                ""
              " (LSP unavailable, so call paths were not searched)")))
 
-        (list (car rendered) (plist-get root :name) (cdr rendered))))))
+        (list :root root :nodes nodes :edges edges :keep keep)))))
+
+(defun expose-callers-build-tests-dot ()
+  "Return (DOT ROOT-NAME TEST-COUNT) for the tests reaching the symbol at point.
+
+Signals a `user-error' naming the symbol when nothing tests it -- that
+being the answer worth stating plainly rather than drawing an empty
+graph."
+
+  (let* ((found (expose-callers-collect-tests))
+         (root (plist-get found :root))
+         (rendered (expose-callers-tests-to-dot
+                    (plist-get found :nodes)
+                    (plist-get found :edges)
+                    root
+                    (plist-get found :keep))))
+
+    (list (car rendered) (plist-get root :name) (cdr rendered))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Entry

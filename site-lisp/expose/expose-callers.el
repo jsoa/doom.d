@@ -901,6 +901,54 @@ answered from the same walk."
                   (< (or (plist-get a :line) 0) (or (plist-get b :line) 0))
                 (string< file-a file-b)))))))
 
+(defun expose-callers-line-text (file line)
+  "Return the text of LINE in FILE, or nil.
+
+Read from a buffer already visiting FILE when there is one, so an
+unsaved test shows what it currently says rather than what is on disk."
+
+  (when (and file line (file-readable-p file))
+    (let ((buffer (find-buffer-visiting file)))
+      (if buffer
+          (with-current-buffer buffer
+            (save-excursion
+              (save-restriction
+                (widen)
+                (goto-char (point-min))
+                (forward-line (1- line))
+                (buffer-substring-no-properties
+                 (line-beginning-position) (line-end-position)))))
+        (with-temp-buffer
+          (insert-file-contents file)
+          (goto-char (point-min))
+          (forward-line (1- line))
+          (buffer-substring-no-properties
+           (line-beginning-position) (line-end-position)))))))
+
+(defun expose-callers-test-xrefs (tests)
+  "Return TESTS as `xref' items.
+
+Presented through xref rather than as a bespoke buffer so the result
+looks and behaves like every other list of search results in Emacs:
+grouped under its file, the matching line shown in context, `n' and `p'
+to move, RET to visit -- and `M-,' back, since visiting from an xref
+buffer pushes the marker itself."
+
+  (mapcar
+   (lambda (node)
+     (let* ((file (plist-get node :file))
+            (line (or (plist-get node :line) 1))
+            (text (expose-callers-line-text file line)))
+       (xref-make
+        ;; The source line is the summary, as in a grep result. Falling
+        ;; back to the symbol's own name keeps a row that still says
+        ;; something when the file has moved on since the walk.
+        (if (and text (not (string-blank-p text)))
+            (string-trim-right text)
+          (or (plist-get node :name) "?"))
+        (xref-make-file-location file line 0))))
+   tests))
+
 (defun expose-callers-collect-tests ()
   "Return a plist of the tests reaching the symbol at point.
 

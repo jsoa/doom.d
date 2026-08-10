@@ -275,11 +275,21 @@ See [Queryset SQL](#queryset-sql). The query plan is a drawing, so it sits with 
 
 ## Finding Tests
 
-`SPC c h t` (`expose-find-tests`) answers "is this tested, and by what" as a list you pick from, and jumps to the one you choose. `M-,` comes back, the same as any other jump.
+`SPC c h t` (`expose-find-tests`) answers "is this tested, and by what" as a results buffer:
+
+```text
+src/tests/test_events.py
+142:def test_user_event_list(client):
+167:def test_user_event_create(client):
+src/tests/test_permissions.py
+88:def test_permissions_denied(client):
+```
+
+An `xref` buffer, so it reads and behaves like every other set of search results in Emacs — grouped under its file, the matching line shown in context, `n` and `p` to move, RET to visit, `M-,` to come back. `g` re-runs the search rather than redisplaying the old answer, and re-runs it *at the point the question was asked from*, not wherever the cursor sits in the results.
 
 The same question as the [test graph](#diagrams-1), and the same computed answer — LSP call hierarchy falling back to `xref`, plus non-call references and, for Django, tests that reach a view only by `reverse()`-ing its URL name. Which one you want depends on what you are asking: the graph shows *how* a test gets here and through which intermediate functions, while this just takes you to the test.
 
-Only tests are listed. The graph keeps the intermediate functions a test arrives through, which are the interesting part of a picture and noise in a list of somewhere to go. Each entry carries its file and line, because two tests in different files routinely share a name.
+Only tests are listed. The graph keeps the intermediate functions a test arrives through, which are the interesting part of a picture and noise in a list of somewhere to go. Each row shows the test's own source line, read from the buffer when one is visiting the file, so an unsaved test reads as it currently stands rather than as it is on disk.
 
 When nothing reaches it, that is stated plainly rather than shown as an empty list — and it means no test reaches this within `expose-callers-max-depth` levels, not that the code is untested by every possible route.
 

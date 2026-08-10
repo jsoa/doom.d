@@ -17,7 +17,7 @@
 (declare-function expose-callers-build-tests-dot "expose-callers" ())
 (declare-function expose-callers-collect-tests "expose-callers" ())
 (declare-function expose-callers-tests-in "expose-callers" (nodes keep))
-(declare-function expose-callers-relative-file "expose-callers" (file))
+(declare-function expose-callers-test-xrefs "expose-callers" (tests))
 (declare-function expose-imports-build-dot "expose-imports" (&optional show-externals))
 (declare-function expose-migrations-build-dot "expose-migrations" ())
 
@@ -1382,7 +1382,11 @@ tests cover this\" is worthless answered plausibly.
 
 Only tests are listed. The graph keeps the intermediate functions a test
 reaches through, which are worth seeing in a picture and are noise in a
-list of somewhere to go."
+list of somewhere to go.
+
+Shown as an `xref' results buffer, so it reads like any other search
+result in Emacs: grouped under its file, the matching line in context,
+`n' and `p' to move, RET to visit and `M-,' to come back."
 
   (interactive)
 
@@ -1396,34 +1400,30 @@ list of somewhere to go."
          (tests (expose-callers-tests-in (plist-get found :nodes)
                                          (plist-get found :keep)))
 
-         ;; The location goes in the candidate rather than an annotation:
-         ;; two tests in different files routinely share a name, and a
-         ;; completion table cannot return the one you looked at if the
-         ;; strings are equal.
-         (candidates
-          (mapcar
-           (lambda (node)
-             (cons (format "%s  %s:%d"
-                           (plist-get node :name)
-                           (expose-callers-relative-file (plist-get node :file))
-                           (or (plist-get node :line) 1))
-                   node))
-           tests)))
+         ;; Captured so the fetcher can search again from where the
+         ;; question was asked. `g' in an xref buffer re-runs the
+         ;; fetcher, and by then point is in the results buffer -- a
+         ;; fetcher reading `thing-at-point' there would look up whatever
+         ;; word the cursor happened to land on, while one closing over
+         ;; the finished list would quietly redisplay a stale answer.
+         (origin (current-buffer))
+         (position (point)))
 
-    (let* ((choice (completing-read
-                    (format "Tests for %s (%d): " name (length tests))
-                    candidates nil t))
-           (node (cdr (assoc choice candidates))))
+    (message "Expose: %s %s"
+             (if (= 1 (length tests)) "1 test covers"
+               (format "%d tests cover" (length tests)))
+             name)
 
-      (when node
-        ;; So `M-,' comes back here, the same as any other jump.
-        (when (fboundp 'xref-push-marker-stack)
-          (xref-push-marker-stack))
-
-        (find-file (plist-get node :file))
-        (goto-char (point-min))
-        (forward-line (1- (or (plist-get node :line) 1)))
-        (recenter)))))
+    (xref-show-xrefs
+     (lambda ()
+       (with-current-buffer origin
+         (save-excursion
+           (goto-char position)
+           (let ((again (expose-callers-collect-tests)))
+             (expose-callers-test-xrefs
+              (expose-callers-tests-in (plist-get again :nodes)
+                                       (plist-get again :keep)))))))
+     nil)))
 
 ;;;###autoload
 (defun expose-run-test-graph ()

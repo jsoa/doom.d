@@ -14,13 +14,7 @@ that such a buffer can reach."
   (and buffer-file-name
        (locate-dominating-file buffer-file-name "angular.json")))
 
-(defun jsoa/html-mode-dispatch ()
-  "Use web-mode for Angular projects, html-mode otherwise."
-  (if (jsoa/angular-project-p)
-      (web-mode)
-    (html-mode)))
-
-(add-to-list 'auto-mode-alist '("\\.html\\'" . jsoa/html-mode-dispatch))
+(add-to-list 'auto-mode-alist '("\\.html\\'" . web-mode))
 
 (defun jsoa/angular-ensure-ts-loaded ()
   "Silently open corresponding TS file for Angular components."
@@ -35,14 +29,15 @@ that such a buffer can reach."
     (web-mode-set-engine "angular")))
 
 (defun jsoa/html-lsp-setup ()
+  ;; html-ls conflicts with Angular's own language server (ngserver), which
+  ;; already provides completions for Angular templates -- scoped to Angular
+  ;; buffers only, so it stays available for plain HTML/Django templates.
+  (when (jsoa/angular-project-p)
+    (setq-local lsp-disabled-clients '(html-ls)))
   (when (projectile-project-p)
     (lsp-deferred)))
 
 (after! web-mode
-  ;; Ensure Angular engine is used
-  (setq web-mode-engines-alist
-        '(("angular" . "\\.html\\'")))
-
   ;; Indentation
   (setq web-mode-markup-indent-offset 2)
   (setq web-mode-code-indent-offset 2)

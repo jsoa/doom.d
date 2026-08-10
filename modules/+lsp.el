@@ -11,9 +11,6 @@
         lsp-idle-delay 0.5
         lsp-log-io nil
 
-        ;; Disable conflicting HTML server
-        lsp-disabled-clients '(html-ls)
-
         ;; Python
         lsp-pyright-python-executable-cmd "python"
         lsp-pyright-disable-tagged-hints t

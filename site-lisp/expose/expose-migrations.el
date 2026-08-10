@@ -25,14 +25,20 @@
   :group 'expose)
 
 (defcustom expose-migrations-max-migrations 24
-  "Most migrations to draw, counted from the most recent.
+  "Most migrations to draw, counted from the most recent, or nil for all.
 
 Counted in migrations rather than operations because a migration is what
 the diagram draws: one of them routinely alters a dozen fields at once,
 so a budget expressed in operations silently reduced a three-hundred
 migration history to five tables. When this trims anything, the diagram
-says so."
-  :type 'integer
+says so.
+
+A limit exists because every table lists every field the model had at
+that point, so the width grows with migrations and the height with the
+model -- a few hundred of them is a picture nothing can usefully show at
+once. `expose-run-migration-history' with a prefix argument sets this to
+nil for that call, which is the way to see a complete history."
+  :type '(choice (const :tag "No limit" nil) integer)
   :group 'expose-migrations)
 
 (defcustom expose-migrations-max-definition-width 44
@@ -670,7 +676,8 @@ step that dropped it, then disappears -- the same way it did in reality."
          ;; dozen fields at once, so a budget of sixty operations drew
          ;; five tables out of three hundred migrations, with nothing on
          ;; the diagram to say the rest existed.
-         (snapshots (if (> total expose-migrations-max-migrations)
+         (snapshots (if (and expose-migrations-max-migrations
+                             (> total expose-migrations-max-migrations))
                         (last all expose-migrations-max-migrations)
                       all))
          (trimmed (- total (length snapshots)))

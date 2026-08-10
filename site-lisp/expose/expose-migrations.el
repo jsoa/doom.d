@@ -24,8 +24,14 @@
   "Django migration history for Expose."
   :group 'expose)
 
-(defcustom expose-migrations-max-operations 60
-  "Maximum operations to include in a model's history."
+(defcustom expose-migrations-max-migrations 24
+  "Most migrations to draw, counted from the most recent.
+
+Counted in migrations rather than operations because a migration is what
+the diagram draws: one of them routinely alters a dozen fields at once,
+so a budget expressed in operations silently reduced a three-hundred
+migration history to five tables. When this trims anything, the diagram
+says so."
   :type 'integer
   :group 'expose-migrations)
 
@@ -308,17 +314,30 @@ models would split a history in half at its first edit."
                         (point-max))))
                (body (buffer-substring-no-properties start end)))
 
-          ;; Anchored to the start of a line, which is how migrations are
-          ;; written -- one keyword argument per line. Matching `name='
-          ;; anywhere instead picks up the tail of `model_name=', because
-          ;; `_' is not a word constituent here, so every field was
-          ;; labelled with its model's name.
-          (let* ((model-name
-                  (when (string-match "^[ \t]*model_name[ \t]*=[ \t]*[\"']\\([^\"']+\\)[\"']" body)
+          ;; A keyword has to start where one can: at the beginning of
+          ;; the body, or after a comma or newline. Matching `name='
+          ;; anywhere instead picks up the tail of `model_name=' -- `_'
+          ;; is not a word constituent, so `\\bname' matches inside it and
+          ;; every field was labelled with its model's name.
+          ;;
+          ;; Anchoring to the start of a *line* fixed that but assumed
+          ;; one keyword per line, which is only how `makemigrations'
+          ;; writes them. A formatter that fits the call on one line --
+          ;; black and ruff both do, under their default width -- left
+          ;; every field nameless, so no field was ever recorded as added
+          ;; or altered.
+          (let* ((keyword-start "\\(?:\\`\\|[,\n]\\)[ \t\n]*")
+
+                 (model-name
+                  (when (string-match
+                         (concat keyword-start "model_name[ \t]*=[ \t]*[\"']\\([^\"']+\\)[\"']")
+                         body)
                     (match-string 1 body)))
 
                  (name
-                  (when (string-match "^[ \t]*name[ \t]*=[ \t]*[\"']\\([^\"']+\\)[\"']" body)
+                  (when (string-match
+                         (concat keyword-start "name[ \t]*=[ \t]*[\"']\\([^\"']+\\)[\"']")
+                         body)
                     (match-string 1 body)))
 
                  (field-type
@@ -362,11 +381,15 @@ models would split a history in half at its first edit."
                       (nreverse fields))))
 
                  (new-name
-                  (when (string-match "^[ \t]*new_name[ \t]*=[ \t]*[\"']\\([^\"']+\\)[\"']" body)
+                  (when (string-match
+                         (concat keyword-start "new_name[ \t]*=[ \t]*[\"']\\([^\"']+\\)[\"']")
+                         body)
                     (match-string 1 body)))
 
                  (old-name
-                  (when (string-match "^[ \t]*old_name[ \t]*=[ \t]*[\"']\\([^\"']+\\)[\"']" body)
+                  (when (string-match
+                         (concat keyword-start "old_name[ \t]*=[ \t]*[\"']\\([^\"']+\\)[\"']")
+                         body)
                     (match-string 1 body)))
 
                  ;; CreateModel/DeleteModel/RenameModel name the model in
@@ -402,10 +425,10 @@ models would split a history in half at its first edit."
                             :migration (file-name-base file)))
               history)))
 
-    (let ((ordered (nreverse history)))
-      (if (> (length ordered) expose-migrations-max-operations)
-          (last ordered expose-migrations-max-operations)
-        ordered))))
+    ;; Returned whole. Trimming belongs where the drawing happens, in
+    ;; `expose-migrations-to-dot', which can count what a reader sees and
+    ;; say what it left out.
+    (nreverse history)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; DOT
@@ -638,17 +661,34 @@ migration, with the fields that migration touched picked out: added
 green, altered amber, dropped red. A dropped field appears once, in the
 step that dropped it, then disappears -- the same way it did in reality."
 
-  (let* ((snapshots (expose-migrations-replay history))
+  (let* ((all (expose-migrations-replay history))
+         (total (length all))
+
+         ;; Trimmed here rather than while reading, and counted in
+         ;; migrations rather than operations. A cap on operations is a
+         ;; cap on something invisible: one migration routinely alters a
+         ;; dozen fields at once, so a budget of sixty operations drew
+         ;; five tables out of three hundred migrations, with nothing on
+         ;; the diagram to say the rest existed.
+         (snapshots (if (> total expose-migrations-max-migrations)
+                        (last all expose-migrations-max-migrations)
+                      all))
+         (trimmed (- total (length snapshots)))
+
          (lines nil)
          (index 0)
          (previous nil))
 
     (push "digraph migrations {" lines)
     (push "  rankdir=LR;" lines)
-    (push (format "  label=\"%s: %d migration%s\";"
+    (push (format "  label=\"%s: %s\";"
                   (expose-migrations-escape model)
-                  (length snapshots)
-                  (if (= (length snapshots) 1) "" "s"))
+                  (if (> trimmed 0)
+                      ;; Said on the diagram, because a truncated history
+                      ;; that looks complete is worse than no history.
+                      (format "last %d of %d migrations (%d earlier not shown)"
+                              (length snapshots) total trimmed)
+                    (format "%d migration%s" total (if (= total 1) "" "s"))))
           lines)
 
     (dolist (snapshot snapshots)

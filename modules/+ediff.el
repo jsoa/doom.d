@@ -103,12 +103,32 @@ the same line\"."
        "=== CODE IMMEDIATELY ABOVE ===\n" (car context) "\n"
        "=== CODE IMMEDIATELY BELOW ===\n" (cdr context) "\n"
 
+       ;; A model handed code will improve it unless told not to, and an
+       ;; improvement smuggled into a conflict resolution is the worst
+       ;; place to receive one: it arrives disguised as somebody else's
+       ;; change, in a commit nobody reviews line by line, in a region
+       ;; that is already hard to read.
+       "This is a merge resolution, not a code review. Reconcile the two"
+       " sides and change nothing else.\n\n"
+
+       "- Every line you return must come from OURS or THEIRS, except the"
+       " minimum needed to join them -- a comma, a bracket, one level of"
+       " indentation.\n"
+       "- Do not refactor, rename, reorder, reformat or simplify anything.\n"
+       "- Do not add or remove comments, logging, type hints, error"
+       " handling or tests.\n"
+       "- Do not fix bugs you notice and do not improve code you think is"
+       " wrong. Both sides may well be imperfect; preserving that is the"
+       " job here, and correcting it is a separate change somebody else"
+       " should get to review on its own.\n"
+       "- If one side already contains everything the other does, return"
+       " that side unchanged.\n"
+       "- Where the two intentions genuinely cannot both be kept, return"
+       " OURS unchanged rather than inventing a compromise.\n\n"
+
        "Return only the resolved code for this region: no conflict markers,"
        " no code fences, no explanation, nothing before or after it."
-       " Keep the indentation of the surrounding code."
-       " Where both sides changed the same thing for different reasons,"
-       " prefer the combination that keeps both intentions;"
-       " where that is impossible, keep OURS and leave the rest alone.")))
+       " Keep the indentation of the surrounding code.")))
 
   (defun jsoa/ediff-ai-clean (text)
     "Strip a Markdown code fence from TEXT without touching its indentation.

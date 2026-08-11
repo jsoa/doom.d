@@ -121,6 +121,7 @@
 (load! "modules/+flycheck")
 (load! "modules/+compilation")
 (load! "modules/+ediff")
+(load! "modules/+merge")
 (load! "modules/+lsp")
 (load! "modules/+magit")
 (load! "modules/+vterm")

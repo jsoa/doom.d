@@ -221,6 +221,22 @@ almost anywhere."
               (if (= 1 (length expose-callers-lsp-failures)) "" "s"))
     ""))
 
+(defun expose-callers-signal-nothing (format-string &rest args)
+  "Signal that nothing was found -- or that the search never finished.
+
+Those are opposite answers, and the second must never be reported as the
+first. \"Nothing calls this\" and \"no test reaches this\" are what
+somebody acts on before deleting code, so a search cut short by a server
+that stopped answering has to say so rather than return a confident
+negative."
+
+  (if expose-callers-lsp-failures
+      (user-error "%s -- but %d lookup%s failed, so the search did not finish (see the Expose log)"
+                  (apply #'format format-string args)
+                  (length expose-callers-lsp-failures)
+                  (if (= 1 (length expose-callers-lsp-failures)) "" "s"))
+    (user-error "%s" (apply #'format format-string args))))
+
 (defun expose-callers-lsp-request (method params)
   "Send METHOD with PARAMS, returning nil if the server does not answer.
 
@@ -1011,7 +1027,7 @@ graph and the test list, which differ only in what they do with it."
                     :line (line-number-at-pos))))))
 
     (unless root
-      (user-error "Nothing callable at point"))
+      (expose-callers-signal-nothing "Nothing callable at point"))
 
     (let* ((root-references
             (when expose-callers-include-references
@@ -1058,7 +1074,11 @@ graph and the test list, which differ only in what they do with it."
                     (hash-table-count nodes))
 
         (when (null (expose-callers-tests-in nodes keep))
-          (user-error
+          ;; "Nothing tests this" and "the search did not finish" are
+          ;; opposite answers, and the second must never be reported as
+          ;; the first: a confident negative about test coverage is
+          ;; exactly what someone acts on before deleting code.
+          (expose-callers-signal-nothing
            (concat "No test reaches %s: no call path, no reference, "
                    "and no test file mentions it%s")
            (plist-get root :name)
@@ -1114,7 +1134,7 @@ neither source can answer."
                     :line (line-number-at-pos))))))
 
     (unless root
-      (user-error "Nothing callable at point"))
+      (expose-callers-signal-nothing "Nothing callable at point"))
 
     (expose-log
      "Callers"
@@ -1146,7 +1166,7 @@ neither source can answer."
       (expose-log "Callers" "Found %d raw reference(s)." (length root-references))
 
       (when (= count 1)
-        (user-error
+        (expose-callers-signal-nothing
          "No callers or references found for %s%s"
          (plist-get root :name)
          (cond

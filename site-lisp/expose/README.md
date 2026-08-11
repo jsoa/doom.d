@@ -293,6 +293,8 @@ Only tests are listed. The graph keeps the intermediate functions a test arrives
 
 When nothing reaches it, that is stated plainly rather than shown as an empty list — and it means no test reaches this within `expose-callers-max-depth` levels, not that the code is untested by every possible route.
 
+A search the language server stopped answering says so instead of reporting a negative. "Nothing tests this" and "the search did not finish" are opposite answers, and the second passed off as the first is what somebody acts on before deleting code.
+
 No AI: "which tests cover this" is worthless answered plausibly.
 
 ### Full Review

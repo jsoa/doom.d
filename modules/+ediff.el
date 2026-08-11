@@ -11,6 +11,23 @@
 ;; b = accept b
 ;; B = accept both
 (after! ediff
+  ;; One frame. The default is `ediff-setup-windows-default', which puts
+  ;; the control panel in a *separate frame* on a graphical display --
+  ;; which a tiling window manager then treats as a new window to place,
+  ;; and which is easy to lose behind the frame you were working in.
+  (setq ediff-window-setup-function #'ediff-setup-windows-plain)
+
+  ;; Skip what Git already merged. In a three-way merge, `n' and `p'
+  ;; otherwise walk every differing region, including the ones resolved
+  ;; automatically -- but the reason to be in ediff at all is the regions
+  ;; where both sides changed the same thing.
+  (setq ediff-show-clashes-only t)
+
+  ;; Side by side rather than stacked, for the two-way diffs reached from
+  ;; magit. Merge sessions already default to a horizontal split
+  ;; (`ediff-merge-split-window-function'); this makes the rest match.
+  (setq ediff-split-window-function #'split-window-horizontally)
+
   (defun jsoa/ediff-copy-both-to-C ()
     "Copy both A and B changes into C."
     (interactive)

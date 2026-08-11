@@ -42,10 +42,41 @@ commands have nothing to act on."
     (require 'smerge-mode)
     (if (jsoa/merge-conflict-p)
         (unless (bound-and-true-p smerge-mode)
+          ;; Silently. The mode line already says SMerge, the markers are
+          ;; unmissable, and a message here competes with flycheck and
+          ;; everything else shouting in the echo area at exactly the
+          ;; moment a conflicted file is opened.
           (smerge-mode 1)
-          (message "Merge conflicts here -- SPC g m to resolve"))
+          (jsoa/merge-suspend-diff-hl))
       (when (bound-and-true-p smerge-mode)
-        (smerge-mode -1)))))
+        (smerge-mode -1)
+        (jsoa/merge-restore-diff-hl)))))
+
+(defvar-local jsoa/merge-diff-hl-suspended nil
+  "Whether `diff-hl-mode' was turned off here because of a conflict.")
+
+(defun jsoa/merge-suspend-diff-hl ()
+  "Turn off `diff-hl-mode' while this buffer has conflict markers.
+
+Git cannot produce a normal unified diff for an unmerged path, and
+`diff-hl-changes-from-buffer' walks that output with
+`diff-beginning-of-hunk' expecting one -- so opening a conflicted file
+raises \"Can't find the beginning of the hunk\", repeatedly, from the
+gutter rather than from anything you did.
+
+The gutter has nothing useful to say about an unmerged file in any case:
+there is no single index version to compare against."
+
+  (when (bound-and-true-p diff-hl-mode)
+    (setq jsoa/merge-diff-hl-suspended t)
+    (diff-hl-mode -1)))
+
+(defun jsoa/merge-restore-diff-hl ()
+  "Turn `diff-hl-mode' back on if this buffer's conflict is resolved."
+
+  (when (and jsoa/merge-diff-hl-suspended (fboundp 'diff-hl-mode))
+    (setq jsoa/merge-diff-hl-suspended nil)
+    (diff-hl-mode 1)))
 
 ;; On open, and again after a revert: Magit reverts buffers after a merge,
 ;; a rebase and a stash pop, which is exactly when a file that was clean a

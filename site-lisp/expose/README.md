@@ -464,6 +464,8 @@ Its main reason to exist is **cycle detection**, drawn in red: an import cycle i
 
 **The reverse call graph has no AI in it.** Finding callers needs whole-project knowledge that no provider has, and a fabricated answer to "is it safe to change this?" is worse than none, so its edges come from LSP call hierarchy — or `xref` when the server can't answer, which the graph says on its title since references are not the same as calls.
 
+A language server that does not answer costs that branch, not the command. The walk makes one call-hierarchy request per node, and `lsp-request` signals on timeout, so a single slow answer used to abort everything and discard every caller already found — most likely on exactly the widely-called function whose callers you most wanted. Failed lookups are logged, and the graph's title says `(incomplete: 3 lookups failed)`, because a graph missing branches looks identical to a graph with nothing there, and this one is read to decide whether a change is safe.
+
 It also includes non-call *references*, drawn dashed and labelled: a function that is only registered somewhere (`validators=[is_valid_member]`) has no callers at all and would otherwise read as dead code. Test files are excluded (`expose-callers-exclude-regexps`) because tests call everything and bury the production paths. The walk is bounded by `expose-callers-max-depth` and `expose-callers-max-nodes`; anything trimmed is marked on the graph rather than dropped silently.
 
 Requires the `dot` binary; the commands say so plainly if it is missing.

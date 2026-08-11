@@ -246,7 +246,7 @@ closing quote --
 
   label=\"do_thing\" (unresolved)\"\"
 
--- which Graphviz rejects outright (\"syntax error near '('\"), taking the
+-- which Graphviz rejects outright (\"syntax error near \='('\"), taking the
 whole diagram with it. The text belongs inside the quotes, so that's
 where this puts it.
 

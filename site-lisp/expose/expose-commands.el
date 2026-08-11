@@ -804,7 +804,6 @@ TARGET-POSITION is cleared after insertion."
                   (= (point)
                      (marker-position marker)))
 
-                 start
                  end-marker
                  indent)
 
@@ -818,9 +817,6 @@ TARGET-POSITION is cleared after insertion."
               (setq indent
                     (expose-docstring-line-indent-string-at
                      (point)))
-
-              (setq start
-                    (point))
 
               (expose-docstring-insert-text-with-indent
                docstring

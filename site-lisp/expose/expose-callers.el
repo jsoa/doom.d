@@ -192,13 +192,54 @@ receive verbatim on the follow-up `incomingCalls' request. Keeping it
 here means the walk never has to ask for the same thing twice."
 
   (when-let ((items
-              (lsp-request "textDocument/prepareCallHierarchy"
-                           (lsp--text-document-position-params))))
+              (expose-callers-lsp-request
+               "textDocument/prepareCallHierarchy"
+               (lsp--text-document-position-params))))
     (mapcar
      (lambda (item)
        (append (expose-callers-lsp-item-to-node item)
                (list :item item)))
      (append items nil))))
+
+(defvar expose-callers-lsp-failures nil
+  "Requests that failed during the current walk, newest first.
+
+Bound around a walk by `expose-callers-collect'. A graph built while
+some of these failed is a partial graph, and has to say so.")
+
+(defun expose-callers-incomplete-note ()
+  "Return a label fragment naming unanswered requests, or an empty string.
+
+A graph missing branches because the server timed out looks exactly like
+a graph with nothing there -- and this one is read to decide whether
+something is safe to change, so the difference matters more here than
+almost anywhere."
+
+  (if expose-callers-lsp-failures
+      (format "  (incomplete: %d lookup%s failed)"
+              (length expose-callers-lsp-failures)
+              (if (= 1 (length expose-callers-lsp-failures)) "" "s"))
+    ""))
+
+(defun expose-callers-lsp-request (method params)
+  "Send METHOD with PARAMS, returning nil if the server does not answer.
+
+`lsp-request' signals on a timeout, and the call hierarchy walk makes one
+request per node -- so a single slow answer aborted the whole command and
+threw away every caller already found. On a large project that is the
+common case, not the rare one: the widely-called function whose callers
+you most want is exactly the one the server takes longest to enumerate.
+
+Failing one branch loses that branch. The count is kept so the graph can
+admit what it did not see."
+
+  (condition-case err
+      (lsp-request method params)
+    (error
+     (push (format "%s: %s" method (error-message-string err))
+           expose-callers-lsp-failures)
+     (expose-log "Callers" "%s failed: %s" method (error-message-string err))
+     nil)))
 
 (defun expose-callers-lsp-incoming (node)
   "Return the callers of NODE via LSP, as node plists.
@@ -207,8 +248,8 @@ NODE must carry the raw `:item' it came from; call hierarchy is
 stateful in that the server hands back opaque items to ask about."
 
   (when-let* ((item (plist-get node :item))
-              (calls (lsp-request "callHierarchy/incomingCalls"
-                                  (list :item item))))
+              (calls (expose-callers-lsp-request "callHierarchy/incomingCalls"
+                                                 (list :item item))))
     (delq
      nil
      (mapcar
@@ -270,7 +311,7 @@ Declarations are excluded at the protocol level, so the definition
 doesn't come back as a reference to itself."
 
   (when-let ((locations
-              (lsp-request "textDocument/references"
+              (expose-callers-lsp-request "textDocument/references"
                            (lsp--make-reference-params nil t))))
 
     (delq nil
@@ -447,9 +488,10 @@ resolved call list."
 
     (push "digraph reverse_calls {" lines)
     (push (format "  rankdir=%s;" expose-callers-graph-direction) lines)
-    (push (format "  label=\"callers of %s%s\";"
+    (push (format "  label=\"callers of %s%s%s\";"
                   (expose-callers-escape (plist-get root :name))
-                  (if exact "" "  (from references -- may include non-calls)"))
+                  (if exact "" "  (from references -- may include non-calls)")
+                  (expose-callers-incomplete-note))
           lines)
 
     (maphash
@@ -807,10 +849,11 @@ KEEP is the set of node keys from `expose-callers-test-reachable'."
 
     (push "digraph tests {" lines)
     (push (format "  rankdir=%s;" expose-callers-graph-direction) lines)
-    (push (format "  label=\"%d test%s reaching %s\";"
+    (push (format "  label=\"%d test%s reaching %s%s\";"
                   test-count
                   (if (= test-count 1) "" "s")
-                  (expose-callers-escape (plist-get root :name)))
+                  (expose-callers-escape (plist-get root :name))
+                  (expose-callers-incomplete-note))
           lines)
 
     (maphash
@@ -955,7 +998,8 @@ buffer pushes the marker itself."
 Keys are `:root', `:nodes', `:edges' and `:keep'. Shared by the test
 graph and the test list, which differ only in what they do with it."
 
-  (let* ((use-lsp (expose-callers-lsp-available-p))
+  (let* ((expose-callers-lsp-failures nil)
+         (use-lsp (expose-callers-lsp-available-p))
 
          (root
           (if use-lsp
@@ -1022,7 +1066,11 @@ graph and the test list, which differ only in what they do with it."
                ""
              " (LSP unavailable, so call paths were not searched)")))
 
-        (list :root root :nodes nodes :edges edges :keep keep)))))
+        ;; Carried out with the result: the binding above ends when this
+        ;; returns, and the graph is rendered by the caller -- so without
+        ;; this the label could never say the walk was incomplete.
+        (list :root root :nodes nodes :edges edges :keep keep
+              :failures expose-callers-lsp-failures)))))
 
 (defun expose-callers-build-tests-dot ()
   "Return (DOT ROOT-NAME TEST-COUNT) for the tests reaching the symbol at point.
@@ -1033,6 +1081,7 @@ graph."
 
   (let* ((found (expose-callers-collect-tests))
          (root (plist-get found :root))
+         (expose-callers-lsp-failures (plist-get found :failures))
          (rendered (expose-callers-tests-to-dot
                     (plist-get found :nodes)
                     (plist-get found :edges)
@@ -1051,7 +1100,8 @@ graph."
 Signals a `user-error' when there is nothing to start from, or when
 neither source can answer."
 
-  (let* ((use-lsp (expose-callers-lsp-available-p))
+  (let* ((expose-callers-lsp-failures nil)
+         (use-lsp (expose-callers-lsp-available-p))
 
          (root
           (if use-lsp

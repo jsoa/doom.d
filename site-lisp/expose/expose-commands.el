@@ -1410,10 +1410,16 @@ result in Emacs: grouped under its file, the matching line in context,
          (origin (current-buffer))
          (position (point)))
 
-    (message "Expose: %s %s"
+    (message "Expose: %s %s%s"
              (if (= 1 (length tests)) "1 test covers"
                (format "%d tests cover" (length tests)))
-             name)
+             name
+             ;; Said out loud: a search the server did not finish answering
+             ;; looks exactly like a search that found everything.
+             (if-let ((failures (plist-get found :failures)))
+                 (format " (incomplete: %d lookup%s failed -- see the log)"
+                         (length failures) (if (= 1 (length failures)) "" "s"))
+               ""))
 
     (xref-show-xrefs
      (lambda ()

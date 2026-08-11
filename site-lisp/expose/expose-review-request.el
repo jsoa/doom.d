@@ -392,8 +392,8 @@ Example patch suggestion:
   "Return matching close delimiter for OPEN-CHAR."
 
   (pcase open-char
-    (?{ ?})
-    (?[ ?])
+    (?\{ ?\})
+    (?\[ ?\])
     (_ nil)))
 
 (defun expose-review-request-extract-balanced-json (text start)

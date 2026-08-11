@@ -656,8 +656,14 @@ line range is only a fallback."
    'face
    face))
 
-(defun expose-review-source-make-range-overlay (item start end face)
-  "Create source range overlay for ITEM from START to END using FACE."
+(defun expose-review-source-make-range-overlay (item start end _face)
+  "Create source range overlay for ITEM from START to END.
+
+The severity face is accepted for symmetry with
+`expose-review-source-make-line-indicator' and deliberately unused: the
+fringe indicator already carries severity by colour, and tinting the
+range as well made a whole block of source read as an error rather than
+as a line with a comment on it."
 
   (let ((overlay
          (make-overlay start end nil t nil)))

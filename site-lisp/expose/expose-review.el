@@ -210,7 +210,7 @@
          (base-branch
           (or
            (plist-get context :base-branch)
-           (expose-review-context-base-branch project-root)))
+           (expose-review-context-detect-base-branch project-root)))
 
          (branch-files
           (when base-branch

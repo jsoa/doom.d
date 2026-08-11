@@ -159,6 +159,17 @@ the branch whose merge-base with HEAD is newest."
             (cdr right))))))))
 
 
+(defcustom expose-review-base-branch-candidates
+  '("origin/develop"
+    "develop"
+    "origin/main"
+    "main"
+    "origin/master"
+    "master")
+  "Base branch candidates used when `expose-review-base-branch' is nil."
+  :type '(repeat string)
+  :group 'expose-review)
+
 (defun expose-review-context-detect-base-branch (project-root)
   "Return the base branch ref for PROJECT-ROOT.
 
@@ -175,17 +186,6 @@ develop/main/master locally and remotely."
        candidate))
     expose-review-base-branch-candidates)
    "HEAD~1"))
-
-(defcustom expose-review-base-branch-candidates
-  '("origin/develop"
-    "develop"
-    "origin/main"
-    "main"
-    "origin/master"
-    "master")
-  "Base branch candidates used when `expose-review-base-branch' is nil."
-  :type '(repeat string)
-  :group 'expose-review)
 
 (defcustom expose-review-context-max-diff-length 120000
   "Maximum number of characters included from each review diff."

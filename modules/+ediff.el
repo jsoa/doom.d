@@ -73,21 +73,59 @@ the same line\"."
     (ignore-errors
       (ediff-get-region-contents n type ediff-control-buffer)))
 
+  (defcustom jsoa/ediff-ai-max-file-lines 900
+    "Longest file sent whole with a conflict, in lines.
+
+Above this only `jsoa/ediff-ai-context-lines' either side go, which is
+worse but bounded: a request carrying a five thousand line file is slow,
+expensive, and mostly padding."
+    :type 'integer
+    :group 'ediff)
+
+  (defconst jsoa/ediff-ai-marker "<<< THE REGION TO RESOLVE GOES HERE >>>"
+    "Placeholder standing in for the conflict inside the surrounding file.")
+
   (defun jsoa/ediff-context (n)
-    "Return (BEFORE . AFTER): the code surrounding region N in buffer C."
+    "Return the code around region N in buffer C, and how it was chosen.
+
+Returns (KIND . TEXT). KIND is `file' when the whole of buffer C fitted,
+`window' when only the lines either side did.
+
+The whole file is worth sending. What a narrow window leaves out is not
+more versions of the conflict -- there are already three of those -- but
+the rest of this file: the function one side extracted the block into,
+the imports that say whether a name is available, the other call sites
+that say what the surrounding code expects. Resolving into a structure
+you cannot see is guesswork.
+
+The region itself is replaced by a marker rather than left in place. A
+model given six hundred lines and three versions of something has to be
+told which part of them to rewrite, and position alone no longer says
+it."
 
     (let ((control ediff-control-buffer))
       (with-current-buffer ediff-buffer-C
         (save-excursion
-          (let* ((beg (ediff-get-diff-posn 'C 'beg n control))
-                 (end (ediff-get-diff-posn 'C 'end n control))
-                 (before (progn (goto-char beg)
-                                (forward-line (- jsoa/ediff-ai-context-lines))
-                                (buffer-substring-no-properties (point) beg)))
-                 (after (progn (goto-char end)
-                               (forward-line jsoa/ediff-ai-context-lines)
-                               (buffer-substring-no-properties end (point)))))
-            (cons before after))))))
+          (let ((beg (ediff-get-diff-posn 'C 'beg n control))
+                (end (ediff-get-diff-posn 'C 'end n control)))
+
+            (if (<= (count-lines (point-min) (point-max))
+                    jsoa/ediff-ai-max-file-lines)
+
+                (cons 'file
+                      (concat (buffer-substring-no-properties (point-min) beg)
+                              jsoa/ediff-ai-marker "\n"
+                              (buffer-substring-no-properties end (point-max))))
+
+              (cons 'window
+                    (concat
+                     (progn (goto-char beg)
+                            (forward-line (- jsoa/ediff-ai-context-lines))
+                            (buffer-substring-no-properties (point) beg))
+                     jsoa/ediff-ai-marker "\n"
+                     (progn (goto-char end)
+                            (forward-line jsoa/ediff-ai-context-lines)
+                            (buffer-substring-no-properties end (point)))))))))))
 
   (defun jsoa/ediff-ai-prompt (n)
     "Return the prompt describing conflict region N."
@@ -102,12 +140,28 @@ the same line\"."
        "Resolve one Git merge conflict.\n\n"
        (format "File: %s\n\n" file)
 
+       ;; The file first, so the versions of the region are read against
+       ;; something rather than in isolation.
+       (if (eq (car context) 'file)
+           "=== THE FILE, WITH THE CONFLICT REMOVED ===\n"
+         (format "=== %d LINES EITHER SIDE OF THE CONFLICT ===\n"
+                 jsoa/ediff-ai-context-lines))
+       (cdr context) "\n"
+
+       ;; Other conflicts in the same file are still marked up, and would
+       ;; otherwise read as an invitation to deal with them too.
+       (if (and (eq (car context) 'file)
+                (string-match-p "^<<<<<<< " (cdr context)))
+           (concat "Any other conflict markers above are regions you are"
+                   " not being asked about. Leave them alone.\n\n")
+         "")
+
+       (format "These are the three versions of %s:\n\n"
+               jsoa/ediff-ai-marker)
+
        "=== OURS ===\n" (or (jsoa/ediff-region n 'A) "") "\n"
        "=== THEIRS ===\n" (or (jsoa/ediff-region n 'B) "") "\n"
        (if ancestor (concat "=== COMMON ANCESTOR ===\n" ancestor "\n") "")
-
-       "=== CODE IMMEDIATELY ABOVE ===\n" (car context) "\n"
-       "=== CODE IMMEDIATELY BELOW ===\n" (cdr context) "\n"
 
        ;; A model handed code will improve it unless told not to, and an
        ;; improvement smuggled into a conflict resolution is the worst
@@ -146,9 +200,11 @@ the same line\"."
        "- Where the two intentions genuinely cannot both be kept, return"
        " OURS unchanged rather than inventing a compromise.\n\n"
 
-       "Return only the resolved code for this region: no conflict markers,"
-       " no code fences, no explanation, nothing before or after it."
-       " Keep the indentation of the surrounding code.")))
+       "Return only the code that replaces "
+       jsoa/ediff-ai-marker
+       ": no conflict markers, no code fences, no explanation, and none of"
+       " the surrounding file -- just the region itself, indented to match"
+       " where it sits.")))
 
   (defun jsoa/ediff-ai-clean (text)
     "Strip a Markdown code fence from TEXT without touching its indentation.

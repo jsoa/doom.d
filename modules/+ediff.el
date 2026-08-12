@@ -206,6 +206,46 @@ it."
        " the surrounding file -- just the region itself, indented to match"
        " where it sits.")))
 
+  (defun jsoa/ediff-region-indent (n)
+    "Return the leading whitespace of region N's first line in buffer C."
+
+    (let ((control ediff-control-buffer))
+      (with-current-buffer ediff-buffer-C
+        (save-excursion
+          (goto-char (ediff-get-diff-posn 'C 'beg n control))
+          (buffer-substring-no-properties
+           (point)
+           (progn (skip-chars-forward " \t") (point)))))))
+
+  (defun jsoa/ediff-ai-reindent (text indent)
+    "Put INDENT back on TEXT's first line if something trimmed it off.
+
+Providers normalize their output with `string-trim' -- correct for the
+popup answers Expose was built around, and destructive here, because it
+strips exactly one thing: the leading whitespace of the first line. The
+result lands flush against the left margin while every line under it
+keeps its indentation, which in Python is not a formatting complaint but
+a syntax error.
+
+Only that one line is repaired, and only when it looks trimmed rather
+than deliberately dedented: a first line at column zero, indented lines
+beneath it, and a region that was itself indented."
+
+    (let ((lines (split-string text "\n")))
+      (if (and (not (string-empty-p indent))
+               (car lines)
+               (not (string-empty-p (car lines)))
+               ;; Starts at column zero...
+               (not (string-match-p "\\`[ \t]" (car lines)))
+               ;; ...while something below it does not.
+               (cl-some (lambda (line) (string-match-p "\\`[ \t]+[^ \t]" line))
+                        (cdr lines)))
+
+          (mapconcat #'identity
+                     (cons (concat indent (car lines)) (cdr lines))
+                     "\n")
+        text)))
+
   (defun jsoa/ediff-ai-clean (text)
     "Strip a Markdown code fence from TEXT without touching its indentation.
 
@@ -244,9 +284,12 @@ the file until you quit and say yes."
     (unless (and (boundp 'ediff-current-difference) (>= ediff-current-difference 0))
       (user-error "Point is not on a difference"))
 
-    (let ((control ediff-control-buffer)
-          (n ediff-current-difference)
-          (prompt (jsoa/ediff-ai-prompt ediff-current-difference)))
+    (let* ((control ediff-control-buffer)
+           (n ediff-current-difference)
+           ;; Captured now, while the region is still what the prompt
+           ;; describes.
+           (indent (jsoa/ediff-region-indent ediff-current-difference))
+           (prompt (jsoa/ediff-ai-prompt ediff-current-difference)))
 
       (message "Expose: asking %s to resolve region %d..."
                expose-provider-default (1+ n))
@@ -263,8 +306,10 @@ the file until you quit and say yes."
              (message "Expose: the ediff session ended before the answer arrived")
 
            (with-current-buffer control
-             (let ((text (jsoa/ediff-ai-clean
-                          (expose-transport-response-text response))))
+             (let ((text (jsoa/ediff-ai-reindent
+                          (jsoa/ediff-ai-clean
+                           (expose-transport-response-text response))
+                          indent)))
 
                ;; Blank, not merely empty: the cleaner strips blank
                ;; *lines*, so a reply of spaces survives as spaces and

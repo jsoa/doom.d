@@ -47,12 +47,18 @@
   ;; The review step that has to be bolted onto most AI editing is already
   ;; the workflow here.
 
-  (defcustom jsoa/ediff-ai-context-lines 12
+  (defcustom jsoa/ediff-ai-context-lines 40
     "Lines of surrounding code sent with a conflict region.
 
 Without them a model sees two fragments and no indentation, scope or
 neighbouring code to match, and returns something that has to be
-re-indented by hand."
+re-indented by hand.
+
+Wide rather than tight, because the interesting conflicts need it. When
+one side has extracted a block into its own function, putting the other
+side's addition inside that function means being able to read it -- and a
+function defined thirty lines away is outside any window small enough to
+call economical."
     :type 'integer
     :group 'ediff)
 
@@ -108,15 +114,29 @@ the same line\"."
        ;; place to receive one: it arrives disguised as somebody else's
        ;; change, in a commit nobody reviews line by line, in a region
        ;; that is already hard to read.
-       "This is a merge resolution, not a code review. Reconcile the two"
-       " sides and change nothing else.\n\n"
+       "This is a merge resolution, not a code review. The result must do"
+       " exactly what OURS and THEIRS each set out to do -- no less, and"
+       " nothing besides.\n\n"
 
-       "- Every line you return must come from OURS or THEIRS, except the"
-       " minimum needed to join them -- a comma, a bracket, one level of"
-       " indentation.\n"
-       "- Do not refactor, rename, reorder, reformat or simplify anything.\n"
+       "- Keep both intentions. Where the two sides touched the same code"
+       " for different reasons, the answer usually contains both changes"
+       " rather than one of them.\n"
+       ;; The rule this replaces said every line had to come from one side
+       ;; or the other, which forbids the resolution that is often the only
+       ;; correct one: if OURS extracted a block into a method and THEIRS
+       ;; added to that block where it used to be, neither side's lines are
+       ;; the answer -- their addition has to move inside the extraction.
+       "- Apply one side's structural change to the other side's new code."
+       " If OURS extracted a block into its own function and THEIRS added"
+       " more code to that block where it used to live, the added code"
+       " belongs inside the extracted function too -- carry the extraction"
+       " across rather than leaving their addition behind at the old site."
+       " Restructuring that far is the merge doing its job, not a liberty"
+       " you are taking; restructuring further is not.\n"
+       "- Beyond that, change nothing the merge does not force: no"
+       " renaming, reordering, reformatting or simplifying.\n"
        "- Do not add or remove comments, logging, type hints, error"
-       " handling or tests.\n"
+       " handling or tests that neither side had.\n"
        "- Do not fix bugs you notice and do not improve code you think is"
        " wrong. Both sides may well be imperfect; preserving that is the"
        " job here, and correcting it is a separate change somebody else"

@@ -207,15 +207,24 @@ it."
        " where it sits.")))
 
   (defun jsoa/ediff-region-indent (n)
-    "Return the leading whitespace of region N's first line in buffer C."
+    "Return the indentation the resolved region N should begin at.
 
-    (let ((control ediff-control-buffer))
-      (with-current-buffer ediff-buffer-C
-        (save-excursion
-          (goto-char (ediff-get-diff-posn 'C 'beg n control))
-          (buffer-substring-no-properties
-           (point)
-           (progn (skip-chars-forward " \t") (point)))))))
+Read from OURS, then THEIRS, and not from buffer C -- which is the
+obvious place and the wrong one. `ediff-default-variant' is `combined'
+by default, so C's region opens with ediff's own `<<<<<<< variant A'
+marker sitting at column zero: asking C for the indentation returns none,
+and the repair that depends on it silently does nothing.
+
+The first line with anything on it wins, since a side can legitimately
+begin with a blank line."
+
+    (or (cl-loop for type in '(A B)
+                 for text = (jsoa/ediff-region n type)
+                 for line = (cl-find-if (lambda (l) (string-match-p "[^ \t]" l))
+                                        (split-string (or text "") "\n"))
+                 when (and line (string-match "\\`[ \t]+" line))
+                 return (match-string 0 line))
+        ""))
 
   (defun jsoa/ediff-ai-reindent (text indent)
     "Put INDENT back on TEXT's first line if something trimmed it off.

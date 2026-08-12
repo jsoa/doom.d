@@ -37,6 +37,23 @@ that such a buffer can reach."
   (when (projectile-project-p)
     (lsp-deferred)))
 
+;; Guessing indentation from the file is wrong for `web-mode' in a way it
+;; isn't for other modes. `dtrt-indent' registers all four web-mode
+;; offsets and picks ONE width for them from the whitespace it sees --
+;; but a Django template is HTML, CSS, JavaScript and template tags in one
+;; file, each legitimately indented differently, so there is no single
+;; right answer for it to find. What it finds instead is an average: a
+;; template whose markup steps by 2 and whose script block steps by 4
+;; produced 3, and 3 then applied to everything.
+;;
+;; Its own documentation names this failure ("6 would be correct but 3 is
+;; guessed"), and the buffer-local value it sets silently beats the global
+;; one set below. Dropping the entry leaves it nothing to adjust here,
+;; while leaving it free to do its job in single-language files.
+(after! dtrt-indent
+  (setq dtrt-indent-hook-mapping-list
+        (assq-delete-all 'web-mode dtrt-indent-hook-mapping-list)))
+
 (after! web-mode
   ;; Indentation
   (setq web-mode-markup-indent-offset 2)

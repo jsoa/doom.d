@@ -138,6 +138,19 @@ for. The offsets here are set globally; anything that sets them
   (setq web-mode-code-indent-offset 2)
   (setq web-mode-css-indent-offset 2)
 
+  ;; The extra column inside <script> and <style>. `web-mode-part-padding'
+  ;; defaults to 1 and both of these inherit it, so the first level inside
+  ;; a script block sits at 1 + `web-mode-code-indent-offset' -- 3 with an
+  ;; offset of 2, and every level below it odd for the same reason: 3, 5,
+  ;; 7. The offsets themselves read 2 the whole time, which is what makes
+  ;; this look like the offsets being ignored.
+  ;;
+  ;; Set both rather than `web-mode-part-padding': the two are defined
+  ;; with its value as their default, so changing the parent after load
+  ;; does not reach them.
+  (setq web-mode-script-padding 0)
+  (setq web-mode-style-padding 0)
+
   ;; Behavior tweaks
   (setq web-mode-enable-auto-quoting nil)
   (setq web-mode-enable-auto-pairing t)

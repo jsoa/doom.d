@@ -54,6 +54,84 @@ that such a buffer can reach."
   (setq dtrt-indent-hook-mapping-list
         (assq-delete-all 'web-mode dtrt-indent-hook-mapping-list)))
 
+(defun jsoa/web-mode-indent-diagnose ()
+  "Report what is deciding indentation in this buffer, and who set it.
+
+For when web-mode indents by something other than what `+html.el' asks
+for. The offsets here are set globally; anything that sets them
+*buffer-locally* wins silently, and the point of this is to name it."
+
+  (interactive)
+
+  (let ((offsets '(web-mode-markup-indent-offset
+                   web-mode-code-indent-offset
+                   web-mode-css-indent-offset
+                   web-mode-attr-indent-offset
+                   web-mode-block-padding
+                   web-mode-script-padding
+                   web-mode-style-padding))
+        (lines nil))
+
+    (push (format "major-mode: %s   engine: %s"
+                  major-mode
+                  (or (bound-and-true-p web-mode-engine) "-"))
+          lines)
+
+    (dolist (symbol offsets)
+      (when (boundp symbol)
+        (push (format "  %-32s %-6s %s"
+                      symbol
+                      (symbol-value symbol)
+                      (if (local-variable-p symbol)
+                          "BUFFER-LOCAL  <- something set this here"
+                        "global"))
+              lines)))
+
+    (push (format "  %-32s %-6s" 'standard-indent standard-indent) lines)
+    (push (format "  %-32s %-6s" 'tab-width tab-width) lines)
+
+    ;; The usual culprit, and the one that leaves a receipt.
+    (push (format "dtrt-indent: mode %s, changed this buffer: %s"
+                  (if (bound-and-true-p dtrt-indent-mode) "ON" "off")
+                  (if (bound-and-true-p dtrt-indent-original-indent)
+                      "YES -- run M-x dtrt-indent-undo to confirm"
+                    "no"))
+          lines)
+
+    ;; Whether the fix below is actually loaded on this machine.
+    (push (format "web-mode still registered with dtrt-indent: %s"
+                  (if (and (boundp 'dtrt-indent-hook-mapping-list)
+                           (assq 'web-mode dtrt-indent-hook-mapping-list))
+                      "YES -- the +html.el fix is NOT loaded here"
+                    "no (fix is in effect)"))
+          lines)
+
+    (push (format "editorconfig: %s"
+                  (cond ((not (fboundp 'editorconfig-mode)) "not installed")
+                        ((bound-and-true-p editorconfig-mode)
+                         (format "ON, properties: %s"
+                                 (or (bound-and-true-p editorconfig-properties-hash)
+                                     "none recorded")))
+                        (t "off")))
+          lines)
+
+    (push (format ".dir-locals: %s"
+                  (or (and buffer-file-name
+                           (locate-dominating-file buffer-file-name ".dir-locals.el"))
+                      "none"))
+          lines)
+
+    (let ((report (string-join (nreverse lines) "\n")))
+      (with-current-buffer (get-buffer-create "*web-mode indent*")
+        ;; `special-mode' below leaves the buffer read-only, so running
+        ;; this a second time cannot erase it without this.
+        (let ((inhibit-read-only t))
+          (erase-buffer)
+          (insert report)
+          (goto-char (point-min)))
+        (special-mode))
+      (display-buffer "*web-mode indent*"))))
+
 (after! web-mode
   ;; Indentation
   (setq web-mode-markup-indent-offset 2)

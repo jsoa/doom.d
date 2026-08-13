@@ -153,14 +153,22 @@ for. The offsets here are set globally; anything that sets them
   ;;   padding 2                content one level in from the tag, wherever
   ;;                            the tag happens to be
   ;;
-  ;; Two, so a part reads like every other nested thing: indented one step
-  ;; from its opening tag. The default of 1 is the odd one out, and is why
-  ;; script bodies came out at 3, 5, 7 with a two-space offset.
+  ;; Different values because the two tags sit at different depths in
+  ;; these templates and both bodies want to land at column 2:
+  ;;
+  ;;   <style> at column 0, inside no block      -> padding 2 -> body at 2
+  ;;   <script> at column 2, inside {% block %}  -> padding 0 -> body at 2
+  ;;
+  ;; Which is to say this is tuned to how the templates are written rather
+  ;; than derived from anything: a <script> that ever sits at column 0
+  ;; will open its body at column 0. The alternative is padding 2 for both,
+  ;; giving a rule that never surprises but puts new code at 4 where the
+  ;; existing code in these files sits at 2.
   ;;
   ;; Set both rather than `web-mode-part-padding': the two are defined
   ;; with its value as their default, so changing the parent after load
   ;; does not reach them.
-  (setq web-mode-script-padding 2)
+  (setq web-mode-script-padding 0)
   (setq web-mode-style-padding 2)
 
   ;; Behavior tweaks

@@ -89,6 +89,11 @@ for. The offsets here are set globally; anything that sets them
 
     (push (format "  %-32s %-6s" 'standard-indent standard-indent) lines)
     (push (format "  %-32s %-6s" 'tab-width tab-width) lines)
+    ;; A deep indent silently becomes a tab when this is on, which reads
+    ;; as the wrong width rather than as a tab.
+    (push (format "  %-32s %-6s %s" 'indent-tabs-mode indent-tabs-mode
+                  (if indent-tabs-mode "<- indentation will use TABS" ""))
+          lines)
 
     ;; The usual culprit, and the one that leaves a receipt.
     (push (format "dtrt-indent: mode %s, changed this buffer: %s"
@@ -138,18 +143,25 @@ for. The offsets here are set globally; anything that sets them
   (setq web-mode-code-indent-offset 2)
   (setq web-mode-css-indent-offset 2)
 
-  ;; The extra column inside <script> and <style>. `web-mode-part-padding'
-  ;; defaults to 1 and both of these inherit it, so the first level inside
-  ;; a script block sits at 1 + `web-mode-code-indent-offset' -- 3 with an
-  ;; offset of 2, and every level below it odd for the same reason: 3, 5,
-  ;; 7. The offsets themselves read 2 the whole time, which is what makes
-  ;; this look like the offsets being ignored.
+  ;; Where the first line inside <script> and <style> sits. This is a
+  ;; count of columns added to the *tag's own column*, not a multiple of
+  ;; the offsets above, which is what makes it confusing:
+  ;;
+  ;;   padding 1 (the default)  <script> at 2 -> content at 3, then 5, 7
+  ;;   padding 0                <script> at 2 -> content at 2, but a tag
+  ;;                            at column 0 puts content at column 0
+  ;;   padding 2                content one level in from the tag, wherever
+  ;;                            the tag happens to be
+  ;;
+  ;; Two, so a part reads like every other nested thing: indented one step
+  ;; from its opening tag. The default of 1 is the odd one out, and is why
+  ;; script bodies came out at 3, 5, 7 with a two-space offset.
   ;;
   ;; Set both rather than `web-mode-part-padding': the two are defined
   ;; with its value as their default, so changing the parent after load
   ;; does not reach them.
-  (setq web-mode-script-padding 0)
-  (setq web-mode-style-padding 0)
+  (setq web-mode-script-padding 2)
+  (setq web-mode-style-padding 2)
 
   ;; Behavior tweaks
   (setq web-mode-enable-auto-quoting nil)

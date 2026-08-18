@@ -139,6 +139,7 @@
 
                (:prefix-map ("R" . "Full Review")
                 :desc "Open/start review" "r" #'expose-review-open-or-start
+                :desc "View diff (like GitHub PR)" "d" #'expose-review-open-pr-diff
                 :desc "Review archives"   "a" #'expose-review-archive-open-full)
 
                (:prefix-map ("M" . "Region Review")

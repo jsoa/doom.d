@@ -328,6 +328,32 @@
      project-root
      branch)))
 
+(declare-function magit-diff-range "magit-diff")
+
+(defun expose-review-open-pr-diff ()
+  "Open a Magit diff of the current branch against its detected base.
+
+Styled like GitHub's PR \"Files changed\" view -- foldable file
+sections and hunks -- but entirely local, using the same base-branch
+detection as `expose-review-open-or-start' (see
+`expose-review-context-detect-base-branch'). No GitHub access
+required."
+
+  (interactive)
+
+  (unless (fboundp 'magit-diff-range)
+    (user-error "Magit is not available"))
+
+  (let* ((project-root
+          (expose-review-context-project-root))
+
+         (base-branch
+          (expose-review-context-detect-base-branch project-root))
+
+         (default-directory project-root))
+
+    (magit-diff-range (format "%s...HEAD" base-branch))))
+
 (defun expose-review-open-or-start ()
   "Open existing review session or start a new one."
 

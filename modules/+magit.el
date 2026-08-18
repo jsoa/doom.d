@@ -31,7 +31,7 @@ after the prefix just inserted."
       ;; - js/ABC-123_mytestbranch
       ;; - some/thing/else/ABC-123
       (if (string-match "\\(?:^\\|/\\)\\([A-Z]+-[0-9]+\\)\\(?:\\b\\|[_-]\\|/\\|$\\)" branch-name)
-          (insert (format "[%s] " (match-string 1 branch-name)))
+          (insert (format "%s " (match-string 1 branch-name)))
         (insert "[-] "))))
 
   (when (and jsoa/git-commit-auto-generate-message

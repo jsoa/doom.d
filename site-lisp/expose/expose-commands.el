@@ -1406,27 +1406,42 @@ result in Emacs: grouped under its file, the matching line in context,
          (origin (current-buffer))
          (position (point)))
 
-    (message "Expose: %s %s%s"
-             (if (= 1 (length tests)) "1 test covers"
-               (format "%d tests cover" (length tests)))
-             name
-             ;; Said out loud: a search the server did not finish answering
-             ;; looks exactly like a search that found everything.
-             (if-let ((failures (plist-get found :failures)))
-                 (format " (incomplete: %d lookup%s failed -- see the log)"
-                         (length failures) (if (= 1 (length failures)) "" "s"))
-               ""))
+    (expose-find-tests-report name tests (plist-get found :failures))
 
     (xref-show-xrefs
      (lambda ()
        (with-current-buffer origin
          (save-excursion
            (goto-char position)
-           (let ((again (expose-callers-collect-tests)))
-             (expose-callers-test-xrefs
-              (expose-callers-tests-in (plist-get again :nodes)
-                                       (plist-get again :keep)))))))
+           (let* ((again (expose-callers-collect-tests))
+                  (again-tests (expose-callers-tests-in (plist-get again :nodes)
+                                                        (plist-get again :keep))))
+             ;; `g' runs this fetcher and nothing else -- the initial
+             ;; call's `message' above never fires again, so a refresh
+             ;; that hits a failure has to say so itself or it silently
+             ;; presents a partial answer as a complete one.
+             (expose-find-tests-report (plist-get root :name) again-tests
+                                       (plist-get again :failures))
+             (expose-callers-test-xrefs again-tests)))))
      nil)))
+
+(defun expose-find-tests-report (name tests failures)
+  "Report what `expose-find-tests' found for NAME: TESTS, given FAILURES.
+
+Shared between the initial search and the `g' refresh inside the results
+buffer, so a search that only partly finished says so identically either
+way -- a search the server did not finish answering looks exactly like
+one that found everything, and that has to be said out loud every time
+it happens, not just the first."
+
+  (message "Expose: %s %s%s"
+           (if (= 1 (length tests)) "1 test covers"
+             (format "%d tests cover" (length tests)))
+           name
+           (if failures
+               (format " (incomplete: %d lookup%s failed -- see the log)"
+                       (length failures) (if (= 1 (length failures)) "" "s"))
+             "")))
 
 ;;;###autoload
 (defun expose-run-test-graph ()

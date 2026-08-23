@@ -112,6 +112,34 @@ must not be recorded -- only the real result should be."
       (expose-commands-show-action-view view 'a-window)
       (should-not recorded))))
 
+(ert-deftest expose-commands-test-action-buffer-shows-loading-before-async-result ()
+  "The action buffer opens immediately with a loading message, before an
+async action's result arrives -- not just once the response lands.
+
+Exercised through the real pipeline (`expose-popup-run-action', not
+`expose-commands-show-action-view' directly) since that loading call is
+`expose-popup-run-view-action's responsibility, not this wrapper's; this
+test is about the two staying wired together correctly."
+
+  (let (pending-cb)
+    (unwind-protect
+        (progn
+          (expose-popup-register-action
+           ?Q "QuickTest" 'view
+           (lambda (cb) (setq pending-cb cb))
+           :async t)
+          (expose-popup-run-action ?Q)
+
+          (should pending-cb)
+          (with-current-buffer (get-buffer expose-action-buffer-name)
+            (should (string-match-p "Loading" (buffer-string))))
+
+          (funcall pending-cb (expose-popup-view-create "QuickTest" "the real answer"))
+          (with-current-buffer expose-action-buffer-name
+            (should (string-match-p "the real answer" (buffer-string)))
+            (should-not (string-match-p "Loading" (buffer-string)))))
+      (kill-buffer (get-buffer-create expose-action-buffer-name)))))
+
 (ert-deftest expose-commands-test-view-display-function-is-wired ()
   "`expose-commands' is the module that redirects `SPC c h h' results
 away from `expose-popup-show-view' -- confirm it actually did, since a

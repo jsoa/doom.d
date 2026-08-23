@@ -5,6 +5,7 @@
 (require 'expose-review-store)
 (require 'diff-mode nil t)
 (require 'expose-review-request)
+(require 'expose-side-panel)
 
 (declare-function expose-review-complete-current "expose-review")
 (declare-function expose-review-rerun-current "expose-review")
@@ -1174,9 +1175,22 @@ is rejected here rather than being handed to `find-file' or
     (goto-char (point-min))))
 
 (defun expose-review-buffer-open (session)
-  "Open dashboard for SESSION."
+  "Open dashboard for SESSION.
 
-  (let ((buffer
+Placed beside the buffer this was invoked from, the same way
+`expose-action-buffer' places a `SPC c h h' result -- see
+`expose-side-panel-place' -- rather than replacing it outright. Both
+callers of this function (`expose-review-open-or-start' and
+`expose-review-start-new') run synchronously, from wherever point was
+when the user asked for a review, so the selected window at the top of
+this function is always the correct one to place beside; unlike an
+async action's result, there is no gap here for it to go stale in
+before this runs."
+
+  (let ((source-window
+         (selected-window))
+
+        (buffer
          (get-buffer-create
           (expose-review-buffer-name session))))
 
@@ -1186,7 +1200,11 @@ is rejected here rather than being handed to `find-file' or
       (expose-review-buffer-normalize-collapsed-sections)
       (expose-review-buffer-render session))
 
-    (switch-to-buffer buffer)))
+    ;; Selected, not just displayed -- `switch-to-buffer' did both
+    ;; before this change, and unlike the action buffer (a glance
+    ;; beside what you're doing, not meant to pull focus), opening a
+    ;; review dashboard is going there to read and act on it.
+    (select-window (expose-side-panel-place source-window buffer))))
 
 (defun expose-review-buffer-refresh-open (session)
   "Refresh dashboard for SESSION if it is open."

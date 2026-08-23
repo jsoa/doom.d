@@ -64,6 +64,7 @@ Typical local layout:
       expose.el
       expose-popup.el
       expose-action-buffer.el
+      expose-side-panel.el
       expose-history.el
       expose-hover.el
       expose-log.el
@@ -599,7 +600,7 @@ SPC c h R r
   -> or start a new async review
 ```
 
-A full review collects branch and Git context, sends a strict JSON review request, parses review items, and displays them in a dashboard buffer.
+A full review collects branch and Git context, sends a strict JSON review request, parses review items, and displays them in a dashboard buffer -- placed beside whatever buffer it was opened from (splitting if only one window was open), the same left/right arrangement as an action-buffer result, rather than replacing it outright. Unlike that buffer, opening a review moves focus into the dashboard, since it's somewhere you're going to read and act on rather than glance at.
 
 The dashboard supports:
 

@@ -26,6 +26,7 @@
 (require 'expose-log)
 (require 'expose-popup)
 (require 'expose-history)
+(require 'expose-side-panel)
 
 (defconst expose-action-buffer-name "*EXPOSE Action*"
   "Name of the persistent action-result buffer.
@@ -86,13 +87,12 @@ more than that."
 (defun expose-action-buffer-live-window (window)
   "Return WINDOW if it is still live, otherwise the selected window.
 
-Shared by `expose-action-buffer-place' and `expose-action-buffer-show',
-which both need the same fallback for the same reason -- a captured
-SOURCE-WINDOW can go stale between when an asynchronous request starts
-and when its response arrives -- and should not each carry their own
-copy of it to drift out of sync with each other."
+A thin alias for `expose-side-panel-live-window', kept under this
+module's own name since it is part of this module's established public
+surface (and its existing tests) -- see there for the full rationale,
+shared verbatim rather than duplicated."
 
-  (if (window-live-p window) window (selected-window)))
+  (expose-side-panel-live-window window))
 
 (defun expose-action-buffer-source-window ()
   "Return the best window to place a follow-up result relative to.
@@ -124,55 +124,19 @@ can be found."
 
 Returns the window now showing the action buffer.
 
-SOURCE-WINDOW -- the window whose buffer was just actioned -- always
-ends up on the left, wherever it started. The action buffer always ends
-up immediately to its right.
+A thin alias for `expose-side-panel-place' with the target buffer
+fixed to `expose-action-buffer-name' (created on demand, rather than
+relying on the caller having made it already -- `set-window-buffer'
+takes a buffer name only when a buffer by that name exists, and there
+is no reason this function's correctness should depend on being called
+in a particular order relative to whatever creates it). Kept under this
+module's own name since it is part of this module's established public
+surface (and its existing tests) -- see `expose-side-panel-place' for
+the full placement rationale, shared verbatim rather than duplicated."
 
-Three shapes this actually has to handle, matching how this gets used
-in practice: one buffer open (split, actioned buffer keeps the original
-window), two buffers with the actioned one on the left (the right pane
-becomes the result, whatever it held before), and two buffers with the
-actioned one on the right (it moves left, displacing whatever was
-there, and its own former window becomes the result pane). Beyond two
-side-by-side windows this still does something reasonable -- act on
-whatever window is already to the right, or split if none -- but is not
-trying to solve arbitrary N-window layouts; nothing about this feature
-asked for that.
-
-Falls back to the selected window if SOURCE-WINDOW is no longer live --
-the caller may have captured it well before this runs, at the start of
-an asynchronous request, and the window can be closed by the time the
-response comes back. Checked here rather than left only to the caller:
-this function's own use of `window-in-direction' signals on a dead
-window, so skipping the check here is a trap the next caller could fall
-into just as easily as this one already did once."
-
-  (let* ((source-window (expose-action-buffer-live-window source-window))
-
-         ;; `get-buffer-create' rather than relying on the caller having
-         ;; made this buffer already: `set-window-buffer' takes a buffer
-         ;; name only when a buffer by that name exists, and there is no
-         ;; reason for this function's correctness to depend on being
-         ;; called in a particular order relative to whatever creates it.
-         (action-buffer (get-buffer-create expose-action-buffer-name))
-         (source-buffer (window-buffer source-window))
-         (right (window-in-direction 'right source-window))
-         (left (window-in-direction 'left source-window)))
-
-    (cond
-     (right
-      (set-window-buffer right action-buffer)
-      right)
-
-     (left
-      (set-window-buffer left source-buffer)
-      (set-window-buffer source-window action-buffer)
-      source-window)
-
-     (t
-      (let ((new-window (split-window source-window nil 'right)))
-        (set-window-buffer new-window action-buffer)
-        new-window)))))
+  (expose-side-panel-place
+   source-window
+   (get-buffer-create expose-action-buffer-name)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Rendering

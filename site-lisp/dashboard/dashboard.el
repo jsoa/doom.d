@@ -1,5 +1,25 @@
 ;;; dashboard.el -*- lexical-binding: t; -*-
 
+(require 'cl-lib)
+
+;; Declared here rather than loaded here: `consult' is only ever used
+;; inside an interactive button action, well after Doom's own startup has
+;; long since loaded it, so requiring it eagerly at file-load time would
+;; only slow down opening the dashboard for no benefit. `eval-when-compile'
+;; gets the byte-compiler the same declaration without paying for a real
+;; load -- and it needs that declaration, not just a promise the symbol
+;; will exist by the time the button is clicked: search-by-extension
+;; below rebinds `consult-ripgrep-args' with a `let', which only behaves
+;; as the dynamic override it is written to be if the compiler already
+;; knows the variable is special. Without this, the compiler treats that
+;; `let' as an ordinary lexical shadow -- confirmed by byte-compiling
+;; without this line, which flags the binding as an *unused* variable,
+;; meaning the rebind was compiled to have no effect on
+;; `consult-ripgrep' at all. The exclusion glob marked "critical" in that
+;; code would have silently stopped applying the moment this file was
+;; ever byte- or native-compiled.
+(eval-when-compile
+  (require 'consult))
 
 ;; =========================
 ;; Core / Utilities
@@ -215,7 +235,7 @@ instead of aligned with the rest of the dashboard."
                   'face `(:foreground ,color)))
                 )
 
-           (let ((line-start (point)))
+           (progn
              ;; label (clickable, blue)
              (when icon
                (insert (propertize icon 'face 'shadow))
@@ -1486,7 +1506,7 @@ margin instead of aligned with the rest of the dashboard."
 
                      ;; message (dimmed slightly)
                      (insert "  ")
-                     (let ((msg-start (point)))
+                     (progn
                        (insert
                         (propertize
                          (concat key ": ")

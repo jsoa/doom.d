@@ -9,11 +9,11 @@
 message generation right after inserting the branch prefix, instead of
 requiring `expose-run-commit-message' (SPC c h g) to be run by hand.")
 
-;; Insert a commit message prefix, i.e. [ticket number]
+;; Insert a commit message prefix, i.e. ticket number
 ;; If a branch name starts with "NAME-NUMBER", get it and supply
-;; a commit prefix of [NAME-NUMBER] otherwise insert [-]
+;; a commit prefix of NAME-NUMBER, otherwise insert -
 (defun jsoa/git-commit-setup ()
-  "Insert commit prefix [ABC-123]-style from current branch name, else [-].
+  "Insert commit prefix \"ABC-123 \" from current branch name, else \"- \".
 
 When `jsoa/git-commit-auto-generate-message' is non-nil, also runs
 `expose-run-commit-message' immediately after, which inserts its
@@ -32,7 +32,10 @@ after the prefix just inserted."
       ;; - some/thing/else/ABC-123
       (if (string-match "\\(?:^\\|/\\)\\([A-Z]+-[0-9]+\\)\\(?:\\b\\|[_-]\\|/\\|$\\)" branch-name)
           (insert (format "%s " (match-string 1 branch-name)))
-        (insert "[-] "))))
+        ;; No brackets here either -- matching the ticket case above, so
+        ;; a log of these commits reads as one consistent style rather
+        ;; than "ABC-123 fix bug" next to "[-] fix bug".
+        (insert "- "))))
 
   (when (and jsoa/git-commit-auto-generate-message
              (fboundp 'expose-run-commit-message))

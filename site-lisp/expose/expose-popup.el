@@ -11,6 +11,7 @@
 (declare-function posframe-hide "posframe")
 (declare-function posframe-show "posframe")
 (declare-function posframe-refresh "posframe")
+(declare-function expose-key-prefix-binding "expose")
 
 (defgroup expose-popup nil
   "Generic EXPOSE popup UI."
@@ -73,6 +74,121 @@
 ;;; Modeline
 ;;; ---------------------------------------------------------------------------
 
+;;; ---------------------------------------------------------------------------
+;;; Random tip
+;;; ---------------------------------------------------------------------------
+;;
+;; A pure discovery mechanic, not a recommendation: it names something that
+;; exists, not something worth doing right now. Anything context-aware
+;; (which of these actually applies to what you're looking at) is a much
+;; harder, heavier problem -- the same one declined for a "no test
+;; coverage" mode-line hint elsewhere in this config, for the same reason.
+;;
+;; The pool is read from the real, installed keymap under
+;; `expose-key-prefix' rather than a hand-maintained list next to it. A
+;; second list invites exactly the drift this session already found once,
+;; in the README's own keybinding table -- a binding added to the keymap
+;; and never added to the list beside it. Walking the keymap means there
+;; is nothing to keep in sync: whatever is actually bound is what shows.
+
+(defcustom expose-popup-tip-exclude-commands
+  '(expose-popup-scroll-down
+    expose-popup-scroll-up
+    expose-popup-hide
+    expose-popup-copy
+    expose-popup-open
+    expose-history-open
+    expose-log-open
+    expose-log-clear
+    expose-hover-debug-current-buffer)
+  "Commands under `expose-key-prefix' never shown as a hover tip.
+
+The popup's own housekeeping -- scrolling itself, closing itself,
+copying itself -- which you learn by using the popup at all, not from a
+tip about it."
+  :type '(repeat symbol)
+  :group 'expose-popup)
+
+(defcustom expose-popup-tip-max-length 46
+  "Longest a tip's description may be before it is cut with an ellipsis.
+
+Keeps a long first line of some command's docstring from pushing the
+tip mode-line segment wide enough to wrap or run off the edge of a
+posframe capped at `expose-popup-max-width'."
+  :type 'integer
+  :group 'expose-popup)
+
+(defvar expose-popup--tip-pool-computed nil
+  "Non-nil once `expose-popup-tip-pool' has run, even if it found nothing.
+
+Distinct from the pool being empty, so an empty project-relative keymap
+\(Expose keybindings skipped, per `expose-key-prefix-conflict-p') is not
+re-walked on every single hover.")
+
+(defvar expose-popup--tip-pool nil
+  "Cached (KEY-STRING . COMMAND) pairs available as a hover tip.
+
+The keymap under `expose-key-prefix' does not change after Doom starts,
+so this is computed once and reused -- walking it is cheap by keymap
+standards, but there is no reason to repeat identical work on every
+hover in a session that shows hundreds of them.")
+
+(defun expose-popup-tip-collect (keymap prefix)
+  "Return (KEY-STRING . COMMAND) pairs for every command bound in KEYMAP.
+
+PREFIX is the key vector leading to KEYMAP, prepended to each binding
+found. Recurses into sub-keymaps, which is how `SPC c h h'/`G'/`R'/`M'/
+`W' -- prefixes of a prefix -- are reached at all."
+
+  (let (found)
+    (when (keymapp keymap)
+      (map-keymap
+       (lambda (event binding)
+         (let ((path (vconcat prefix (vector event))))
+           (cond
+            ((keymapp binding)
+             (setq found (append found (expose-popup-tip-collect binding path))))
+            ((and (commandp binding) (symbolp binding)
+                  (not (memq binding expose-popup-tip-exclude-commands)))
+             (push (cons (key-description path) binding) found)))))
+       keymap))
+    found))
+
+(defun expose-popup-tip-pool ()
+  "Return the memoized pool of (KEY-STRING . COMMAND) tip candidates."
+
+  (unless expose-popup--tip-pool-computed
+    (setq expose-popup--tip-pool-computed t)
+    (setq expose-popup--tip-pool
+          (when (fboundp 'expose-key-prefix-binding)
+            (when-let ((keymap (expose-key-prefix-binding)))
+              (when (keymapp keymap)
+                (expose-popup-tip-collect keymap []))))))
+  expose-popup--tip-pool)
+
+(defun expose-popup-tip-description (command)
+  "Return a short description of COMMAND from its own docstring.
+
+Not a separately maintained label: the first line of the docstring is
+the same sentence `C-h f' would show, so it cannot describe a command
+differently from what the command actually is."
+
+  (let* ((doc (or (documentation command) ""))
+         (line (car (split-string doc "\n"))))
+    (if (> (length line) expose-popup-tip-max-length)
+        (concat (substring line 0 expose-popup-tip-max-length) "…")
+      line)))
+
+(defun expose-popup-random-tip ()
+  "Return a random \"did you know\" string, or nil if there is nothing to show."
+
+  (when-let* ((pool (expose-popup-tip-pool))
+              (entry (nth (random (length pool)) pool))
+              (label (expose-popup-key-prefix-label)))
+    (format "tip: %s %s -- %s"
+            label (car entry)
+            (expose-popup-tip-description (cdr entry)))))
+
 (defun expose-popup-key-prefix-label ()
   "Return the Expose key prefix label."
 
@@ -81,6 +197,23 @@
    (if (boundp 'expose-key-prefix)
        expose-key-prefix
      "c h")))
+
+(defvar expose-popup--showing-hover nil
+  "Non-nil while the popup buffer holds passive hover content.
+
+Set by `expose-popup-show-content', cleared by `expose-popup-show-view'.
+The tip only appears here, never on an action result: hover shows up
+unasked, so a tip fits it the way it would not fit a result you
+specifically requested and are trying to read.")
+
+(defvar expose-popup--current-tip nil
+  "The tip chosen for the hover currently on screen, or nil.
+
+Picked once, when the hover is shown -- not read fresh from
+`expose-popup-mode-line-info', which is the `:eval' form re-run on
+every mode-line refresh. Picking there would re-randomize the tip
+continuously for as long as one hover stayed on screen, flickering
+rather than holding still long enough to read.")
 
 (defun expose-popup-mode-line-info ()
   "Return compact Expose popup mode-line info."
@@ -107,7 +240,10 @@
         'face
         'shadow))
 
-     expose-popup-mode-line-status))
+     expose-popup-mode-line-status
+
+     (when (and expose-popup--showing-hover expose-popup--current-tip)
+       (propertize expose-popup--current-tip 'face 'shadow))))
    "   "))
 
 (defun expose-popup-mode-line-format ()
@@ -425,6 +561,11 @@
   (expose-popup-set-mode-line
    (expose-popup-view-title view))
 
+  ;; Not a hover: this is a result you asked for, and a tip about some
+  ;; other command would compete with the answer you are trying to read.
+  (setq expose-popup--showing-hover nil)
+  (setq expose-popup--current-tip nil)
+
   (let ((buffer
          (get-buffer-create expose-popup-buffer-name)))
 
@@ -473,6 +614,12 @@
 
   (expose-popup-set-mode-line
    "Hover")
+
+  ;; Picked once, here -- not from `expose-popup-mode-line-info', which
+  ;; runs on every mode-line refresh and would re-randomize the tip for
+  ;; as long as this one hover stays on screen.
+  (setq expose-popup--showing-hover t)
+  (setq expose-popup--current-tip (expose-popup-random-tip))
 
   (let ((buffer
          (get-buffer-create expose-popup-buffer-name)))

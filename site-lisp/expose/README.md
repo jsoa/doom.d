@@ -302,6 +302,7 @@ No AI: "which tests cover this" is worthless answered plausibly.
 | Key           | Command                           | Description                      |
 |---------------|-----------------------------------|----------------------------------|
 | `SPC c h R r` | `expose-review-open-or-start`     | Open or start full branch review |
+| `SPC c h R d` | `expose-review-open-pr-diff`      | View diff against base branch, GitHub-PR style |
 | `SPC c h R a` | `expose-review-archive-open-full` | Open full review archive viewer  |
 
 ### Region Review
@@ -597,6 +598,8 @@ Active and historical full reviews are stored under:
 .git/expose/reviews/<branch-slug>/active.eld
 .git/expose/reviews/<branch-slug>/history/<timestamp>.eld
 ```
+
+`SPC c h R d` (`expose-review-open-pr-diff`) is the non-AI sibling of the above: a Magit diff of the current branch against its detected base, foldable by file the way GitHub's PR "Files changed" view is, entirely local and requiring no GitHub access. Same base-branch detection as `SPC c h R r`.
 
 ## Region Reviews
 

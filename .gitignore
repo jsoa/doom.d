@@ -14,3 +14,9 @@ tmp/
 /private
 
 *.elc
+
+# Emacs-generated machine state (fonts, package selections, etc. written by
+# `customize'), specific to this install and not meant to be checked in --
+# left untracked deliberately, so this stops it showing as noise in every
+# `git status'.
+/custom.el

@@ -120,6 +120,81 @@
       (expose-popup-show-content "hover body")
       (should (string-match-p "tip:" (expose-popup-mode-line-info))))))
 
+;;; ---------------------------------------------------------------------------
+;;; `expose-popup-view-display-function' indirection: the seam
+;;; `expose-commands.el' uses to redirect `SPC c h h' results into the
+;;; persistent action buffer instead of the hover, without this file
+;;; needing to know that module exists.
+;;; ---------------------------------------------------------------------------
+
+(ert-deftest expose-popup-test-view-action-defaults-through-show-view ()
+  "With `expose-popup-view-display-function' at its indirection default,
+both the loading view and the final view go through
+`expose-popup-show-view'.
+
+Bound explicitly to that default here rather than relying on the
+ambient global: in the assembled library, `expose-commands.el' `setq's
+this variable at load time to redirect `SPC c h h' results elsewhere,
+by design (see `expose-popup-test-view-action-honors-async-override'
+below and its counterpart in `expose-commands.el') -- so once that file
+has loaded, as it has by the time the full suite runs, the *actual*
+ambient default is no longer `expose-popup-show-view'. This test is
+about the indirection mechanism itself, not about what any particular
+caller has pointed it at."
+
+  (let ((expose-popup-view-display-function #'expose-popup-show-view)
+        shown)
+    (cl-letf (((symbol-function 'expose-popup-show-view)
+               (lambda (view &optional _sw) (push (expose-popup-view-title view) shown))))
+      (expose-popup-register-action ?z "Zt" 'view
+                                    (lambda (cb) (funcall cb (expose-popup-view-create "Zt" "done")))
+                                    :async t)
+      (expose-popup-run-action ?z)
+      ;; Loading and final views share a title ("Zt") -- only the body
+      ;; differs ("Loading..." vs "done") -- so two identical entries is
+      ;; correct here, not a duplicate.
+      (should (equal '("Zt" "Zt") (nreverse shown))))))
+
+(ert-deftest expose-popup-test-view-action-honors-async-override ()
+  "An override receives both the loading and final view, with the SAME
+captured source-window on each call -- not re-derived per call, since
+point may have moved by the time the async result lands."
+
+  (let (calls)
+    (let ((expose-popup-view-display-function
+           (lambda (view source-window) (push (list (expose-popup-view-title view) source-window) calls))))
+      (expose-popup-register-action ?y "Yt" 'view
+                                    (lambda (cb) (funcall cb (expose-popup-view-create "Yt" "done")))
+                                    :async t)
+      (expose-popup-run-action ?y))
+    (setq calls (nreverse calls))
+    (should (equal '("Yt" "Yt") (mapcar #'car calls)))
+    (should (eq (cadr (nth 0 calls)) (cadr (nth 1 calls))))))
+
+(ert-deftest expose-popup-test-view-action-sync-honors-override ()
+  (let (calls)
+    (let ((expose-popup-view-display-function
+           (lambda (view _sw) (push (expose-popup-view-title view) calls))))
+      (expose-popup-register-action ?x "Xt" 'view
+                                    (lambda () (expose-popup-view-create "Xt" "sync result")))
+      (expose-popup-run-action ?x))
+    (should (member "Xt" calls))))
+
+(ert-deftest expose-popup-test-direct-callers-are-not-affected-by-override ()
+  "Watch, Region Review, and Full Review's source hover call
+`expose-popup-show-view' directly, never through the registry -- an
+override in place must have no effect on them."
+
+  (let ((direct-shown nil)
+        (expose-popup-view-display-function
+         (lambda (&rest _) (error "must not be called for a direct caller"))))
+    (cl-letf (((symbol-function 'expose-popup-set-mode-line) (lambda (&rest _) nil))
+              ((symbol-function 'expose-popup-show-buffer) (lambda () nil))
+              ((symbol-function 'posframe-refresh) (lambda (&rest _) nil))
+              ((symbol-function 'expose-history-add) (lambda (&rest _) (setq direct-shown t))))
+      (expose-popup-show-view (expose-popup-view-create "Direct" "body"))
+      (should direct-shown))))
+
 (ert-deftest expose-popup-test-action-result-does-not-show-a-tip ()
   "A result you asked for must not compete with a tip about something else."
 

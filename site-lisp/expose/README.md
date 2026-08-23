@@ -13,10 +13,11 @@ Expose gives you a lightweight code-context command center at point:
 - Shows LSP hover information when available.
 - Falls back to Eldoc when LSP hover is unavailable.
 - Shows Flycheck diagnostics at point.
-- Displays focused action results in a small `posframe` popup.
+- Displays a small `posframe` popup for hover, diagnostics, and Watch/Review comments.
+- Shows Thing at Point action results in a persistent, colorized side window.
 - Runs provider-backed code actions asynchronously.
 - Supports Clipboard, Codex, Copilot, Claude Code, and other provider implementations.
-- Captures popup history for final action responses.
+- Captures popup history for Watch, Full Review, and Region Review popups (Thing at Point results go to the action window instead -- see above -- and are not added to history).
 - Supports copy/open/log/debug commands.
 - Supports quick hover scrolling with `C-j` / `C-k` while the popup is visible.
 - Includes Git status and diff context for change-oriented actions.
@@ -62,6 +63,7 @@ Typical local layout:
     expose/
       expose.el
       expose-popup.el
+      expose-action-buffer.el
       expose-history.el
       expose-hover.el
       expose-log.el
@@ -248,6 +250,8 @@ These actions use the active region when one is selected, falling back to the po
 | `SPC c h h y` | `expose-run-why`                     | Explain likely design intent         |
 | `SPC c h h m` | `expose-run-mental-model`            | Build a mental model                 |
 | `SPC c h h ?` | `expose-hover-debug-current-buffer`  | Debug current buffer hover state     |
+
+A Thing at Point result does not show in the small hover popup -- these answers routinely ran longer than a hover has room for. Instead it opens in a persistent, colorized `*EXPOSE Action*` window: the buffer you actioned always ends up on the left, and the result always ends up in the window immediately to its right, splitting the frame if there was only one window open. It stays open, showing only the most recent action's result, until you close it (`q`) or run another action anywhere. Watch, Full Review, and Region Review are unaffected -- their own hovers and source popups still work exactly as before.
 
 ### Diagrams
 

@@ -5,6 +5,7 @@
 (require 'newcomment)
 (require 'expose-log)
 (require 'expose-popup)
+(require 'expose-action-buffer)
 (require 'expose-hover)
 (require 'expose-transport)
 (require 'expose-provider)
@@ -2237,6 +2238,27 @@ but `s' to check against the DOT source is the real safeguard."
    'view
    #'expose-changelog-async
    :async t))
+
+;;; ---------------------------------------------------------------------------
+;;; Where `SPC c h h' results are shown
+;;; ---------------------------------------------------------------------------
+;;
+;; A result from this group -- explain, fix, refactor, and the rest --
+;; routinely overflowed the small hover it used to show in. Redirected to
+;; the persistent, colorized side window `expose-action-buffer' provides
+;; instead, via the indirection `expose-popup-run-view-action' calls
+;; through rather than `expose-popup-show-view' directly. Watch, Region
+;; Review, and Full Review's source hover are untouched by this: none of
+;; them are registered actions, and none of them go through
+;; `expose-popup-view-display-function' -- each calls
+;; `expose-popup-show-view' itself.
+
+(defun expose-commands-show-action-view (view source-window)
+  "Show VIEW in the persistent action-result buffer instead of the hover."
+
+  (expose-action-buffer-show view source-window))
+
+(setq expose-popup-view-display-function #'expose-commands-show-action-view)
 
 ;;; ---------------------------------------------------------------------------
 ;;; Debug

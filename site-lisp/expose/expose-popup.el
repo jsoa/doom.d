@@ -357,6 +357,23 @@ rather than holding still long enough to read.")
      "No action registered for key %c."
      key)))
 
+(defvar expose-popup-view-display-function #'expose-popup-show-view
+  "Function called to display a view for a registered `view'-kind action.
+
+Called as (FUNCTION VIEW SOURCE-WINDOW). Indirected through a variable,
+rather than `expose-popup-run-view-action' calling
+`expose-popup-show-view' directly, so a caller elsewhere can redirect
+where these specific results go without this file needing to depend on
+anything about what does -- `expose-commands.el' sets this to show
+`SPC c h h' results in a persistent side window instead, and requiring
+that from here (to call it directly) would be circular, since it in
+turn requires this file for the rendering it reuses.
+
+Every OTHER caller of `expose-popup-show-view' in this library --
+Watch, Region Review, Full Review's source hover -- calls it directly
+and never goes through this variable, so redirecting it here has no
+effect on them.")
+
 (defun expose-popup-run-view-action (action)
   "Run a popup view ACTION."
 
@@ -364,15 +381,23 @@ rather than holding still long enough to read.")
          (plist-get action :label))
 
         (async
-         (plist-get action :async)))
+         (plist-get action :async))
+
+        ;; Captured once, here, rather than read fresh wherever it is
+        ;; used below: the async branch's callback runs later, by which
+        ;; time the selected window may be anywhere.
+        (source-window
+         (selected-window)))
 
     (expose-log
      "Popup"
      "Showing loading view for %s."
      label)
 
-    (expose-popup-show-view
-     (expose-popup-loading-view label))
+    (funcall
+     expose-popup-view-display-function
+     (expose-popup-loading-view label)
+     source-window)
 
     (expose-popup-set-mode-line
      (format "Loading %s" label))
@@ -387,16 +412,18 @@ rather than holding still long enough to read.")
 
           (funcall
            (plist-get action :command)
-           #'expose-popup-show-view))
+           (lambda (view)
+             (funcall expose-popup-view-display-function view source-window))))
 
       (expose-log
        "Popup"
        "Starting sync view action: %s."
        label)
 
-      (expose-popup-show-view
-       (funcall
-        (plist-get action :command))))))
+      (funcall
+       expose-popup-view-display-function
+       (funcall (plist-get action :command))
+       source-window))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Views
@@ -546,8 +573,12 @@ rather than holding still long enough to read.")
            body
          (format "%s" body))))))
 
-(defun expose-popup-show-view (view)
-  "Display VIEW in the popup."
+(defun expose-popup-show-view (view &optional _source-window)
+  "Display VIEW in the popup.
+
+SOURCE-WINDOW is accepted and ignored -- present only so this remains a
+valid value for `expose-popup-view-display-function', which is called
+with it."
 
   (expose-log
    "Popup"

@@ -779,23 +779,32 @@ entire node."
     :code)))
 
 (defun expose-request-commit-message (context)
-  "Build a commit message request."
+  "Build a commit message request.
 
-  (expose-request-create
-   'commit-message
-   'xml
+Scoped to staged changes only (`expose-context-git-staged-only'): a
+commit message describes what is about to be committed, and a file
+edited but not yet `git add'ed will not be part of that commit, however
+current its edits are in the working tree. Every other request that
+folds in git context wants the opposite -- the full working-tree diff --
+which is why this is a narrow `let' around just this one call rather
+than a change to what `expose-context-with-git' does by default."
 
-   "Write a clear git commit message for the current changes. Use the git diff and status as the primary source of truth. Prefer a concise conventional-commit style subject when appropriate, followed by a short body only if useful. Do not invent changes that are not present in the diff."
+  (let ((expose-context-git-staged-only t))
+    (expose-request-create
+     'commit-message
+     'xml
 
-   (expose-request-select-with-git
-    context
-    :project
-    :language
-    :file
-    :focus
-    :scope)
+     "Write a clear git commit message for the currently staged changes. Use the git diff and status as the primary source of truth -- both describe only what has been staged, not any other edits sitting unstaged in the working tree. Prefer a concise conventional-commit style subject when appropriate, followed by a short body only if useful. Do not invent changes that are not present in the diff."
 
-   t))
+     (expose-request-select-with-git
+      context
+      :project
+      :language
+      :file
+      :focus
+      :scope)
+
+     t)))
 
 (defun expose-request-changelog (context)
   "Build a changelog request."

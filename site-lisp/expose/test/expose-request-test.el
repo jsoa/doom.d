@@ -89,6 +89,56 @@
         (plist-get request :instruction))))))
 
 ;;; ---------------------------------------------------------------------------
+;;; Regression: commit-message must scope git context to staged changes only.
+;;;
+;;; `expose-context-git-diff'/`expose-context-git-status' compared against
+;;; HEAD by default, which mixes in whatever is edited-but-not-staged in the
+;;; working tree -- so a commit message described changes that would not
+;;; actually be part of the commit. `expose-request-commit-message' binds
+;;; `expose-context-git-staged-only' around building its context; every
+;;; other request type must NOT.
+;;; ---------------------------------------------------------------------------
+
+(ert-deftest expose-request-test-commit-message-scopes-to-staged-only ()
+  (let (staged-only-during-call)
+    (cl-letf (((symbol-function 'expose-context-with-git)
+               (lambda (context)
+                 (setq staged-only-during-call expose-context-git-staged-only)
+                 context)))
+
+      (expose-request-commit-message '(:project "demo"))
+
+      (should staged-only-during-call))))
+
+(ert-deftest expose-request-test-review-does-not-scope-to-staged-only ()
+  (let (staged-only-during-call)
+    (cl-letf (((symbol-function 'expose-context-with-git)
+               (lambda (context)
+                 (setq staged-only-during-call expose-context-git-staged-only)
+                 context)))
+
+      (expose-request-review '(:project "demo"))
+
+      (should-not staged-only-during-call))))
+
+(ert-deftest expose-request-test-commit-message-staged-only-does-not-leak ()
+  "Building a commit-message request must not affect the next request built."
+
+  (cl-letf (((symbol-function 'expose-context-with-git)
+             (lambda (context) context)))
+    (expose-request-commit-message '(:project "demo")))
+
+  (should-not expose-context-git-staged-only)
+
+  (let (staged-only-during-call)
+    (cl-letf (((symbol-function 'expose-context-with-git)
+               (lambda (context)
+                 (setq staged-only-during-call expose-context-git-staged-only)
+                 context)))
+      (expose-request-review '(:project "demo"))
+      (should-not staged-only-during-call))))
+
+;;; ---------------------------------------------------------------------------
 ;;; expose-request-select / expose-request-select-with-git
 ;;; ---------------------------------------------------------------------------
 

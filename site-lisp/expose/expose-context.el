@@ -434,6 +434,28 @@ identifier/expression/construct lookup when present."
   :type 'integer
   :group 'expose)
 
+(defvar expose-context-git-staged-only nil
+  "When non-nil, git status/diff context is restricted to staged changes.
+
+Every request that folds in git context (review, security, performance,
+risks, changelog, commit-message) shares the same
+`expose-context-git-diff'/`expose-context-git-status' machinery, and
+almost all of them want the same thing: the full working-tree diff
+against HEAD, since they answer questions about the code as it stands
+right now, staged or not. `expose-request-commit-message' is the one
+exception -- a commit message describes what is about to be committed,
+so it needs to see only what is staged, or a file edited-but-not-yet-
+`git add'ed shows up in the message for a commit that will not actually
+include it.
+
+A dynamic variable rather than a parameter threaded through the request
+builders: every layer between here and the one caller that needs this
+(`expose-context-with-git', `expose-request-select-with-git', and the
+five other request builders that call it) is generic plumbing that has
+no reason to know this distinction exists. Let-bound narrowly around the
+one call site that does.")
+
+
 (defun expose-context-git-root ()
   "Return the current git root, or nil."
 
@@ -501,8 +523,24 @@ identifier/expression/construct lookup when present."
      (expose-redact-excluded-path-p path root))
    (expose-context-git-status-line-paths line)))
 
+(defun expose-context-git-status-line-unstaged-p (line)
+  "Return non-nil when porcelain `git status --short' LINE is not staged.
+
+The first of the two status columns is the index (staged) status; a
+space or `?' there means nothing about this file has been `git add'ed
+yet -- a space is \"no staged change\", and `?' is untracked, which by
+definition cannot be staged. Everything else (`M', `A', `D', `R', `C',
+`U') is some staged change, whatever the second column says about
+further unstaged edits on top of it."
+
+  (memq (aref line 0) '(?\s ??)))
+
 (defun expose-context-filter-git-status (status root)
   "Return STATUS with lines referencing excluded paths under ROOT removed.
+
+Also drops unstaged lines when `expose-context-git-staged-only' is
+bound, so a file edited but not yet staged is not listed as part of the
+change a commit message is about to describe.
 
 `git status --short' output is plain filename/status lines, not a unified
 diff or an XML-attribute-shaped path, so it is invisible to the redaction
@@ -514,7 +552,9 @@ handled everywhere else."
     (string-join
      (seq-remove
       (lambda (line)
-        (expose-context-git-status-line-excluded-p line root))
+        (or (expose-context-git-status-line-excluded-p line root)
+            (and expose-context-git-staged-only
+                 (expose-context-git-status-line-unstaged-p line))))
       (split-string status "\n"))
      "\n")))
 
@@ -532,7 +572,11 @@ handled everywhere else."
      root)))
 
 (defun expose-context-git-diff ()
-  "Return git diff for current changes in the project."
+  "Return git diff for current changes in the project.
+
+Against HEAD -- staged and unstaged together -- unless
+`expose-context-git-staged-only' is bound, in which case only staged
+changes (`--cached') are included."
 
   (when-let ((root
               (expose-context-git-root)))
@@ -541,12 +585,17 @@ handled everywhere else."
      (expose-context-call-git
       root
       "diff"
-      "HEAD"
+      (if expose-context-git-staged-only "--cached" "HEAD")
       "--no-ext-diff")
      expose-context-git-diff-max-length)))
 
 (defun expose-context-with-git (context)
-  "Return CONTEXT with git status and diff added."
+  "Return CONTEXT with git status and diff added.
+
+Scoped to staged changes only when `expose-context-git-staged-only' is
+bound around the call -- nothing to do here beyond calling
+`expose-context-git-status'/`expose-context-git-diff', which read that
+variable themselves."
 
   (let ((status
          (expose-context-git-status))

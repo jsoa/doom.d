@@ -13,6 +13,8 @@
 ;;   with `e' on a conflicted file. See `+ediff.el' for the `B' key that
 ;;   takes *both* sides, which ediff itself has no command for.
 
+(require 'nerd-icons nil t)
+
 (defvar jsoa/merge-conflict-regexp "^<<<<<<< "
   "Regexp matching the start of a Git conflict marker.")
 
@@ -96,6 +98,87 @@ through `find-file-hook' or `after-revert-hook' instead."
     (jsoa/smerge-maybe-enable)))
 
 (add-hook 'after-save-hook #'jsoa/smerge-after-save)
+
+;;; ---------------------------------------------------------------------------
+;;; Mode line
+;;; ---------------------------------------------------------------------------
+;;
+;; The first version of `jsoa/smerge-maybe-enable' announced arming with a
+;; `message', removed a few commits later because it collided with
+;; flycheck's own noise in the echo area at exactly the moment a
+;; conflicted file opens -- the one moment it mattered most. That traded
+;; a working reminder for no reminder at all. A mode-line segment is the
+;; middle ground: on screen for as long as the buffer is conflicted,
+;; costs nothing to have there or to ignore, and clickable straight into
+;; the resolver rather than only informative.
+
+(defcustom jsoa/merge-mode-line-icon "nf-fa-exclamation_triangle"
+  "Nerd Font icon name for the merge-conflict mode-line indicator.
+
+Only used when `nerd-icons' is installed; a plain `⚠' is shown
+otherwise, matching how `expose-watch-mode-line-icon' falls back."
+  :type 'string
+  :group 'jsoa)
+
+(defface jsoa/merge-mode-line-face
+  '((t :inherit warning :weight bold))
+  "Face for the merge-conflict mode-line indicator.")
+
+(defun jsoa/merge-mode-line-icon-glyph ()
+  "Return the icon glyph for the merge-conflict mode-line indicator."
+
+  (if (fboundp 'nerd-icons-faicon)
+
+      (nerd-icons-faicon
+       jsoa/merge-mode-line-icon
+       :face 'jsoa/merge-mode-line-face
+       :height 0.9
+       :v-adjust -0.02)
+
+    "⚠"))
+
+(defvar jsoa/merge-mode-line-keymap
+  (let ((map (make-sparse-keymap)))
+    (define-key map [mode-line mouse-1] #'jsoa/smerge-resolve)
+    map)
+  "Keymap active on a click of the merge-conflict mode-line indicator.
+
+Emacs delivers a click on mode-line text as a `[mode-line mouse-1]'
+event to whatever `local-map' that text is propertized with, and always
+against the buffer whose mode line was clicked -- correct even when
+that window is not the selected one.")
+
+(defun jsoa/merge-mode-line ()
+  "Return the mode-line construct for a conflicted buffer, or \"\"."
+
+  (if (bound-and-true-p smerge-mode)
+
+      (propertize
+       (format " %s conflict" (jsoa/merge-mode-line-icon-glyph))
+       'face 'jsoa/merge-mode-line-face
+       'mouse-face 'mode-line-highlight
+       'local-map jsoa/merge-mode-line-keymap
+       'help-echo "mouse-1: resolve conflicts (jsoa/smerge-resolve)")
+
+    ""))
+
+(defvar jsoa/merge-mode-line-indicator
+  '(:eval (jsoa/merge-mode-line))
+  "Mode-line construct for merge conflicts.")
+
+(defun jsoa/merge-install-mode-line ()
+  "Install the merge-conflict mode-line indicator.
+
+Into `mode-line-misc-info', the same extension point
+`expose-watch-install-mode-line' uses, so ordinary Emacs and Doom
+modeline's `misc-info' segment both display it without any modeline
+config of your own."
+
+  (unless (member jsoa/merge-mode-line-indicator mode-line-misc-info)
+    (setq mode-line-misc-info
+          (append mode-line-misc-info (list jsoa/merge-mode-line-indicator)))))
+
+(jsoa/merge-install-mode-line)
 
 (defun jsoa/merge-goto-conflict ()
   "Move point to the start of the next conflict, wrapping. Return non-nil if found.

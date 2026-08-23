@@ -208,4 +208,100 @@ or a caller's own quick error message -- is shown but not recorded."
           (insert (propertize "**" 'invisible 'markdown-markup)))
         (should (invisible-p (1- (point-max))))))))
 
+;;; ---------------------------------------------------------------------------
+;;; Copy commands. Evil-specific parts (that `y'/`c'/`q' are actually
+;;; bound to these, in the right states) are not exercised here, the
+;;; same as this package's other Evil integrations -- see the
+;;; `with-eval-after-load 'evil' block in `expose-action-buffer.el' --
+;;; none of which load Evil in this test suite either. Verified once,
+;;; live, against real Evil, when this was built.
+;;; ---------------------------------------------------------------------------
+
+(ert-deftest expose-action-buffer-test-copy-copies-whole-buffer ()
+  (with-temp-buffer
+    (insert "one\ntwo\nthree")
+    (expose-action-buffer-copy)
+    (should (equal "one\ntwo\nthree" (current-kill 0)))))
+
+(ert-deftest expose-action-buffer-test-copy-strips-text-properties ()
+  "Copied text must be plain -- pasted into a real code buffer, a
+lingering `face' or `invisible' property from the rendered markdown
+would be actively wrong there, not just cosmetic."
+
+  (with-temp-buffer
+    (insert (propertize "styled" 'face 'bold 'invisible 'markdown-markup))
+    (expose-action-buffer-copy)
+    (should-not (text-properties-at 0 (current-kill 0)))))
+
+(ert-deftest expose-action-buffer-test-code-blocks-finds-one ()
+  (with-temp-buffer
+    (insert "prose\n\n```python\ndef foo():\n    pass\n```\n\nmore prose\n")
+    (should
+     (equal
+      '("def foo():\n    pass\n")
+      (mapcar (lambda (b) (buffer-substring-no-properties (car b) (cdr b)))
+              (expose-action-buffer-code-blocks))))))
+
+(ert-deftest expose-action-buffer-test-code-blocks-finds-several-in-order ()
+  (with-temp-buffer
+    (insert "```python\na = 1\n```\n\nbetween\n\n```python\nb = 2\n```\n")
+    (should
+     (equal
+      '("a = 1\n" "b = 2\n")
+      (mapcar (lambda (b) (buffer-substring-no-properties (car b) (cdr b)))
+              (expose-action-buffer-code-blocks))))))
+
+(ert-deftest expose-action-buffer-test-code-blocks-none-in-plain-text ()
+  (with-temp-buffer
+    (insert "no fences here at all")
+    (should-not (expose-action-buffer-code-blocks))))
+
+(ert-deftest expose-action-buffer-test-code-blocks-ignores-unterminated-fence ()
+  (with-temp-buffer
+    (insert "```python\nno closing fence\nkeeps going\n")
+    (should-not (expose-action-buffer-code-blocks))))
+
+(ert-deftest expose-action-buffer-test-copy-code-at-point-inside-a-block ()
+  (with-temp-buffer
+    (expose-action-buffer-mode)
+    (let ((inhibit-read-only t))
+      (insert "```python\ndef foo():\n    return 42\n```\n"))
+    (goto-char (point-min))
+    (search-forward "return 42")
+    (expose-action-buffer-copy-code-at-point)
+    (should (equal "def foo():\n    return 42\n" (current-kill 0)))))
+
+(ert-deftest expose-action-buffer-test-copy-code-at-point-outside-but-only-one-block ()
+  "Point does not have to be inside the block when there is only one --
+requiring that would be friction for the common case."
+
+  (with-temp-buffer
+    (expose-action-buffer-mode)
+    (let ((inhibit-read-only t))
+      (insert "some prose\n\n```python\ndef foo():\n    return 42\n```\n"))
+    (goto-char (point-min))
+    (expose-action-buffer-copy-code-at-point)
+    (should (equal "def foo():\n    return 42\n" (current-kill 0)))))
+
+(ert-deftest expose-action-buffer-test-copy-code-at-point-outside-with-several-blocks ()
+  "More than one block and point is not inside any of them: this must
+say so, not guess which one was meant."
+
+  (with-temp-buffer
+    (expose-action-buffer-mode)
+    (let ((inhibit-read-only t))
+      (insert "```python\na = 1\n```\n\nbetween\n\n```python\nb = 2\n```\n"))
+    (goto-char (point-min))
+    (search-forward "between")
+    (let ((kill-ring nil) (kill-ring-yank-pointer nil))
+      (expose-action-buffer-copy-code-at-point)
+      (should-not kill-ring))))
+
+(ert-deftest expose-action-buffer-test-copy-code-at-point-no-blocks ()
+  (with-temp-buffer
+    (expose-action-buffer-mode)
+    (let ((kill-ring nil) (kill-ring-yank-pointer nil))
+      (expose-action-buffer-copy-code-at-point)
+      (should-not kill-ring))))
+
 (provide 'expose-action-buffer-test)

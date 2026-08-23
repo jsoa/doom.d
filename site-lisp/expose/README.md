@@ -253,6 +253,14 @@ These actions use the active region when one is selected, falling back to the po
 
 A Thing at Point result does not show in the small hover popup -- these answers routinely ran longer than a hover has room for. Instead it opens in a persistent, colorized `*EXPOSE Action*` window: the buffer you actioned always ends up on the left, and the result always ends up in the window immediately to its right, splitting the frame if there was only one window open. It stays open, showing only the most recent action's result, until you close it (`q`) or run another action anywhere. Each result is also recorded to popup history (`SPC c h H`), same as before. Region Review's own results share this same window -- see "Region Reviews" below. Watch and Full Review are unaffected -- their hovers and source popups still work exactly as before.
 
+It is an ordinary, read-only Evil-normal-state buffer -- navigate, search, and visually select in it the same as anywhere else. Two extra keys:
+
+| Key | Command                                | Description                                                      |
+|-----|-----------------------------------------|-------------------------------------------------------------------|
+| `y` | `expose-action-buffer-copy`            | Copy the whole buffer                                             |
+| `c` | `expose-action-buffer-copy-code-at-point` | Copy the fenced code block at point (or the only one in the buffer) |
+| `q` | `quit-window`                          | Close it                                                           |
+
 ### Diagrams
 
 | Key           | Command                             | Description                              |

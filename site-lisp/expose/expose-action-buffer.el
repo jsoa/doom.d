@@ -21,6 +21,7 @@
 ;;; next action still lands in the right place without needing to know
 ;;; what happened since the last one.
 
+(require 'cl-lib)
 (require 'subr-x)
 (require 'expose-log)
 (require 'expose-popup)
@@ -55,7 +56,15 @@ more than that."
   ;; this mode nor the popup's own `expose-popup-mode' otherwise honors
   ;; it, so without this the markup characters render literally, right
   ;; next to the bold/code face already correctly applied around them.
-  (add-to-invisibility-spec 'markdown-markup))
+  (add-to-invisibility-spec 'markdown-markup)
+
+  ;; This buffer should still feel like a normal Evil-readable buffer --
+  ;; navigation and search work the same as anywhere else. Only matters
+  ;; on a stale re-entry (the mode function itself only runs once per
+  ;; buffer, on the first `expose-action-buffer-show'; see there), since
+  ;; `evil-set-initial-state' below already covers the first entry.
+  (when (bound-and-true-p evil-local-mode)
+    (evil-normal-state)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Placement
@@ -207,5 +216,108 @@ this check exists at all rather than adding unconditionally."
     (let ((result-window (expose-action-buffer-place placement-window)))
       (set-window-point result-window (point-min))
       buffer)))
+
+;;; ---------------------------------------------------------------------------
+;;; Interactive commands
+;;; ---------------------------------------------------------------------------
+
+(defun expose-action-buffer-code-blocks ()
+  "Return the fenced code blocks in the current buffer.
+
+Each element is a (START . END) cons delimiting one block's *content*,
+excluding the ``` fence lines themselves. Found with a plain regexp
+search over the buffer's own text rather than via `markdown-mode'
+machinery: the fence lines are always literally present here regardless
+of whether real fontification hid them (see `expose-action-buffer-mode'
+above, and its `markdown-markup' invisibility spec) -- a raw
+`invisible' property never actually deletes text -- so this works the
+same whether or not `markdown-mode' was available to render with, and
+does not need it either."
+
+  (save-excursion
+    (goto-char (point-min))
+    (let (blocks)
+      (while (re-search-forward "^```[[:alnum:]_+-]*[ \t]*$" nil t)
+        (let ((content-start (progn (forward-line 1) (point))))
+          (if (re-search-forward "^```[ \t]*$" nil t)
+              (progn
+                (push (cons content-start (match-beginning 0)) blocks)
+                (goto-char (match-end 0)))
+            ;; An unterminated fence: stop, rather than treat the rest
+            ;; of the buffer as if it were still inside a block.
+            (goto-char (point-max)))))
+      (nreverse blocks))))
+
+(defun expose-action-buffer-code-block-bounds-at (blocks pos)
+  "Return the element of BLOCKS containing POS, or nil."
+
+  (cl-loop for bounds in blocks
+           when (and (>= pos (car bounds)) (<= pos (cdr bounds)))
+           return bounds))
+
+(defun expose-action-buffer-copy ()
+  "Copy the whole action buffer to the kill ring."
+
+  (interactive)
+
+  (kill-new (buffer-substring-no-properties (point-min) (point-max)))
+  (message "Expose action buffer copied"))
+
+(defun expose-action-buffer-copy-code-at-point ()
+  "Copy the fenced code block at point to the kill ring.
+
+If point is not inside a code block but the buffer contains exactly
+one, copies that one instead: most single-action results (Fix,
+Refactor, a Region Review item) carry exactly one snippet, and
+requiring point to sit inside it first would be friction for no real
+benefit. With more than one and point outside all of them, this says so
+rather than guessing which one you meant."
+
+  (interactive)
+
+  (let* ((blocks (expose-action-buffer-code-blocks))
+         (bounds
+          (or (expose-action-buffer-code-block-bounds-at blocks (point))
+              (and (= 1 (length blocks)) (car blocks)))))
+
+    (cond
+     (bounds
+      (kill-new (buffer-substring-no-properties (car bounds) (cdr bounds)))
+      (message "Code block copied"))
+
+     (blocks
+      (message
+       "Point is not in a code block (%d in this buffer) -- move point into one first"
+       (length blocks)))
+
+     (t
+      (message "No code block in this buffer")))))
+
+;;; ---------------------------------------------------------------------------
+;;; Keymap
+;;; ---------------------------------------------------------------------------
+;;
+;; This buffer should still feel like a normal Evil-readable buffer:
+;; motion, search, and visual-selection yank all work exactly as they
+;; do anywhere else. Only two keys are added, and only in Normal state
+;; (Visual state's own `y' -- yanking a selection you made yourself --
+;; is untouched): `y' and `c' as pending operators have nothing to act
+;; on in a read-only buffer without a following edit, so repurposing
+;; them here costs nothing real. `y' for the common case (copy
+;; everything), `c' for the one this feature was actually asked for
+;; (copy just the code).
+
+(with-eval-after-load 'evil
+  (evil-define-key* 'normal expose-action-buffer-mode-map
+    (kbd "y") #'expose-action-buffer-copy
+    (kbd "c") #'expose-action-buffer-copy-code-at-point
+    (kbd "q") #'quit-window)
+
+  (evil-define-key* 'motion expose-action-buffer-mode-map
+    (kbd "y") #'expose-action-buffer-copy
+    (kbd "c") #'expose-action-buffer-copy-code-at-point
+    (kbd "q") #'quit-window)
+
+  (evil-set-initial-state 'expose-action-buffer-mode 'normal))
 
 (provide 'expose-action-buffer)

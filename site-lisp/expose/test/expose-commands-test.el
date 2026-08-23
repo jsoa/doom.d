@@ -1,6 +1,7 @@
 ;;; expose-commands-test.el --- Tests for expose-commands -*- lexical-binding: t; -*-
 
 (require 'ert)
+(require 'cl-lib)
 (require 'expose-commands)
 
 ;;; ---------------------------------------------------------------------------
@@ -79,6 +80,44 @@
    (equal
     (expose-commands-clean-insert-text nil)
     "")))
+
+;;; ---------------------------------------------------------------------------
+;;; expose-commands-show-action-view
+;;;
+;;; The wiring that redirects `SPC c h h' results into the persistent
+;;; action buffer -- and, since that bypasses `expose-popup-show-view'
+;;; (the function `expose-history-add' used to piggyback on), the place
+;;; that has to add them to history itself instead.
+;;; ---------------------------------------------------------------------------
+
+(ert-deftest expose-commands-test-show-action-view-shows-and-records ()
+  (let ((shown nil) (recorded nil)
+        (view (expose-popup-view-create "Explain" "the answer")))
+    (cl-letf (((symbol-function 'expose-action-buffer-show)
+               (lambda (v _sw) (setq shown v)))
+              ((symbol-function 'expose-history-add)
+               (lambda (v) (setq recorded v))))
+      (expose-commands-show-action-view view 'a-window)
+      (should (eq shown view))
+      (should (eq recorded view)))))
+
+(ert-deftest expose-commands-test-show-action-view-skips-history-for-loading-view ()
+  "The transient `Loading...' placeholder (`:history nil') is shown but
+must not be recorded -- only the real result should be."
+
+  (let ((recorded nil)
+        (view (expose-popup-loading-view "Explain")))
+    (cl-letf (((symbol-function 'expose-action-buffer-show) (lambda (&rest _) nil))
+              ((symbol-function 'expose-history-add) (lambda (v) (setq recorded v))))
+      (expose-commands-show-action-view view 'a-window)
+      (should-not recorded))))
+
+(ert-deftest expose-commands-test-view-display-function-is-wired ()
+  "`expose-commands' is the module that redirects `SPC c h h' results
+away from `expose-popup-show-view' -- confirm it actually did, since a
+load-order slip here would silently leave results going to the hover."
+
+  (should (eq expose-popup-view-display-function #'expose-commands-show-action-view)))
 
 (provide 'expose-commands-test)
 

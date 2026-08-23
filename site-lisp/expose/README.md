@@ -17,7 +17,7 @@ Expose gives you a lightweight code-context command center at point:
 - Shows Thing at Point action results in a persistent, colorized side window.
 - Runs provider-backed code actions asynchronously.
 - Supports Clipboard, Codex, Copilot, Claude Code, and other provider implementations.
-- Captures popup history for Watch, Full Review, and Region Review popups (Thing at Point results go to the action window instead -- see above -- and are not added to history).
+- Captures popup history for Watch, Full Review, Region Review, and Thing at Point results.
 - Supports copy/open/log/debug commands.
 - Supports quick hover scrolling with `C-j` / `C-k` while the popup is visible.
 - Includes Git status and diff context for change-oriented actions.
@@ -251,7 +251,7 @@ These actions use the active region when one is selected, falling back to the po
 | `SPC c h h m` | `expose-run-mental-model`            | Build a mental model                 |
 | `SPC c h h ?` | `expose-hover-debug-current-buffer`  | Debug current buffer hover state     |
 
-A Thing at Point result does not show in the small hover popup -- these answers routinely ran longer than a hover has room for. Instead it opens in a persistent, colorized `*EXPOSE Action*` window: the buffer you actioned always ends up on the left, and the result always ends up in the window immediately to its right, splitting the frame if there was only one window open. It stays open, showing only the most recent action's result, until you close it (`q`) or run another action anywhere. Watch, Full Review, and Region Review are unaffected -- their own hovers and source popups still work exactly as before.
+A Thing at Point result does not show in the small hover popup -- these answers routinely ran longer than a hover has room for. Instead it opens in a persistent, colorized `*EXPOSE Action*` window: the buffer you actioned always ends up on the left, and the result always ends up in the window immediately to its right, splitting the frame if there was only one window open. It stays open, showing only the most recent action's result, until you close it (`q`) or run another action anywhere. Each result is also recorded to popup history (`SPC c h H`), same as before. Watch, Full Review, and Region Review are unaffected -- their own hovers and source popups still work exactly as before.
 
 ### Diagrams
 

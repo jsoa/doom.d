@@ -2247,16 +2247,27 @@ but `s' to check against the DOT source is the real safeguard."
 ;; routinely overflowed the small hover it used to show in. Redirected to
 ;; the persistent, colorized side window `expose-action-buffer' provides
 ;; instead, via the indirection `expose-popup-run-view-action' calls
-;; through rather than `expose-popup-show-view' directly. Watch, Region
-;; Review, and Full Review's source hover are untouched by this: none of
-;; them are registered actions, and none of them go through
-;; `expose-popup-view-display-function' -- each calls
-;; `expose-popup-show-view' itself.
+;; through rather than `expose-popup-show-view' directly -- and still
+;; added to popup history from here, so `SPC c h H' keeps seeing these
+;; results even though they no longer pass through the function history
+;; used to piggyback on. Watch, Region Review, and Full Review's source
+;; hover are untouched by any of this: none of them are registered
+;; actions, and none of them go through `expose-popup-view-display-function'
+;; -- each calls `expose-popup-show-view' itself, hover and history both
+;; exactly as before.
 
 (defun expose-commands-show-action-view (view source-window)
-  "Show VIEW in the persistent action-result buffer instead of the hover."
+  "Show VIEW in the persistent action-result buffer instead of the hover.
 
-  (expose-action-buffer-show view source-window))
+Also adds VIEW to popup history, exactly as `expose-popup-show-view'
+itself would have -- reusing `expose-popup-view-history-p' so the
+transient loading placeholder (`:history nil') is skipped the same way
+it always was, and only the real result gets recorded."
+
+  (expose-action-buffer-show view source-window)
+
+  (when (expose-popup-view-history-p view)
+    (expose-history-add view)))
 
 (setq expose-popup-view-display-function #'expose-commands-show-action-view)
 

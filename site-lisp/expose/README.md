@@ -253,13 +253,20 @@ These actions use the active region when one is selected, falling back to the po
 
 A Thing at Point result does not show in the small hover popup -- these answers routinely ran longer than a hover has room for. Instead it opens in a persistent, colorized `*EXPOSE Action*` window: the buffer you actioned always ends up on the left, and the result always ends up in the window immediately to its right, splitting the frame if there was only one window open. It stays open, showing only the most recent action's result, until you close it (`q`) or run another action anywhere. Each result is also recorded to popup history (`SPC c h H`), same as before. Region Review's own results share this same window -- see "Region Reviews" below. Watch and Full Review are unaffected -- their hovers and source popups still work exactly as before.
 
-It is an ordinary, read-only Evil-normal-state buffer -- navigate, search, and visually select in it the same as anywhere else. Two extra keys:
+It is an ordinary, read-only Evil-normal-state buffer -- navigate, search, and visually select in it the same as anywhere else. Extra keys:
 
 | Key | Command                                | Description                                                      |
 |-----|-----------------------------------------|-------------------------------------------------------------------|
 | `y` | `expose-action-buffer-copy`            | Copy the whole buffer                                             |
 | `c` | `expose-action-buffer-copy-code-at-point` | Copy the fenced code block at point (or the only one in the buffer) |
+| `r` | `expose-commands-refine-action-buffer` | Refine the result with a follow-up instruction (see below)        |
 | `q` | `quit-window`                          | Close it                                                           |
+
+#### Refining a result
+
+Experimental. `r` prompts for one line of free text -- e.g. "also add a test for the empty-list case" -- and rebuilds the same result with that folded in, on top of the exact code and context the action first ran against, not whatever point happens to be on now. It works on any successful `SPC c h h` result (Explain, Tests, Fix, all of them); a result that errored has nothing to build on and cannot be refined.
+
+Every refinement you ask for is kept, including "undo that" or "nvm" -- there is no real undo, only another line appended to the list, sent back to the provider numbered and in order so it can work out for itself what "that" refers to and what the combined, final ask actually is. Be specific and reference the most recent request directly (the prompt shows this hint each time); a request several steps back, or one that only makes sense verbally in a longer conversation, is more likely to be misread. The full list-so-far is shown under the header. A refinement that fails leaves the buffer exactly as it was before you asked, so you can try again rather than losing the thread.
 
 ### Diagrams
 

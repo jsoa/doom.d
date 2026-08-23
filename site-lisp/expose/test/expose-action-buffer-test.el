@@ -117,6 +117,47 @@ instead of signaling."
                         (mapcar (lambda (w) (buffer-name (window-buffer w))) (window-list))))))))
 
 ;;; ---------------------------------------------------------------------------
+;;; expose-action-buffer-source-window: where a refinement asked for
+;;; from *inside* this buffer should place its result -- not
+;;; `(selected-window)', which from in here is this buffer's own.
+;;; ---------------------------------------------------------------------------
+
+(ert-deftest expose-action-buffer-test-source-window-finds-buffer-showing-source ()
+  (expose-action-buffer-test-with-clean-frame
+    (let* ((source (expose-action-buffer-test-reset (get-buffer-create "eabt-sw1.py"))))
+      (expose-action-buffer-show
+       (list :title "T" :body "b" :format 'plain) source)
+      (with-selected-window (get-buffer-window expose-action-buffer-name)
+        (should (equal "eabt-sw1.py"
+                       (buffer-name (window-buffer (expose-action-buffer-source-window)))))))))
+
+(ert-deftest expose-action-buffer-test-source-window-falls-back-to-left-window ()
+  "Even if `expose-action-buffer-source' is stale (its buffer no longer
+shown anywhere), the window to the left is still the right answer as
+long as the usual two-pane layout is intact."
+
+  (expose-action-buffer-test-with-clean-frame
+    (let* ((source (expose-action-buffer-test-reset (get-buffer-create "eabt-sw2.py"))))
+      (expose-action-buffer-show
+       (list :title "T" :body "b" :format 'plain) source)
+      (let ((left (window-in-direction 'left (get-buffer-window expose-action-buffer-name))))
+        (set-window-buffer left (get-buffer-create "eabt-sw2-replaced.py")))
+      (with-selected-window (get-buffer-window expose-action-buffer-name)
+        (should (equal "eabt-sw2-replaced.py"
+                       (buffer-name (window-buffer (expose-action-buffer-source-window)))))))))
+
+(ert-deftest expose-action-buffer-test-source-window-falls-back-to-selected-as-last-resort ()
+  "No source buffer recorded, and no window to the left (this is the
+only window) -- the selected window is the only thing left to offer."
+
+  (expose-action-buffer-test-with-clean-frame
+    (let ((sole (expose-action-buffer-test-reset (get-buffer-create "eabt-sw3"))))
+      (with-current-buffer "eabt-sw3"
+        (expose-action-buffer-mode)
+        (setq expose-action-buffer-source nil))
+      (should (eq sole (expose-action-buffer-source-window))))))
+
+;;; ---------------------------------------------------------------------------
 ;;; End to end: rendering plus placement together.
 ;;; ---------------------------------------------------------------------------
 
@@ -152,6 +193,80 @@ previous result's text."
         (with-current-buffer expose-action-buffer-name
           (should (string-match-p "a different answer" (buffer-string)))
           (should-not (string-match-p "the first answer" (buffer-string))))))))
+
+;;; ---------------------------------------------------------------------------
+;;; Refine data and rendering. This module only carries `:refine' and
+;;; renders around it opaquely -- what it actually means, and the
+;;; command that acts on it, live in `expose-commands.el' and are
+;;; tested there.
+;;; ---------------------------------------------------------------------------
+
+(ert-deftest expose-action-buffer-test-stashes-refine-from-view ()
+  (expose-action-buffer-test-with-clean-frame
+    (let ((source (expose-action-buffer-test-reset (get-buffer-create "eabt-refine1.py"))))
+      (expose-action-buffer-show
+       (list :title "Tests" :body "b" :format 'plain
+             :refine (list :type 'tests :context '(:file "x") :refinements '("also add C")))
+       source)
+      (with-current-buffer expose-action-buffer-name
+        (should
+         (equal
+          '(:type tests :context (:file "x") :refinements ("also add C"))
+          expose-action-buffer-refine))))))
+
+(ert-deftest expose-action-buffer-test-refine-absent-when-view-has-none ()
+  (expose-action-buffer-test-with-clean-frame
+    (let ((source (expose-action-buffer-test-reset (get-buffer-create "eabt-refine2.py"))))
+      (expose-action-buffer-show (list :title "Explain" :body "b" :format 'plain) source)
+      (with-current-buffer expose-action-buffer-name
+        (should-not expose-action-buffer-refine)))))
+
+(ert-deftest expose-action-buffer-test-refine-does-not-leak-into-next-unrelated-result ()
+  "A later, unrelated result (no `:refine' of its own) must not inherit
+the previous one's -- otherwise `r' would silently offer to refine
+something it has no actual data for."
+
+  (expose-action-buffer-test-with-clean-frame
+    (let ((source (expose-action-buffer-test-reset (get-buffer-create "eabt-refine3.py"))))
+      (expose-action-buffer-show
+       (list :title "Tests" :body "b" :format 'plain
+             :refine (list :type 'tests :context '(:file "x") :refinements nil))
+       source)
+      (expose-action-buffer-show (list :title "Explain" :body "b2" :format 'plain) source)
+      (with-current-buffer expose-action-buffer-name
+        (should-not expose-action-buffer-refine)))))
+
+(ert-deftest expose-action-buffer-test-renders-refinements-list-and-hint ()
+  (expose-action-buffer-test-with-clean-frame
+    (let ((source (expose-action-buffer-test-reset (get-buffer-create "eabt-refine4.py"))))
+      (expose-action-buffer-show
+       (list :title "Tests" :body "b" :format 'plain
+             :refine (list :type 'tests :context '(:file "x")
+                           :refinements '("also add C" "nvm undo that")))
+       source)
+      (with-current-buffer expose-action-buffer-name
+        (should (string-match-p "1) also add C" (buffer-string)))
+        (should (string-match-p "2) nvm undo that" (buffer-string)))
+        (should (string-match-p "r: refine" (buffer-string)))))))
+
+(ert-deftest expose-action-buffer-test-no-refinements-list-when-none-applied-yet ()
+  (expose-action-buffer-test-with-clean-frame
+    (let ((source (expose-action-buffer-test-reset (get-buffer-create "eabt-refine5.py"))))
+      (expose-action-buffer-show
+       (list :title "Tests" :body "b" :format 'plain
+             :refine (list :type 'tests :context '(:file "x") :refinements nil))
+       source)
+      (with-current-buffer expose-action-buffer-name
+        (should-not (string-match-p "Refinements:" (buffer-string)))
+        ;; Still refinable, hint still shown, even with nothing applied yet.
+        (should (string-match-p "r: refine" (buffer-string)))))))
+
+(ert-deftest expose-action-buffer-test-no-hint-when-not-refinable ()
+  (expose-action-buffer-test-with-clean-frame
+    (let ((source (expose-action-buffer-test-reset (get-buffer-create "eabt-refine6.py"))))
+      (expose-action-buffer-show (list :title "Explain" :body "b" :format 'plain) source)
+      (with-current-buffer expose-action-buffer-name
+        (should-not (string-match-p "r: refine" (buffer-string)))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; History: every kind of result this buffer shows -- a `SPC c h h'

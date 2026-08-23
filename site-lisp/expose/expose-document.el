@@ -7,11 +7,14 @@
 ;;; Builder
 ;;; ---------------------------------------------------------------------------
 
-(defun expose-document-build (type)
-  "Build a document for request TYPE."
+(defun expose-document-build (type &optional context)
+  "Build a document for request TYPE.
+
+CONTEXT is passed through to `expose-request-build' unchanged -- see
+there for when to supply one."
 
   (let ((request
-          (expose-request-build type)))
+          (expose-request-build type context)))
 
     (expose-document-render request)))
 

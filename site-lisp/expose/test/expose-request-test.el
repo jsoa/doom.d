@@ -47,6 +47,75 @@
      (equal (plist-get request :context) '(:file "app.py")))))
 
 ;;; ---------------------------------------------------------------------------
+;;; expose-request-extra-instructions: the seam a refinement injects
+;;; through, without threading a parameter through every
+;;; `expose-request-TYPE' builder -- same technique as
+;;; `expose-context-git-staged-only'.
+;;; ---------------------------------------------------------------------------
+
+(ert-deftest expose-request-test-extra-instructions-absent-by-default ()
+  (let ((request
+         (expose-request-create 'explain 'xml "Explain this." nil)))
+
+    (should
+     (equal
+      (concat "Explain this." "\n\n" expose-request-output-instruction)
+      (plist-get request :instruction)))))
+
+(ert-deftest expose-request-test-extra-instructions-appended-between-base-and-output ()
+  (let ((expose-request-extra-instructions "Also cover the empty case."))
+    (let ((request
+           (expose-request-create 'explain 'xml "Explain this." nil)))
+
+      (should
+       (equal
+        (concat
+         "Explain this." "\n\n"
+         "Also cover the empty case." "\n\n"
+         expose-request-output-instruction)
+        (plist-get request :instruction))))))
+
+(ert-deftest expose-request-test-extra-instructions-also-applies-when-raw ()
+  (let ((expose-request-extra-instructions "Also cover the empty case."))
+    (let ((request
+           (expose-request-create 'commit-message 'xml "Write a commit message." nil t)))
+
+      (should
+       (string-match-p
+        (regexp-quote "Also cover the empty case.")
+        (plist-get request :instruction))))))
+
+;;; ---------------------------------------------------------------------------
+;;; expose-request-build: an explicit CONTEXT is used as-is instead of
+;;; calling expose-context-build -- what lets a refinement rebuild a
+;;; request against the code as it was when the action first ran,
+;;; rather than wherever point has drifted to since.
+;;; ---------------------------------------------------------------------------
+
+(ert-deftest expose-request-test-build-defaults-to-fresh-context ()
+  (cl-letf (((symbol-function 'expose-context-build)
+             (lambda () '(:file "fresh.py"))))
+
+    (should
+     (equal
+      '(:file "fresh.py")
+      (plist-get (expose-request-build 'explain) :context)))))
+
+(ert-deftest expose-request-test-build-reuses-explicit-context ()
+  ;; Stubbed to error rather than return something plausible: proves
+  ;; expose-context-build is genuinely never called when an explicit
+  ;; CONTEXT is given, not just that its result happens to be ignored.
+  (cl-letf (((symbol-function 'expose-context-build)
+             (lambda () (error "must not be called when context is explicit"))))
+
+    (should
+     (equal
+      '(:file "stale.py")
+      (plist-get
+       (expose-request-build 'explain '(:file "stale.py"))
+       :context)))))
+
+;;; ---------------------------------------------------------------------------
 ;;; Regression: commit-message must be raw, changelog must not be.
 ;;;
 ;;; This is the exact mismatch that used to corrupt commit messages inserted

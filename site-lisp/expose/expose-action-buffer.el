@@ -41,6 +41,19 @@ Cosmetic only -- shown in the header -- but also the reason this is
 buffer-local rather than a plain defvar: a stale value from the last
 action must not leak into a fresh one.")
 
+(defvar-local expose-action-buffer-refine nil
+  "Opaque refinement data for this buffer's current content, or nil.
+
+Carried on a view's `:refine' key by whichever caller built it (see
+`expose-action-buffer-insert'), and otherwise meaningless here: this
+module does not know or care what a \"type\" or \"context\" is, only
+that their presence means a follow-up ask is possible, and their
+absence means it is not -- `expose-commands-refine-action-buffer' is
+what actually understands and acts on this plist. A plist with at
+least `:type', `:context', and `:refinements' (the list of follow-up
+asks applied so far, oldest first) when refinement is possible; nil
+when it is not -- currently only a result that errored.")
+
 (define-derived-mode expose-action-buffer-mode special-mode "Expose-Action"
   "Major mode for the Expose action-result buffer.
 
@@ -80,6 +93,31 @@ and when its response arrives -- and should not each carry their own
 copy of it to drift out of sync with each other."
 
   (if (window-live-p window) window (selected-window)))
+
+(defun expose-action-buffer-source-window ()
+  "Return the best window to place a follow-up result relative to.
+
+For an action started from a source buffer, that is simply the window
+the request was invoked from -- but a refinement is asked for from
+*inside* the action buffer itself, where `(selected-window)' is this
+buffer's own window, not the source's. Passing that straight to
+`expose-action-buffer-show' would misfire: seeing a window to its own
+left, it would treat this buffer as if IT were what got actioned, and
+overwrite the real source pane with a copy of itself.
+
+Tries, in order: the window currently showing
+`expose-action-buffer-source' (correct whenever the usual two-pane
+layout is still intact), the window to the left of the selected one
+(correct even if that buffer was replaced by something else since),
+then the selected window itself as a last resort -- not usually
+correct, but a working command beats a hard error when nothing better
+can be found."
+
+  (or
+   (and expose-action-buffer-source
+        (get-buffer-window expose-action-buffer-source))
+   (window-in-direction 'left (selected-window))
+   (selected-window)))
 
 (defun expose-action-buffer-place (source-window)
   "Arrange SOURCE-WINDOW and the action buffer as left/right panes.
@@ -145,9 +183,16 @@ into just as easily as this one already did once."
 
 VIEW is rendered the same way the posframe popup rendered it --
 `expose-popup-render-body', unchanged -- so the colorizing this is
-explicitly meant to keep is not a second implementation of it."
+explicitly meant to keep is not a second implementation of it.
 
-  (let ((inhibit-read-only t))
+Also stashes VIEW's `:refine' key into `expose-action-buffer-refine',
+and, when it is set, renders the refinements applied so far (if any)
+under the header and a one-line hint above the body -- see
+`expose-action-buffer-refine' for what that key means and who sets it."
+
+  (let ((inhibit-read-only t)
+        (refine (plist-get view :refine)))
+
     (erase-buffer)
 
     (insert
@@ -158,9 +203,33 @@ explicitly meant to keep is not a second implementation of it."
 
     (insert "\n")
     (insert (propertize (make-string 60 ?─) 'face 'shadow))
-    (insert "\n\n")
+    (insert "\n")
 
+    (when-let ((refinements (plist-get refine :refinements)))
+      (insert
+       (propertize
+        (concat
+         "Refinements: "
+         (string-join
+          (cl-loop for instruction in refinements
+                   for n from 1
+                   collect (format "%d) %s" n instruction))
+          "  "))
+        'face 'shadow))
+      (insert "\n"))
+
+    (insert "\n")
     (insert (expose-popup-render-body view))
+
+    (when refine
+      (insert "\n\n")
+      (insert (propertize (make-string 60 ?─) 'face 'shadow))
+      (insert
+       (propertize
+        "\nr: refine this result, e.g. \"also add a test for the empty-list case\" or \"undo the last one\""
+        'face 'shadow)))
+
+    (setq expose-action-buffer-refine refine)
 
     (goto-char (point-min))))
 

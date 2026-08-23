@@ -126,6 +126,152 @@ load-order slip here would silently leave results going to the hover."
 
   (should (eq expose-popup-view-display-function #'expose-action-buffer-show)))
 
+;;; ---------------------------------------------------------------------------
+;;; Refining an action buffer result
+;;; ---------------------------------------------------------------------------
+
+(ert-deftest expose-commands-test-action-view-carries-refine-when-type-and-context-given ()
+  (let ((view (expose-action-view "Tests" "the answer" 'tests '(:file "a.py"))))
+    (should
+     (equal
+      '(:type tests :context (:file "a.py") :refinements nil)
+      (plist-get view :refine)))))
+
+(ert-deftest expose-commands-test-action-view-omits-refine-when-type-or-context-missing ()
+  "An error response calls `expose-action-view' with neither -- nothing
+successful yet exists to build a follow-up on."
+
+  (should-not (plist-get (expose-action-view "Tests" "boom") :refine))
+  (should-not (plist-get (expose-action-view "Tests" "boom" 'tests) :refine))
+  (should-not (plist-get (expose-action-view "Tests" "boom" nil '(:file "a.py")) :refine)))
+
+(ert-deftest expose-commands-test-action-view-carries-refinements-through ()
+  (let ((view
+         (expose-action-view "Tests" "the answer" 'tests '(:file "a.py") '("also add C"))))
+
+    (should
+     (equal '("also add C") (plist-get (plist-get view :refine) :refinements)))))
+
+(ert-deftest expose-commands-test-refine-instructions-text-is-numbered-and-framed ()
+  (let ((text (expose-commands-refine-instructions-text '("also add C" "nvm undo that"))))
+
+    (should (string-match-p "1\\. also add C" text))
+    (should (string-match-p "2\\. nvm undo that" text))
+    ;; The framing exists specifically so "undo that" resolves reliably
+    ;; -- see the discussion this was built from.
+    (should (string-match-p "follow-up refinements" text))))
+
+(defmacro expose-commands-test-with-stub-transport (response-var &rest body)
+  "Run BODY with `expose-transport-send-document-async' stubbed.
+
+RESPONSE-VAR is bound to a mutable cons `(kind . value)': set it to
+`(success . \"text\")' or `(error . \"message\")' before an action runs
+to control what the stub hands back. The document actually sent is
+recorded into `expose-commands-test-last-document', for assertions
+about what a refinement folded into the request."
+
+  (declare (indent 1))
+  `(let ((,response-var (cons 'success "stub response"))
+         (expose-commands-test-last-document nil))
+     (cl-letf (((symbol-function 'expose-transport-send-document-async)
+                (lambda (_provider document success-cb _project-root error-cb)
+                  (setq expose-commands-test-last-document document)
+                  (pcase (car ,response-var)
+                    ('success (funcall success-cb (cdr ,response-var)))
+                    ('error (funcall error-cb (list 'error (cdr ,response-var)))))
+                  'stub-process)))
+       ,@body)))
+
+(defmacro expose-commands-test-with-refinable-buffer (&rest body)
+  "Run BODY with `expose-action-buffer-name' current, selected, and
+showing a refinable result -- as if a real `SPC c h h' action had just
+completed. `widgets.py' (a plain buffer, not visiting a real file) is
+the source, to its left."
+
+  (declare (indent 0))
+  `(let ((response (cons 'success "stub response")))
+     ;; Stubbed: real `expose-context-build' reaches out to Projectile,
+     ;; Flycheck, imenu and the like, none of which this test suite
+     ;; runs against real implementations of (see
+     ;; `test/stubs/projectile.el'). These tests are about the refine
+     ;; mechanism -- accumulation, undo-by-append, rollback-on-error --
+     ;; not about context-building itself, which has its own coverage.
+     (cl-letf (((symbol-function 'expose-context-build)
+                (lambda () '(:file "ecrt-widgets.py"))))
+       (expose-commands-test-with-stub-transport response
+         (unwind-protect
+             (progn
+               (delete-other-windows)
+               (switch-to-buffer (get-buffer-create "ecrt-widgets.py"))
+               (expose-popup-register-action
+                ?T "Tests" 'view
+                (lambda (cb) (expose-send-view-action-async 'tests "Tests" cb))
+                :async t)
+               (expose-popup-run-action ?T)
+               (with-selected-window (get-buffer-window expose-action-buffer-name)
+                 ,@body))
+           (delete-other-windows)
+           (when (get-buffer expose-action-buffer-name)
+             (kill-buffer expose-action-buffer-name))
+           (when (get-buffer "ecrt-widgets.py")
+             (kill-buffer "ecrt-widgets.py")))))))
+
+(ert-deftest expose-commands-test-refine-accumulates-and-resends-both-on-undo ()
+  "The full round trip: two refinements, the second an \"undo\", both
+kept -- nothing is ever popped, matching the design this was built to."
+
+  (expose-commands-test-with-refinable-buffer
+    (setq response (cons 'success "tests with C"))
+    (cl-letf (((symbol-function 'read-string) (lambda (&rest _) "also add a test for C")))
+      (call-interactively #'expose-commands-refine-action-buffer))
+
+    (should (equal '("also add a test for C")
+                    (plist-get expose-action-buffer-refine :refinements)))
+
+    (setq response (cons 'success "tests without C"))
+    (cl-letf (((symbol-function 'read-string) (lambda (&rest _) "nvm undo that")))
+      (call-interactively #'expose-commands-refine-action-buffer))
+
+    (should (equal '("also add a test for C" "nvm undo that")
+                    (plist-get expose-action-buffer-refine :refinements)))
+    (should (string-match-p "1\\. also add a test for C" expose-commands-test-last-document))
+    (should (string-match-p "2\\. nvm undo that" expose-commands-test-last-document))
+    (with-current-buffer expose-action-buffer-name
+      (should (string-match-p "tests without C" (buffer-string))))))
+
+(ert-deftest expose-commands-test-refine-empty-input-is-a-noop ()
+  (expose-commands-test-with-refinable-buffer
+    (let ((before (plist-get expose-action-buffer-refine :refinements)))
+      (cl-letf (((symbol-function 'read-string) (lambda (&rest _) "   ")))
+        (call-interactively #'expose-commands-refine-action-buffer))
+      (should (equal before (plist-get expose-action-buffer-refine :refinements))))))
+
+(ert-deftest expose-commands-test-refine-failure-rolls-back-but-stays-refinable ()
+  (expose-commands-test-with-refinable-buffer
+    (setq response (cons 'success "tests with C"))
+    (cl-letf (((symbol-function 'read-string) (lambda (&rest _) "also add a test for C")))
+      (call-interactively #'expose-commands-refine-action-buffer))
+
+    (setq response (cons 'error "provider exploded"))
+    (cl-letf (((symbol-function 'read-string) (lambda (&rest _) "this one fails")))
+      (call-interactively #'expose-commands-refine-action-buffer))
+
+    (with-current-buffer expose-action-buffer-name
+      (should (string-match-p "Refinement failed" (buffer-string)))
+      (should expose-action-buffer-refine)
+      ;; The failed ask is dropped, not silently kept as if it had
+      ;; succeeded -- only the prior, successful one survives.
+      (should (equal '("also add a test for C")
+                      (plist-get expose-action-buffer-refine :refinements))))))
+
+(ert-deftest expose-commands-test-refine-refuses-without-refine-data ()
+  (expose-commands-test-with-refinable-buffer
+    (with-current-buffer expose-action-buffer-name
+      (setq expose-action-buffer-refine nil))
+    (should-error
+     (call-interactively #'expose-commands-refine-action-buffer)
+     :type 'user-error)))
+
 (provide 'expose-commands-test)
 
 ;;; expose-commands-test.el ends here

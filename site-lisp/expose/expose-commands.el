@@ -10,6 +10,9 @@
 (require 'expose-transport)
 (require 'expose-provider)
 (require 'expose-diagram)
+(require 'expose-context)
+(require 'expose-document)
+(require 'expose-request)
 
 ;; Loaded on demand by `expose-run-reverse-call-graph' rather than up
 ;; front: it pulls in `xref' and only matters if that one command is
@@ -1715,15 +1718,39 @@ but `s' to check against the DOT source is the real safeguard."
 ;;; Views
 ;;; ---------------------------------------------------------------------------
 
-(defun expose-action-view (title response)
-  "Create an Expose popup view with TITLE and RESPONSE."
+(defun expose-action-view (title response &optional type context refinements)
+  "Create an Expose popup view with TITLE and RESPONSE.
 
-  (expose-popup-view-create
-   title
-   response))
+TYPE and CONTEXT, when both given, are carried on a `:refine' key --
+see `expose-action-buffer-refine' for what it holds and who reads it --
+so this result can later be rebuilt with an amended instruction rather
+than left a dead end. REFINEMENTS is the list of follow-up asks already
+applied to reach this result, oldest first; omitted for a fresh,
+not-yet-refined one.
+
+Omit TYPE/CONTEXT entirely for a result that should not be refinable at
+all -- an error response, say, where there is nothing successful yet to
+build on."
+
+  (let ((view
+         (expose-popup-view-create title response)))
+
+    (if (and type context)
+        (plist-put
+         view :refine
+         (list :type type :context context :refinements refinements))
+      view)))
 
 (defun expose-send-view-action-async (type title callback)
-  "Send TYPE asynchronously and call CALLBACK with a titled popup view."
+  "Send TYPE asynchronously and call CALLBACK with a titled popup view.
+
+Context is built once, up front -- not inside `expose-document-build'
+itself, though that would be the more obvious place -- specifically so
+it can be captured and threaded onto the resulting view's `:refine'
+key. A refinement rebuilds this exact request later with an amended
+instruction, and needs the code it was originally about, not whatever
+`expose-context-build' would return if it ran again at that later
+point, from wherever point has drifted to since."
 
   (expose-log
    "Command"
@@ -1731,40 +1758,44 @@ but `s' to check against the DOT source is the real safeguard."
    type
    expose-provider-default)
 
-  (expose-commands-send-document-async
-   (symbol-name type)
-   expose-provider-default
-   (expose-document-build type)
-   nil
+  (let ((context (expose-context-build)))
 
-   (lambda (response)
+    (expose-commands-send-document-async
+     (symbol-name type)
+     expose-provider-default
+     (expose-document-build type context)
+     nil
 
-     (expose-log
-      "Command"
-      "Async action %s returned response (%d bytes)."
-      type
-      (length response))
+     (lambda (response)
 
-     (funcall
-      callback
-      (expose-action-view title response))
+       (expose-log
+        "Command"
+        "Async action %s returned response (%d bytes)."
+        type
+        (length response))
 
-     (expose-log
-      "Command"
-      "Async action %s completed."
-      type))
+       (funcall
+        callback
+        (expose-action-view title response type context))
 
-   (lambda (error-message)
+       (expose-log
+        "Command"
+        "Async action %s completed."
+        type))
 
-     (expose-log
-      "Command"
-      "Async action %s failed: %s"
-      type
-      error-message)
+     (lambda (error-message)
 
-     (funcall
-      callback
-      (expose-action-view title error-message)))))
+       (expose-log
+        "Command"
+        "Async action %s failed: %s"
+        type
+        error-message)
+
+       ;; No :refine here -- nothing succeeded yet to build a follow-up
+       ;; on top of.
+       (funcall
+        callback
+        (expose-action-view title error-message))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Action Commands
@@ -2260,6 +2291,151 @@ but `s' to check against the DOT source is the real safeguard."
 ;; before.
 
 (setq expose-popup-view-display-function #'expose-action-buffer-show)
+
+;;; ---------------------------------------------------------------------------
+;;; Refining an action buffer result
+;;; ---------------------------------------------------------------------------
+;;
+;; Experimental. Every `SPC c h h' action funnels through
+;; `expose-send-view-action-async', so every one of them -- Explain,
+;; Tests, Fix, all the rest -- ends up refinable; the one thing that
+;; is not is a result that errored (see `expose-action-buffer-refine'),
+;; since there is nothing successful yet to build a follow-up on.
+
+(defun expose-commands-refine-instructions-text (refinements)
+  "Format REFINEMENTS as text for `expose-request-extra-instructions'.
+
+Explicitly numbered and framed as an ordered sequence, not left as a
+flat blob of concatenated asks: a follow-up like \"undo that\" is only
+reliably resolved by the model when it can see exactly which numbered
+item \"that\" refers to."
+
+  (concat
+   "The user has asked for these follow-up refinements to your previous "
+   "answer, in the order given. A later one may reference or countermand "
+   "an earlier one by position (e.g. \"undo that\" or \"nvm\" refers to "
+   "the item immediately before it) -- apply your best judgment for what "
+   "the combined, final intent is, then answer accordingly:\n\n"
+   (string-join
+    (cl-loop for instruction in refinements
+             for n from 1
+             collect (format "%d. %s" n instruction))
+    "\n")))
+
+(defun expose-commands-refine-action-buffer ()
+  "Refine the action buffer's current result with a follow-up instruction.
+
+Prompts for one line of free text, folds it into the growing list of
+refinements applied so far, and rebuilds the *same* request -- same
+type, same context captured when the action first ran -- with that
+list appended as extra instruction text, asking the provider to read
+back through it and act on the combined intent.
+
+Nothing is ever removed from the list, including after \"undo that\" --
+undo is just one more entry for the model to reconcile against what
+came before, not a real rewind (seemed easier to actually get right
+than tracking real undo state, and cheap to try first). A failed
+refinement drops back to the state before it was asked, so the buffer
+stays refinable for another attempt rather than dead-ending."
+
+  (interactive)
+
+  (unless expose-action-buffer-refine
+    (user-error "This result cannot be refined"))
+
+  (let* ((refine expose-action-buffer-refine)
+         (type (plist-get refine :type))
+         (context (plist-get refine :context))
+         (title (plist-get refine :title))
+         (previous-refinements (plist-get refine :refinements))
+
+         (instruction
+          (string-trim
+           (read-string
+            (format
+             "Refine %s (e.g. \"also add a test for the empty-list case\", \"undo that\"): "
+             title)))))
+
+    (if (string-empty-p instruction)
+
+        (message "Refine cancelled (empty input)")
+
+      (let* ((refinements
+              (append previous-refinements (list instruction)))
+
+             (placement-window
+              (expose-action-buffer-source-window)))
+
+        (expose-log
+         "Command"
+         "Refining %s action with %d refinement(s): %s"
+         type
+         (length refinements)
+         instruction)
+
+        ;; Shown immediately, not just on completion: carries the new
+        ;; instruction in its own `:refine' data too, so the
+        ;; refinements list visibly grows right away rather than
+        ;; flashing blank during the request.
+        (expose-action-buffer-show
+         (list
+          :title title
+          :body "Loading..."
+          :format 'plain
+          :history nil
+          :refine (list :type type :context context :title title
+                        :refinements refinements))
+         placement-window)
+
+        (let ((expose-request-extra-instructions
+               (expose-commands-refine-instructions-text refinements)))
+
+          (expose-commands-send-document-async
+           (format "%s (refine)" (symbol-name type))
+           expose-provider-default
+           (expose-document-build type context)
+           nil
+
+           (lambda (response)
+
+             (expose-log
+              "Command"
+              "Refinement of %s returned response (%d bytes)."
+              type
+              (length response))
+
+             (expose-action-buffer-show
+              (expose-action-view title response type context refinements)
+              placement-window))
+
+           (lambda (error-message)
+
+             (expose-log
+              "Command"
+              "Refinement of %s failed: %s"
+              type
+              error-message)
+
+             ;; Rolled back to PREVIOUS-REFINEMENTS, not REFINEMENTS --
+             ;; the failed ask never actually got answered, so keeping
+             ;; it in the list next time would misrepresent it as
+             ;; already having been acted on.
+             (expose-action-buffer-show
+              (list
+               :title title
+               :body (format "Refinement failed: %s" error-message)
+               :format 'plain
+               :history nil
+               :refine (list :type type :context context :title title
+                             :refinements previous-refinements))
+              placement-window))))))))
+
+(with-eval-after-load 'evil
+  (evil-define-key* 'normal expose-action-buffer-mode-map
+    (kbd "r") #'expose-commands-refine-action-buffer)
+
+  (evil-define-key* 'motion expose-action-buffer-mode-map
+    (kbd "r") #'expose-commands-refine-action-buffer))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Debug

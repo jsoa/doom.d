@@ -21,6 +21,23 @@ popup."
 ;;; ---------------------------------------------------------------------------
 
 
+(defvar expose-request-extra-instructions nil
+  "Extra instruction text appended to the next request built via
+`expose-request-create', after INSTRUCTION and before the output-format
+instruction, or nil for none.
+
+Dynamically scoped rather than threaded as a parameter through every
+`expose-request-TYPE' builder, the same reason
+`expose-context-git-staged-only' is: exactly one caller needs to inject
+something here, and every `expose-request-TYPE' function already
+funnels through this single convergence point regardless of which one
+it is, so there is no real parameter to thread -- only a value to
+notice if it happens to be set. Set by
+`expose-commands-refine-action-buffer' around the one request a
+refinement rebuilds, carrying the accumulated transcript of follow-up
+asks (\"also add a test for the empty-list case\", \"undo that\", ...)
+for the provider to read back through and act on.")
+
 (defun expose-request-create (type document-format instruction context &optional raw)
   "Return a request object.
 
@@ -33,11 +50,14 @@ inserted directly into a buffer rather than displayed as Markdown."
    :document-format document-format
    :instruction
    (string-join
-    (list
-     instruction
-     (if raw
-         expose-request-raw-output-instruction
-       expose-request-output-instruction))
+    (delq
+     nil
+     (list
+      instruction
+      expose-request-extra-instructions
+      (if raw
+          expose-request-raw-output-instruction
+        expose-request-output-instruction)))
     "\n\n")
    :context context))
 
@@ -827,11 +847,18 @@ than a change to what `expose-context-with-git' does by default."
 ;;; Dispatcher
 ;;; ---------------------------------------------------------------------------
 
-(defun expose-request-build (type)
-  "Build a request of TYPE."
+(defun expose-request-build (type &optional context)
+  "Build a request of TYPE.
+
+CONTEXT defaults to a freshly built `(expose-context-build)', reading
+point/region/buffer as they are right now. Pass one in to reuse context
+captured earlier instead: a refinement rebuilds the same request with
+an amended instruction, and the code it is about must stay exactly
+what it was when the action first ran, not wherever point drifted to
+by the time a follow-up was asked."
 
   (let ((context
-         (expose-context-build)))
+         (or context (expose-context-build))))
 
     (pcase type
       ('review

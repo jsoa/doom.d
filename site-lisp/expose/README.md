@@ -14,7 +14,7 @@ Expose gives you a lightweight code-context command center at point:
 - Falls back to Eldoc when LSP hover is unavailable.
 - Shows Flycheck diagnostics at point.
 - Displays a small `posframe` popup for hover, diagnostics, and Watch/Review comments.
-- Shows Thing at Point action results in a persistent, colorized side window.
+- Shows Thing at Point action results and Region Review results in a persistent, colorized side window.
 - Runs provider-backed code actions asynchronously.
 - Supports Clipboard, Codex, Copilot, Claude Code, and other provider implementations.
 - Captures popup history for Watch, Full Review, Region Review, and Thing at Point results.
@@ -251,7 +251,7 @@ These actions use the active region when one is selected, falling back to the po
 | `SPC c h h m` | `expose-run-mental-model`            | Build a mental model                 |
 | `SPC c h h ?` | `expose-hover-debug-current-buffer`  | Debug current buffer hover state     |
 
-A Thing at Point result does not show in the small hover popup -- these answers routinely ran longer than a hover has room for. Instead it opens in a persistent, colorized `*EXPOSE Action*` window: the buffer you actioned always ends up on the left, and the result always ends up in the window immediately to its right, splitting the frame if there was only one window open. It stays open, showing only the most recent action's result, until you close it (`q`) or run another action anywhere. Each result is also recorded to popup history (`SPC c h H`), same as before. Watch, Full Review, and Region Review are unaffected -- their own hovers and source popups still work exactly as before.
+A Thing at Point result does not show in the small hover popup -- these answers routinely ran longer than a hover has room for. Instead it opens in a persistent, colorized `*EXPOSE Action*` window: the buffer you actioned always ends up on the left, and the result always ends up in the window immediately to its right, splitting the frame if there was only one window open. It stays open, showing only the most recent action's result, until you close it (`q`) or run another action anywhere. Each result is also recorded to popup history (`SPC c h H`), same as before. Region Review's own results share this same window -- see "Region Reviews" below. Watch and Full Review are unaffected -- their hovers and source popups still work exactly as before.
 
 ### Diagrams
 
@@ -613,7 +613,7 @@ Region Review is a persistent selected-region review workflow.
 select region
 SPC c h M m
   -> review selected source range
-  -> show full review popup when ready
+  -> show full review in the persistent action buffer when ready
   -> keep source markers active until completed/canceled
 ```
 
@@ -625,9 +625,11 @@ Region Review behavior:
 - Rejects overlapping active region reviews in the same file.
 - Shows a subtle active-region indicator.
 - Shows right-fringe markers for active review ranges.
-- Shows item hovers only on concrete review item lines.
+- Shows item hovers only on concrete review item lines, in the small hover popup.
 - Does not auto-popup merely by moving through the active region.
 - Can be completed or canceled from the source buffer.
+
+The review's own results -- the "Reviewing..." message shown as soon as it starts, and the full review once it completes, fails, or times out -- open in the same persistent `*EXPOSE Action*` window Thing at Point results use, placed and recorded to history the same way. Only the per-item hover (resting on a single flagged line) stays in the small popup; Full Review's source hover is unaffected by any of this.
 
 Active and historical region reviews are stored under:
 

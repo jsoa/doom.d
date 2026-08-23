@@ -7,6 +7,7 @@
 (require 'markdown-mode nil t)
 (require 'expose-log)
 (require 'expose-popup)
+(require 'expose-action-buffer)
 (require 'expose-provider)
 (require 'expose-redact)
 (require 'expose-transport)
@@ -1160,19 +1161,24 @@ overlay, which deliberately does cover blank lines/line endings."
          items)
         "\n\n"))))))
 
-(defun expose-review-region-show-full-session (session)
-  "Show full region review SESSION."
+(defun expose-review-region-show-full-session (session &optional source-window)
+  "Show full region review SESSION in the persistent action buffer.
 
-  (expose-popup-show-view
+SOURCE-WINDOW places it the same way a `SPC c h h' result would --
+defaults to the selected window, correct for the synchronous
+`expose-review-region-show-full-at-point' path; the asynchronous path
+in `expose-review-region' itself captures the window the review was
+started from and passes it explicitly, since the selected window by
+the time a response arrives may be anywhere."
+
+  (expose-action-buffer-show
    (list
     :title "Region Review"
     :body
     (expose-review-region-render-markdown
      (expose-review-region-full-markdown session))
-    :history t))
-
-  (when (eq (plist-get session :state) 'running)
-    (expose-popup-set-mode-line "Loading Region Review")))
+    :history t)
+   (or source-window (selected-window))))
 
 (defun expose-review-region-source-clear ()
   "Clear active region review overlays in current buffer."
@@ -1560,13 +1566,14 @@ lookup, but quadratic here across a multi-line range."
   expose-review-region-source-enable-if-file)
 
 (defun expose-review-region-show-error (message)
-  "Show region review error MESSAGE in popup."
+  "Show region review error MESSAGE in the persistent action buffer."
 
-  (expose-popup-show-view
+  (expose-action-buffer-show
    (list
     :title "Review Region"
     :body message
-    :history nil)))
+    :history nil)
+   (selected-window)))
 
 ;;;###autoload
 (defun expose-review-region (start end)
@@ -1579,6 +1586,13 @@ lookup, but quadratic here across a multi-line range."
 
   (let* ((source-buffer
           (current-buffer))
+
+         ;; Captured now, not read at display time: by the time an async
+         ;; response arrives, the selected window may be anywhere, and
+         ;; the result belongs next to where this review was started,
+         ;; the same way a `SPC c h h' action's result does.
+         (source-window
+          (selected-window))
 
          (project-root
           (expose-review-region-project-root))
@@ -1645,7 +1659,7 @@ lookup, but quadratic here across a multi-line range."
       (expose-review-region-save-active session)
       (expose-review-region-source-refresh-all)
 
-      (expose-popup-show-view
+      (expose-action-buffer-show
        (list
         :title "Region Review"
         :body
@@ -1655,9 +1669,8 @@ lookup, but quadratic here across a multi-line range."
           file
           line-start
           line-end))
-        :history nil))
-
-      (expose-popup-set-mode-line "Loading Region Review")
+        :history nil)
+       source-window)
 
       (expose-log
        "ReviewRegion"
@@ -1709,7 +1722,7 @@ lookup, but quadratic here across a multi-line range."
                        (expose-review-region-deactivate-selection)
 
                        (expose-review-region-show-full-session
-                        latest-session))))))))
+                        latest-session source-window))))))))
 
       (expose-review-region-register-process
        id
@@ -1765,7 +1778,7 @@ lookup, but quadratic here across a multi-line range."
                         (expose-review-region-deactivate-selection)
 
                         (expose-review-region-show-full-session
-                         latest-session)))
+                         latest-session source-window)))
 
                     (expose-log
                      "ReviewRegion"
@@ -1796,7 +1809,7 @@ lookup, but quadratic here across a multi-line range."
                      (expose-review-region-deactivate-selection)
 
                      (expose-review-region-show-full-session
-                      latest-session))))))))
+                      latest-session source-window))))))))
 
         project-root
 
@@ -1836,7 +1849,7 @@ lookup, but quadratic here across a multi-line range."
                 (expose-review-region-deactivate-selection)
 
                 (expose-review-region-show-full-session
-                 latest-session)))
+                 latest-session source-window)))
 
             (message
              "Expose region review failed: %s"

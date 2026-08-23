@@ -154,6 +154,34 @@ previous result's text."
           (should-not (string-match-p "the first answer" (buffer-string))))))))
 
 ;;; ---------------------------------------------------------------------------
+;;; History: every kind of result this buffer shows -- a `SPC c h h'
+;;; action, a Region Review result -- is meant to keep landing in popup
+;;; history exactly as it did when `expose-popup-show-view' was the one
+;;; adding it, now that this buffer is what actually shows them.
+;;; ---------------------------------------------------------------------------
+
+(ert-deftest expose-action-buffer-test-show-records-to-history ()
+  (expose-action-buffer-test-with-clean-frame
+    (let ((source (expose-action-buffer-test-reset (get-buffer-create "eabt-hist.py")))
+          (view (expose-popup-view-create "Explain" "the answer"))
+          recorded)
+      (cl-letf (((symbol-function 'expose-history-add) (lambda (v) (setq recorded v))))
+        (expose-action-buffer-show view source)
+        (should (eq recorded view))))))
+
+(ert-deftest expose-action-buffer-test-show-skips-history-for-history-nil-view ()
+  "A view marked `:history nil' -- the transient `Loading...' placeholder,
+or a caller's own quick error message -- is shown but not recorded."
+
+  (expose-action-buffer-test-with-clean-frame
+    (let ((source (expose-action-buffer-test-reset (get-buffer-create "eabt-hist2.py")))
+          (view (list :title "Explain" :body "Loading..." :history nil))
+          recorded)
+      (cl-letf (((symbol-function 'expose-history-add) (lambda (v) (setq recorded v))))
+        (expose-action-buffer-show view source)
+        (should-not recorded)))))
+
+;;; ---------------------------------------------------------------------------
 ;;; Markdown markup hiding: `expose-popup-render-body' marks a rendered
 ;;; `**bold**''s asterisks `invisible markdown-markup', but a property
 ;;; alone hides nothing -- `buffer-invisibility-spec' must also name that

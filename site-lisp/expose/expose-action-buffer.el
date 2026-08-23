@@ -24,6 +24,7 @@
 (require 'subr-x)
 (require 'expose-log)
 (require 'expose-popup)
+(require 'expose-history)
 
 (defconst expose-action-buffer-name "*EXPOSE Action*"
   "Name of the persistent action-result buffer.
@@ -166,7 +167,17 @@ the caller before the (usually asynchronous) request was sent -- by the
 time a response arrives, point may have moved anywhere, so this cannot
 be discovered here. Falls back to the currently selected window if
 SOURCE-WINDOW is no longer live, which is a reasonable place to put a
-result even though it is not the one the request was actually about."
+result even though it is not the one the request was actually about.
+
+Also adds VIEW to popup history, unless it carries `:history nil' --
+`expose-popup-view-history-p', reused as-is rather than reimplemented,
+is what `expose-popup-show-view' itself has always checked before
+adding a view, and every kind of result this buffer shows (a `SPC c h
+h' action, a Region Review result) is meant to keep landing in history
+exactly as it did before it had a persistent window of its own to show
+in. The one thing that should not: the transient \"Loading...\"
+placeholder a caller shows while a request is in flight, which is why
+this check exists at all rather than adding unconditionally."
 
   (let* ((placement-window (expose-action-buffer-live-window source-window))
 
@@ -189,6 +200,9 @@ result even though it is not the one the request was actually about."
 
       (expose-action-buffer-insert view source-buffer)
       (setq expose-action-buffer-source source-buffer))
+
+    (when (expose-popup-view-history-p view)
+      (expose-history-add view))
 
     (let ((result-window (expose-action-buffer-place placement-window)))
       (set-window-point result-window (point-min))

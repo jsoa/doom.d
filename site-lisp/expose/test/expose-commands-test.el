@@ -82,44 +82,23 @@
     "")))
 
 ;;; ---------------------------------------------------------------------------
-;;; expose-commands-show-action-view
+;;; Where `SPC c h h' results are shown
 ;;;
 ;;; The wiring that redirects `SPC c h h' results into the persistent
-;;; action buffer -- and, since that bypasses `expose-popup-show-view'
-;;; (the function `expose-history-add' used to piggyback on), the place
-;;; that has to add them to history itself instead.
+;;; action buffer, set directly to `expose-action-buffer-show' (no
+;;; wrapper needed -- see the comment above the `setq' in
+;;; `expose-commands.el'). What that function itself does with a
+;;; view -- placement, rendering, adding to history -- is tested in
+;;; `expose-action-buffer-test.el', not duplicated here.
 ;;; ---------------------------------------------------------------------------
-
-(ert-deftest expose-commands-test-show-action-view-shows-and-records ()
-  (let ((shown nil) (recorded nil)
-        (view (expose-popup-view-create "Explain" "the answer")))
-    (cl-letf (((symbol-function 'expose-action-buffer-show)
-               (lambda (v _sw) (setq shown v)))
-              ((symbol-function 'expose-history-add)
-               (lambda (v) (setq recorded v))))
-      (expose-commands-show-action-view view 'a-window)
-      (should (eq shown view))
-      (should (eq recorded view)))))
-
-(ert-deftest expose-commands-test-show-action-view-skips-history-for-loading-view ()
-  "The transient `Loading...' placeholder (`:history nil') is shown but
-must not be recorded -- only the real result should be."
-
-  (let ((recorded nil)
-        (view (expose-popup-loading-view "Explain")))
-    (cl-letf (((symbol-function 'expose-action-buffer-show) (lambda (&rest _) nil))
-              ((symbol-function 'expose-history-add) (lambda (v) (setq recorded v))))
-      (expose-commands-show-action-view view 'a-window)
-      (should-not recorded))))
 
 (ert-deftest expose-commands-test-action-buffer-shows-loading-before-async-result ()
   "The action buffer opens immediately with a loading message, before an
 async action's result arrives -- not just once the response lands.
 
-Exercised through the real pipeline (`expose-popup-run-action', not
-`expose-commands-show-action-view' directly) since that loading call is
-`expose-popup-run-view-action's responsibility, not this wrapper's; this
-test is about the two staying wired together correctly."
+Exercised through the real pipeline (`expose-popup-run-action'), since
+that loading call is `expose-popup-run-view-action's responsibility;
+this test is about the two staying wired together correctly."
 
   (let (pending-cb)
     (unwind-protect
@@ -145,7 +124,7 @@ test is about the two staying wired together correctly."
 away from `expose-popup-show-view' -- confirm it actually did, since a
 load-order slip here would silently leave results going to the hover."
 
-  (should (eq expose-popup-view-display-function #'expose-commands-show-action-view)))
+  (should (eq expose-popup-view-display-function #'expose-action-buffer-show)))
 
 (provide 'expose-commands-test)
 

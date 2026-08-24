@@ -223,6 +223,122 @@ than one keyword argument, not an edge case."
    (equal "Widget.objects.filter(x=1)"
           (expose-orm-resolve-self "Widget.objects.filter(x=1)"))))
 
+;;; ---------------------------------------------------------------------------
+;;; expose-orm-local-self-alias / expose-orm-resolve-local-alias
+;;;
+;;; `queryset = self.queryset' followed later by `queryset.filter(...)'
+;;; -- the standard shape of a `get_queryset' override that narrows the
+;;; class's own `queryset' -- is one hop further back than
+;;; `self.queryset.filter(...)' itself, but resolvable the same way.
+;;; ---------------------------------------------------------------------------
+
+(ert-deftest expose-orm-test-local-self-alias-finds-simple-assignment ()
+  (let ((buffer
+         (expose-orm-test-python-buffer
+          "class WidgetViewSet:\n    def get_queryset(self):\n        queryset = self.queryset\n        return queryset.filter(x=1)\n"
+          "return queryset")))
+    (unwind-protect
+        (with-current-buffer buffer
+          (should (equal "queryset" (expose-orm-local-self-alias "queryset"))))
+      (kill-buffer buffer))))
+
+(ert-deftest expose-orm-test-local-self-alias-nil-for-unknown-name ()
+  (let ((buffer
+         (expose-orm-test-python-buffer
+          "class WidgetViewSet:\n    def get_queryset(self):\n        queryset = self.queryset\n        return queryset.filter(x=1)\n"
+          "return queryset")))
+    (unwind-protect
+        (with-current-buffer buffer
+          (should-not (expose-orm-local-self-alias "not_a_real_name")))
+      (kill-buffer buffer))))
+
+(ert-deftest expose-orm-test-local-self-alias-ignores-a-further-reassignment ()
+  "A later `queryset = queryset.filter(...)' does not match the simple
+`NAME = self.ATTR' shape this looks for, so it is not mistaken for the
+alias itself -- the original assignment further up is still what gets
+found."
+
+  (let ((buffer
+         (expose-orm-test-python-buffer
+          "class WidgetViewSet:\n    def get_queryset(self):\n        queryset = self.queryset\n        queryset = queryset.filter(x=1)\n        return queryset.filter(y=2)\n"
+          "return queryset")))
+    (unwind-protect
+        (with-current-buffer buffer
+          (should (equal "queryset" (expose-orm-local-self-alias "queryset"))))
+      (kill-buffer buffer))))
+
+(ert-deftest expose-orm-test-local-self-alias-nil-outside-a-method ()
+  (let ((buffer
+         (expose-orm-test-python-buffer
+          "queryset = self.queryset\nx = queryset.filter(y=1)\n"
+          "queryset.filter")))
+    (unwind-protect
+        (with-current-buffer buffer
+          (should-not (expose-orm-local-self-alias "queryset")))
+      (kill-buffer buffer))))
+
+(ert-deftest expose-orm-test-resolve-local-alias-substitutes-self-form ()
+  (let ((buffer
+         (expose-orm-test-python-buffer
+          "class WidgetViewSet:\n    def get_queryset(self):\n        queryset = self.queryset\n        return queryset.filter(x=1)\n"
+          "return queryset")))
+    (unwind-protect
+        (with-current-buffer buffer
+          (should
+           (equal "self.queryset.filter(x=1)"
+                  (expose-orm-resolve-local-alias "queryset.filter(x=1)"))))
+      (kill-buffer buffer))))
+
+(ert-deftest expose-orm-test-resolve-local-alias-unchanged-without-an-alias ()
+  (let ((buffer
+         (expose-orm-test-python-buffer "x = Widget.objects.all()\n" "Widget")))
+    (unwind-protect
+        (with-current-buffer buffer
+          (should
+           (equal "Widget.objects.filter(x=1)"
+                  (expose-orm-resolve-local-alias "Widget.objects.filter(x=1)"))))
+      (kill-buffer buffer))))
+
+(ert-deftest expose-orm-test-resolve-local-alias-does-not-touch-bare-self ()
+  "`self' itself must go through `expose-orm-resolve-self', not be
+treated as a local name needing its own alias lookup."
+
+  (let ((buffer
+         (expose-orm-test-python-buffer
+          "class WidgetViewSet:\n    def get_queryset(self):\n        return self.queryset.filter(x=1)\n"
+          "self.queryset")))
+    (unwind-protect
+        (with-current-buffer buffer
+          (should
+           (equal "self.queryset.filter(x=1)"
+                  (expose-orm-resolve-local-alias "self.queryset.filter(x=1)"))))
+      (kill-buffer buffer))))
+
+(ert-deftest expose-orm-test-expression-resolves-alias-across-branches ()
+  "End to end, through `expose-orm-expression': the exact shape a
+`get_queryset' override narrowing by an `if'/`else' branch has --
+`queryset = self.queryset' at the top, each branch building on it
+differently further down."
+
+  (let ((buffer
+         (expose-orm-test-python-buffer
+          (concat
+           "class EventViewSet:\n"
+           "    def get_queryset(self):\n"
+           "        queryset = self.queryset\n"
+           "        if condition:\n"
+           "            queryset = queryset.filter(x=1)\n"
+           "        else:\n"
+           "            queryset = queryset.filter(y=2)\n"
+           "        return queryset\n")
+          "queryset = queryset.filter(y=2)")))
+    (unwind-protect
+        (with-current-buffer buffer
+          (beginning-of-line)
+          (should
+           (equal "EventViewSet.queryset.filter(y=2)" (expose-orm-expression))))
+      (kill-buffer buffer))))
+
 (provide 'expose-orm-test)
 
 ;;; expose-orm-test.el ends here

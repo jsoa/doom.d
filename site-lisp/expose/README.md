@@ -543,6 +543,20 @@ What that cannot reach is **locals**: `request`, a loop variable, anything only 
 
 **A leading `self.` is the one local this resolves outright**, since `self.queryset.filter(...)` — the standard DRF/CBV shape — is ordinarily the exact same object as the class's own `queryset = Model.objects.filter(...)` attribute. Selecting from inside a method resolves that leading `self.` to its enclosing class before sending the expression, so `self.queryset.filter(status="open")` is inspected as `MyViewSet.queryset.filter(status="open")`. This assumes `queryset` really is set at the class level rather than only ever computed by a `get_queryset()` override or a `@property` — when it is not, the class-level lookup fails with its own clear error instead of pretending to work.
 
+**A local that is itself just an alias for `self.ATTR` is resolved one hop further back**, the same way: `get_queryset` overrides very often start with `queryset = self.queryset` and narrow it from there, sometimes differently per branch --
+
+```python
+def get_queryset(self):
+    queryset = self.queryset
+    if condition:
+        queryset = queryset.filter(x=1)
+    else:
+        queryset = queryset.filter(y=2)
+    return queryset
+```
+
+-- and selecting any later statement using the bare `queryset` finds that original `queryset = self.queryset` line earlier in the same method and resolves through it, the same as if you had selected `self.queryset.filter(y=2)` directly. Only that one specific shape (`NAME = self.ATTR`, a bare attribute access, nothing chained onto it) is looked for — a *further* reassignment like `queryset = queryset.filter(x=1)` doesn't match it, so this always finds the original alias regardless of how many reassignments came after it, and is never confused by one. A local with no such assignment anywhere earlier in the method is unresolvable exactly as before.
+
 **Everywhere else a local shows up as a `filter()`/`exclude()`/`get()` argument value, it's mocked, not refused** — `self.request.user`, `self.kwargs["id"]`, any name or expression that can't be resolved. The point of this tool was never the exact value a query runs with; it's the query's *shape* — which indexes it hits, what it joins, whether it's bounded — and none of that depends on which specific user or id it is. So the unresolvable value is replaced with a plausible one, of the *actual field's* type: an int for a `ForeignKey`, a string for `CharField`, an ISO date for `DateField`, and so on — looked up from the model's own `_meta`, the same "computed, not generated" rule everything else here follows, not a blind placeholder guessed without knowing what it's standing in for. `__in` wraps it in a list, `__isnull` stays a plain boolean regardless of the field. What got mocked, and with what, is always named in the result's note, so a real filter never quietly looks identical to a made-up one.
 
 Only an argument *value* is ever replaced — never the queryset itself. `some_local_queryset.filter(x=1)`, where the unresolvable name is what you're filtering rather than an argument to it, still reports the name it couldn't resolve; there's no field to mock a starting point against, only a different expression to select instead (`Model.objects.filter(x=1)`, say).

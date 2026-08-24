@@ -188,22 +188,83 @@ to work."
 
     expression))
 
+(defun expose-orm-local-self-alias (name)
+  "Return the `self.ATTR' NAME is a simple alias for, or nil.
+
+Looks for a `NAME = self.ATTR' assignment -- a bare attribute access,
+no further chaining -- earlier in the enclosing method: the
+`queryset = self.queryset' line a `get_queryset' override that narrows
+the class's own `queryset' typically begins with. Nothing more general
+than that one shape is attempted -- a further reassignment
+(`queryset = queryset.filter(...)') does not match it, so this always
+finds the *original* alias regardless of how many chained
+reassignments came after it in the same method (including across an
+`if'/`else' that each build on it differently, exactly the shape a
+`get_queryset' override narrowing by branch tends to have), and never
+mistakes an intermediate one for it."
+
+  (when (expose-orm-enclosing-class)
+    (save-excursion
+      (let ((search-end (point))
+            found)
+        (beginning-of-defun)
+        (while (re-search-forward
+                (concat "^[ \t]*" (regexp-quote name)
+                        "[ \t]*=[ \t]*self\\.\\([A-Za-z_][A-Za-z0-9_]*\\)[ \t]*$")
+                search-end t)
+          (setq found (match-string 1)))
+        found))))
+
+(defun expose-orm-resolve-local-alias (expression)
+  "Return EXPRESSION with a leading local alias for `self.ATTR' resolved.
+
+`queryset = self.queryset' followed later by `queryset.filter(...)' is
+the standard shape of a `get_queryset' override that starts from the
+class's own queryset and narrows it from there -- resolvable the same
+way a direct `self.queryset.filter(...)' already is, one hop further
+back: find where the leading name was assigned from a bare
+`self.ATTR' earlier in the same method (see
+`expose-orm-local-self-alias'), and splice that in for it, leaving
+`expose-orm-resolve-self' to take it the rest of the way to the
+enclosing class."
+
+  (if-let* (((string-match "\\`\\([A-Za-z_][A-Za-z0-9_]*\\)\\." expression))
+            (name (match-string 1 expression))
+            ((not (equal name "self")))
+            ;; Captured before calling `expose-orm-local-self-alias':
+            ;; its own `re-search-forward' (over the buffer, not this
+            ;; string) clobbers the global match data the `string-match'
+            ;; above set, so `(match-end 1)' read afterward would name a
+            ;; *buffer* position instead of an offset into EXPRESSION --
+            ;; wildly out of range for `substring' below, when it
+            ;; doesn't just silently splice the wrong thing in.
+            (rest (substring expression (length name)))
+            (attr (expose-orm-local-self-alias name)))
+
+      (concat "self." attr rest)
+
+    expression))
+
 (defun expose-orm-expression ()
   "Return the queryset expression to inspect.
 
 The region when there is one, otherwise the whole statement at point --
 which is what you want for a chain wrapped across several lines, where
-the current line alone is a fragment. A leading `self.' is then
-resolved to its enclosing class -- see `expose-orm-resolve-self'."
+the current line alone is a fragment. A leading local alias for
+`self.ATTR' is resolved first (see `expose-orm-resolve-local-alias'),
+then a leading `self.' is resolved to its enclosing class (see
+`expose-orm-resolve-self') -- in that order, since the alias
+resolution's own job is turning the first shape into the second."
 
   (expose-orm-resolve-self
-   (expose-orm-strip-binding
-    (if (use-region-p)
-        (buffer-substring-no-properties (region-beginning) (region-end))
-      (save-excursion
-        (let ((start (progn (python-nav-beginning-of-statement) (point)))
-              (end (progn (python-nav-end-of-statement) (point))))
-          (buffer-substring-no-properties start end)))))))
+   (expose-orm-resolve-local-alias
+    (expose-orm-strip-binding
+     (if (use-region-p)
+         (buffer-substring-no-properties (region-beginning) (region-end))
+       (save-excursion
+         (let ((start (progn (python-nav-beginning-of-statement) (point)))
+               (end (progn (python-nav-end-of-statement) (point))))
+           (buffer-substring-no-properties start end))))))))
 
 (defun expose-orm-project-root ()
   "Return the directory holding `manage.py', or nil."

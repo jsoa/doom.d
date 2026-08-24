@@ -73,13 +73,17 @@ UNINDEXABLE_LOOKUPS = {
 }
 
 
-def refusal(expression):
-    """Return why EXPRESSION must not be evaluated, or None if it is safe."""
+def refusal(tree):
+    """Return why TREE must not be evaluated, or None if it is safe.
 
-    try:
-        tree = ast.parse(expression.strip(), mode="eval")
-    except SyntaxError as exc:
-        return "not a single Python expression: %s" % exc
+    Takes an already-parsed tree, not a source string, so the same check
+    applies identically before and after `rewrite_terminal_call' -- a
+    `.get()`/`.exists()`/etc. at the *top* of the expression is handled by
+    rewriting it away entirely (see there), but one buried inside, say, a
+    filter argument (`qs.filter(pk=Other.objects.get(x=1).id)`) still
+    reaches here and is still refused: rewriting only the outermost call
+    is a deliberate, much narrower fix than trying to safely evaluate an
+    expression with a real side effect nested inside it."""
 
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
@@ -112,6 +116,72 @@ def refusal(expression):
                 )
 
     return None
+
+
+# Terminal methods rewritten rather than refused: each is a filter chain
+# plus a single-row/aggregate read, and the read is the only part of it
+# that would actually connect. The filter chain underneath is exactly
+# what `.query' can already show without connecting -- so the call is
+# dropped (or, for `.get()', turned back into the `.filter()' it already
+# is under the hood: `QuerySet.get()' is `self.filter(*args, **kwargs)'
+# followed by a single-row check, not a different query) rather than
+# evaluated. Maps each method to what its rewrite loses, for the note
+# shown alongside the result.
+REWRITABLE_TERMINALS = {
+    "get": ("filter", "the single-row check `.get()` adds"),
+    "aget": ("filter", "the single-row check `.aget()` adds"),
+    "exists": (None, "the `SELECT (1) ... LIMIT 1` wrapper `.exists()` actually runs"),
+    "aexists": (None, "the `SELECT (1) ... LIMIT 1` wrapper `.aexists()` actually runs"),
+    "first": (None, "the ordering/`LIMIT 1` `.first()` adds"),
+    "afirst": (None, "the ordering/`LIMIT 1` `.afirst()` adds"),
+    "last": (None, "the reversed ordering/`LIMIT 1` `.last()` adds"),
+    "alast": (None, "the reversed ordering/`LIMIT 1` `.alast()` adds"),
+    "count": (None, "the `SELECT COUNT(*)` wrapper `.count()` actually runs"),
+    "acount": (None, "the `SELECT COUNT(*)` wrapper `.acount()` actually runs"),
+    "earliest": (None, "the ordering/`LIMIT 1` `.earliest()` adds"),
+    "aearliest": (None, "the ordering/`LIMIT 1` `.aearliest()` adds"),
+    "latest": (None, "the ordering/`LIMIT 1` `.latest()` adds"),
+    "alatest": (None, "the ordering/`LIMIT 1` `.latest()` adds"),
+}
+
+
+def rewrite_terminal_call(tree):
+    """Return (TREE, NOTE): TREE with its outermost call rewritten away if
+    it is one of `REWRITABLE_TERMINALS', unchanged otherwise; NOTE
+    explains what changed, or is None if nothing did.
+
+    Only the *outermost* call -- what the whole expression evaluates to.
+    A `.get()' nested inside, building an argument for something else,
+    is a different and harder problem (see `refusal') this does not
+    attempt."""
+
+    call = tree.body
+    if not isinstance(call, ast.Call) or not isinstance(call.func, ast.Attribute):
+        return tree, None
+
+    name = call.func.attr
+    if name not in REWRITABLE_TERMINALS:
+        return tree, None
+
+    replacement, lost = REWRITABLE_TERMINALS[name]
+
+    if replacement:
+        body = ast.Call(
+            func=ast.Attribute(value=call.func.value, attr=replacement, ctx=ast.Load()),
+            args=call.args,
+            keywords=call.keywords,
+        )
+    else:
+        body = call.func.value
+
+    new_tree = ast.Expression(body=body)
+    ast.fix_missing_locations(new_tree)
+
+    note = "`.%s()` was not run; shown is the SQL for the underlying selection, without %s." % (
+        name,
+        lost,
+    )
+    return new_tree, note
 
 
 def build_namespace(module_path):
@@ -363,17 +433,32 @@ def fetch_plan(queryset, payload):
     return plan, None
 
 
+def combine_notes(*notes):
+    """Return NOTES joined into one string, dropping any that are None."""
+
+    joined = [note for note in notes if note]
+    return "; ".join(joined) if joined else None
+
+
 def analyse(expression, module_path, payload=None):
     from django.db.models import Manager, QuerySet
 
-    blocked = refusal(expression)
+    try:
+        tree = ast.parse(expression.strip(), mode="eval")
+    except SyntaxError as exc:
+        return {"error": "not a single Python expression: %s" % exc, "refused": True}
+
+    tree, rewrite_note = rewrite_terminal_call(tree)
+
+    blocked = refusal(tree)
     if blocked:
         return {"error": blocked, "refused": True}
 
-    namespace, note = build_namespace(module_path)
+    namespace, import_note = build_namespace(module_path)
+    note = combine_notes(import_note, rewrite_note)
 
     try:
-        value = eval(expression.strip(), namespace)  # noqa: S307
+        value = eval(compile(tree, "<expose-orm>", "eval"), namespace)  # noqa: S307
     except NameError as exc:
         return {
             "error": "%s -- this expression depends on a name that only exists "

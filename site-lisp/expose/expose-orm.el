@@ -116,20 +116,76 @@ and the binding is not part of the expression Python must evaluate."
       (string-trim (match-string 1 trimmed)))
      (t trimmed))))
 
+(defun expose-orm-enclosing-class ()
+  "Return the name of the Python class enclosing point, or nil.
+
+`self' only resolves to something inspectable when the selection came
+from inside a class's own method -- `python-info-current-defun' already
+knows this shape (\"ClassName.method_name\", however many levels of
+nesting deep, e.g. \"Outer.Inner.method_name\"), so this only has to
+drop the last component."
+
+  (when-let ((defun-name (python-info-current-defun)))
+    (let ((parts (split-string defun-name "\\.")))
+      (when (> (length parts) 1)
+        (string-join (butlast parts) ".")))))
+
+(defun expose-orm-resolve-self (expression)
+  "Return EXPRESSION with a leading `self.' resolved to its enclosing class.
+
+`self.queryset.filter(...)' is the standard DRF/CBV shape for a
+queryset expression, and unresolvable as written: the analysis runs in
+a plain module namespace with no request in flight to have built a
+`self' from. `self.queryset', though, is ordinarily the exact same
+object as the class's own `queryset = Model.objects.filter(...)'
+attribute -- so substituting the enclosing class name in for `self'
+turns an expression that always failed with a bare `NameError' into
+one that actually inspects something, for what is likely the single
+most common reason `expose-orm-inspect' was refusing real code.
+
+Only the *leading* `self.', deliberately: `self.queryset.filter(x=
+self.kwargs[\"id\"])' has a second `self' this does not touch, since
+`kwargs' is real per-request state with no class-level equivalent --
+resolving only what is genuinely the same object as a class attribute,
+not guessing at instance state generally.
+
+Assumes the named attribute is set at the class level, not only ever
+assigned per-instance in `__init__' or computed by a `@property' --
+true for the common case this is aimed at, but not guaranteed; when it
+is not, the class-level lookup fails with its own clear error (an
+`AttributeError', not a silently wrong result) rather than pretending
+to work."
+
+  (if-let* (((string-match "\\`self\\.\\(.*\\)\\'" expression))
+            (rest (match-string 1 expression))
+            (class (expose-orm-enclosing-class)))
+
+      (progn
+        (expose-log
+         "orm"
+         "Resolved leading `self.' to `%s.' (from %s)"
+         class
+         expression)
+        (concat class "." rest))
+
+    expression))
+
 (defun expose-orm-expression ()
   "Return the queryset expression to inspect.
 
 The region when there is one, otherwise the whole statement at point --
 which is what you want for a chain wrapped across several lines, where
-the current line alone is a fragment."
+the current line alone is a fragment. A leading `self.' is then
+resolved to its enclosing class -- see `expose-orm-resolve-self'."
 
-  (expose-orm-strip-binding
-   (if (use-region-p)
-       (buffer-substring-no-properties (region-beginning) (region-end))
-     (save-excursion
-       (let ((start (progn (python-nav-beginning-of-statement) (point)))
-             (end (progn (python-nav-end-of-statement) (point))))
-         (buffer-substring-no-properties start end))))))
+  (expose-orm-resolve-self
+   (expose-orm-strip-binding
+    (if (use-region-p)
+        (buffer-substring-no-properties (region-beginning) (region-end))
+      (save-excursion
+        (let ((start (progn (python-nav-beginning-of-statement) (point)))
+              (end (progn (python-nav-end-of-statement) (point))))
+          (buffer-substring-no-properties start end)))))))
 
 (defun expose-orm-project-root ()
   "Return the directory holding `manage.py', or nil."

@@ -126,6 +126,26 @@ being inspected, not something this should paper over)."
                   (expose-orm-resolve-self "self.queryset.filter(name=\"foo\")"))))
       (kill-buffer buffer))))
 
+(ert-deftest expose-orm-test-resolve-self-works-across-multiple-lines ()
+  "Regression: `.' does not match a newline in Emacs regexps, and the
+first version of this function's own regex used `.*' unguarded --
+silently failing to match, and so silently leaving `self.' unresolved,
+for any selection whose arguments wrapped onto their own line. Which
+is completely ordinary formatting for a `.filter()' call with more
+than one keyword argument, not an edge case."
+
+  (let ((buffer
+         (expose-orm-test-python-buffer
+          "class WidgetViewSet:\n    def get_something(self):\n        return self.queryset.filter(\n            name=\"foo\", state=1\n        )\n"
+          "self.queryset")))
+    (unwind-protect
+        (with-current-buffer buffer
+          (should
+           (equal "WidgetViewSet.queryset.filter(\n            name=\"foo\", state=1\n        )"
+                  (expose-orm-resolve-self
+                   "self.queryset.filter(\n            name=\"foo\", state=1\n        )"))))
+      (kill-buffer buffer))))
+
 (ert-deftest expose-orm-test-resolve-self-only-resolves-the-leading-one ()
   (let ((buffer
          (expose-orm-test-python-buffer

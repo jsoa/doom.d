@@ -156,7 +156,15 @@ is not, the class-level lookup fails with its own clear error (an
 `AttributeError', not a silently wrong result) rather than pretending
 to work."
 
-  (if-let* (((string-match "\\`self\\.\\(.*\\)\\'" expression))
+  (if-let* (;; `.' does not match a newline in Emacs regexps, and a
+            ;; selection wrapping its arguments onto their own line --
+            ;; `self.queryset.filter(\n  x=1\n)' -- is completely
+            ;; ordinary formatting, not an edge case. `(?:.\|\n)*'
+            ;; is `expose-orm-strip-binding''s own fix for the exact
+            ;; same trap, right above this function; that one and this
+            ;; one only ever failed together, silently, once anything
+            ;; past the first line existed.
+            ((string-match "\\`self\\.\\(\\(?:.\\|\n\\)*\\)\\'" expression))
             (rest (match-string 1 expression))
             (class (expose-orm-enclosing-class)))
 

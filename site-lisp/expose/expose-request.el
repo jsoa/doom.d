@@ -127,6 +127,28 @@ inserted directly into a buffer rather than displayed as Markdown."
     :imports
     :focus)))
 
+(defun expose-request-buffer-review (context)
+  "Build a request reviewing the current buffer's uncommitted changes.
+
+Unlike `expose-request-review', which prioritizes the code at point and
+only leans on the diff as secondary context, this is driven by the
+diff itself -- CONTEXT's `:buffer-diff', scoped to just this file (see
+`expose-context-git-diff-for-buffer'), not the whole-project one
+`expose-request-select-with-git' assumes."
+
+  (expose-request-create
+   'buffer-review
+   'xml
+
+   "Review the diff below for correctness, readability, maintainability, and potential bugs. It is the current file's uncommitted changes -- focus on what actually changed, using the rest of the file only as context for judging it."
+
+   (expose-request-select
+    context
+    :project
+    :language
+    :file
+    :buffer-diff)))
+
 (defun expose-request-diagnostics (context)
   "Build a diagnostics request."
 
@@ -863,6 +885,9 @@ by the time a follow-up was asked."
     (pcase type
       ('review
        (expose-request-review context))
+
+      ('buffer-review
+       (expose-request-buffer-review context))
 
       ('diagnostics
        (expose-request-diagnostics context))

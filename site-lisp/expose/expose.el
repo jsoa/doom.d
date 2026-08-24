@@ -75,6 +75,7 @@
 
                ;; Keep these directly under SPC c h.
                :desc "Continue at point" "c" #'expose-continue-at-point
+               :desc "Buffer Review"     "b" #'expose-run-buffer-review
                :desc "Commit Message"    "g" #'expose-run-commit-message
                :desc "Changelog"         "n" #'expose-run-changelog
 

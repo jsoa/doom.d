@@ -179,6 +179,46 @@
 
       (should staged-only-during-call))))
 
+;;; ---------------------------------------------------------------------------
+;;; expose-request-buffer-review: driven by :buffer-diff, not point/
+;;; selection -- unlike expose-request-review, which this otherwise
+;;; parallels.
+;;; ---------------------------------------------------------------------------
+
+(ert-deftest expose-request-test-buffer-review-includes-the-diff ()
+  "The diff text itself travels in :context (rendered into its own XML
+tag), not inlined into :instruction -- same split as every other
+request type."
+
+  (let ((request
+         (expose-request-buffer-review
+          (list :project "demo" :language "Python" :file "widgets.py"
+                :buffer-diff "@@ -1,2 +1,3 @@\n+# a change"))))
+
+    (should (eq 'buffer-review (plist-get request :type)))
+    (should (string-match-p "diff" (plist-get request :instruction)))
+    (should (equal "@@ -1,2 +1,3 @@\n+# a change"
+                    (plist-get (plist-get request :context) :buffer-diff)))))
+
+(ert-deftest expose-request-test-buffer-review-selects-only-the-relevant-keys ()
+  "Point/selection-shaped keys (:scope, :focus, ...) have no meaning for
+a whole-buffer diff review and must not leak in even if present on the
+context passed in."
+
+  (let ((request
+         (expose-request-buffer-review
+          (list :project "demo" :file "widgets.py" :buffer-diff "diff text"
+                :scope "should not appear" :focus "should not appear either"))))
+
+    (should (equal '(:project "demo" :file "widgets.py" :buffer-diff "diff text")
+                    (plist-get request :context)))))
+
+(ert-deftest expose-request-test-build-dispatches-buffer-review ()
+  (let ((request
+         (expose-request-build 'buffer-review '(:project "demo" :buffer-diff "diff text"))))
+
+    (should (eq 'buffer-review (plist-get request :type)))))
+
 (ert-deftest expose-request-test-review-does-not-scope-to-staged-only ()
   (let (staged-only-during-call)
     (cl-letf (((symbol-function 'expose-context-with-git)

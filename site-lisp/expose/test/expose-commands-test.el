@@ -272,6 +272,50 @@ kept -- nothing is ever popped, matching the design this was built to."
      (call-interactively #'expose-commands-refine-action-buffer)
      :type 'user-error)))
 
+;;; ---------------------------------------------------------------------------
+;;; expose-run-buffer-review / expose-buffer-review-async
+;;; ---------------------------------------------------------------------------
+
+(ert-deftest expose-commands-test-run-buffer-review-refuses-without-a-file ()
+  (with-temp-buffer
+    (should-error (expose-run-buffer-review) :type 'user-error)))
+
+(ert-deftest expose-commands-test-run-buffer-review-refuses-with-no-diff ()
+  (cl-letf (((symbol-function 'expose-context-git-diff-for-buffer) (lambda () nil)))
+    (let ((buffer-file-name "/repo/widgets.py"))
+      (should-error (expose-run-buffer-review) :type 'user-error))))
+
+(ert-deftest expose-commands-test-run-buffer-review-refuses-with-blank-diff ()
+  (cl-letf (((symbol-function 'expose-context-git-diff-for-buffer) (lambda () "   \n")))
+    (let ((buffer-file-name "/repo/widgets.py"))
+      (should-error (expose-run-buffer-review) :type 'user-error))))
+
+(ert-deftest expose-commands-test-run-buffer-review-proceeds-with-a-real-diff ()
+  (let (ran)
+    (cl-letf (((symbol-function 'expose-context-git-diff-for-buffer) (lambda () "@@ real diff @@"))
+              ((symbol-function 'expose-popup-run-action) (lambda (key) (setq ran key))))
+      (let ((buffer-file-name "/repo/widgets.py"))
+        (expose-run-buffer-review))
+      (should (eq ?b ran)))))
+
+(ert-deftest expose-commands-test-buffer-review-async-context-carries-the-diff ()
+  (let (sent-type sent-title sent-context)
+    (cl-letf (((symbol-function 'expose-context-project) (lambda () "demo"))
+              ((symbol-function 'expose-context-language) (lambda () "Python"))
+              ((symbol-function 'expose-context-relative-file) (lambda () "widgets.py"))
+              ((symbol-function 'expose-context-git-diff-for-buffer) (lambda () "@@ the diff @@"))
+              ((symbol-function 'expose-send-view-action-async)
+               (lambda (type title callback &optional context)
+                 (setq sent-type type sent-title title sent-context context)
+                 (funcall callback nil))))
+
+      (expose-buffer-review-async #'ignore))
+
+    (should (eq 'buffer-review sent-type))
+    (should (equal "Buffer Review" sent-title))
+    (should (equal "@@ the diff @@" (plist-get sent-context :buffer-diff)))
+    (should (equal "widgets.py" (plist-get sent-context :file)))))
+
 (provide 'expose-commands-test)
 
 ;;; expose-commands-test.el ends here

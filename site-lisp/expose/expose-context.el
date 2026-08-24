@@ -589,6 +589,36 @@ changes (`--cached') are included."
       "--no-ext-diff")
      expose-context-git-diff-max-length)))
 
+(defun expose-context-git-diff-for-buffer ()
+  "Return git diff for the current buffer's file only, or nil.
+
+Against HEAD -- staged and unstaged together -- unless
+`expose-context-git-staged-only' is bound, in which case only staged
+changes (`--cached') are included, same as `expose-context-git-diff'.
+
+Scoped with a trailing `-- FILE' rather than reusing
+`expose-context-git-diff' unscoped and filtering its output down
+afterward: the file has to be given relative to the git root, not the
+project root `expose-context-relative-file' uses (a diff invocation's
+paths are always relative to wherever git itself is being run from,
+here `expose-context-git-root'), and those two roots can differ."
+
+  (when-let ((root
+              (expose-context-git-root))
+
+             (file
+              buffer-file-name))
+
+    (expose-context-truncate
+     (expose-context-call-git
+      root
+      "diff"
+      (if expose-context-git-staged-only "--cached" "HEAD")
+      "--no-ext-diff"
+      "--"
+      (file-relative-name file root))
+     expose-context-git-diff-max-length)))
+
 (defun expose-context-with-git (context)
   "Return CONTEXT with git status and diff added.
 

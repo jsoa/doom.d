@@ -863,6 +863,30 @@ TARGET-POSITION is cleared after insertion."
 
   (expose-popup-run-action ?r))
 
+;;;###autoload
+(defun expose-run-buffer-review ()
+  "Review the current buffer's uncommitted changes.
+
+Driven by the diff itself, not the code at point the way
+`expose-run-review' is -- for \"is what I've just changed here any
+good\", asked directly, without needing to select it first.
+
+Refuses up front if there is nothing uncommitted in this file to
+review, rather than sending an empty diff and getting back a review of
+nothing."
+
+  (interactive)
+
+  (unless buffer-file-name
+    (user-error "Buffer is not visiting a file"))
+
+  (let ((diff (expose-context-git-diff-for-buffer)))
+    (when (or (null diff) (string-blank-p diff))
+      (user-error "No uncommitted changes in %s to review"
+                  (file-name-nondirectory buffer-file-name))))
+
+  (expose-popup-run-action ?b))
+
 (defun expose-run-diagnostics ()
   "Run the registered Expose diagnostics action."
 
@@ -1692,16 +1716,22 @@ build on."
          (list :type type :context context :refinements refinements))
       view)))
 
-(defun expose-send-view-action-async (type title callback)
+(defun expose-send-view-action-async (type title callback &optional context)
   "Send TYPE asynchronously and call CALLBACK with a titled popup view.
 
-Context is built once, up front -- not inside `expose-document-build'
-itself, though that would be the more obvious place -- specifically so
-it can be captured and threaded onto the resulting view's `:refine'
-key. A refinement rebuilds this exact request later with an amended
-instruction, and needs the code it was originally about, not whatever
-`expose-context-build' would return if it ran again at that later
-point, from wherever point has drifted to since."
+CONTEXT defaults to a freshly built `(expose-context-build)' -- the
+generic, point-based context every ordinary `SPC c h h' action wants.
+Pass one in for a type built from something else entirely (a whole
+buffer's diff, say, not point/selection); passed through to
+`expose-request-build', same as there.
+
+Whichever it is, built once, up front -- not inside
+`expose-document-build' itself, though that would be the more obvious
+place -- specifically so it can be captured and threaded onto the
+resulting view's `:refine' key. A refinement rebuilds this exact
+request later with an amended instruction, and needs the context it
+was originally about, not whatever building it fresh would return if
+it ran again at that later point."
 
   (expose-log
    "Command"
@@ -1709,7 +1739,7 @@ point, from wherever point has drifted to since."
    type
    expose-provider-default)
 
-  (let ((context (expose-context-build)))
+  (let ((context (or context (expose-context-build))))
 
     (expose-commands-send-document-async
      (symbol-name type)
@@ -1766,6 +1796,26 @@ point, from wherever point has drifted to since."
    'review
    "Review"
    callback))
+
+(defun expose-buffer-review-async (callback)
+  "Review the current buffer's uncommitted changes and call CALLBACK with a popup view.
+
+Built from a plist of its own, not `expose-context-build' -- the
+generic context builder is about point/selection, and this has neither;
+what it has is a file and a diff."
+
+  (let ((context
+         (list
+          :project (expose-context-project)
+          :language (expose-context-language)
+          :file (expose-context-relative-file)
+          :buffer-diff (expose-context-git-diff-for-buffer))))
+
+    (expose-send-view-action-async
+     'buffer-review
+     "Buffer Review"
+     callback
+     context)))
 
 (defun expose-diagnostics ()
   "Explain diagnostics at point asynchronously."
@@ -2079,6 +2129,13 @@ point, from wherever point has drifted to since."
    "Review"
    'view
    #'expose-review-async
+   :async t)
+
+  (expose-popup-register-action
+   ?b
+   "Buffer Review"
+   'view
+   #'expose-buffer-review-async
    :async t)
 
   (expose-popup-register-action

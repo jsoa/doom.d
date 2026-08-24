@@ -35,6 +35,49 @@
       (should (member "--cached" seen-args))
       (should-not (member "HEAD" seen-args)))))
 
+;;; ---------------------------------------------------------------------------
+;;; expose-context-git-diff-for-buffer: same HEAD/--cached rule as
+;;; expose-context-git-diff, but scoped to one file with a trailing
+;;; `-- FILE', relative to the git root (not the project root).
+;;; ---------------------------------------------------------------------------
+
+(ert-deftest expose-context-test-diff-for-buffer-scopes-to-file-relative-to-git-root ()
+  (let (seen-args)
+    (cl-letf (((symbol-function 'expose-context-git-root) (lambda () "/repo/"))
+              ((symbol-function 'expose-context-call-git)
+               (lambda (_root &rest args) (setq seen-args args) "")))
+
+      (let ((buffer-file-name "/repo/sub/widgets.py"))
+        (expose-context-git-diff-for-buffer))
+
+      (should (member "HEAD" seen-args))
+      (should-not (member "--cached" seen-args))
+      ;; The scoping args, in order, at the end.
+      (should (equal '("--" "sub/widgets.py") (last seen-args 2))))))
+
+(ert-deftest expose-context-test-diff-for-buffer-uses-cached-when-staged-only ()
+  (let (seen-args
+        (expose-context-git-staged-only t))
+    (cl-letf (((symbol-function 'expose-context-git-root) (lambda () "/repo/"))
+              ((symbol-function 'expose-context-call-git)
+               (lambda (_root &rest args) (setq seen-args args) "")))
+
+      (let ((buffer-file-name "/repo/widgets.py"))
+        (expose-context-git-diff-for-buffer))
+
+      (should (member "--cached" seen-args))
+      (should-not (member "HEAD" seen-args)))))
+
+(ert-deftest expose-context-test-diff-for-buffer-nil-without-a-file ()
+  (cl-letf (((symbol-function 'expose-context-git-root) (lambda () "/repo/")))
+    (let ((buffer-file-name nil))
+      (should-not (expose-context-git-diff-for-buffer)))))
+
+(ert-deftest expose-context-test-diff-for-buffer-nil-without-a-git-root ()
+  (cl-letf (((symbol-function 'expose-context-git-root) (lambda () nil)))
+    (let ((buffer-file-name "/repo/widgets.py"))
+      (should-not (expose-context-git-diff-for-buffer)))))
+
 (ert-deftest expose-context-test-status-line-unstaged-p ()
   ;; Column 1 is the index (staged) status; a space or `?' there means
   ;; nothing about the file is staged yet.

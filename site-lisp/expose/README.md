@@ -217,6 +217,7 @@ Expose installs bindings under `SPC c h` by default.
 | Key         | Command                             | Description                                  |
 |-------------|-------------------------------------|----------------------------------------------|
 | `SPC c h c` | `expose-continue-at-point`          | Inline continuation at point                 |
+| `SPC c h b` | `expose-run-buffer-review`          | Review the current buffer's uncommitted changes |
 | `SPC c h g` | `expose-run-commit-message`         | Insert generated commit message at point     |
 | `SPC c h n` | `expose-run-changelog`              | Generate changelog entry from Git changes    |
 | `SPC c h j` | `expose-popup-scroll-down`          | Scroll popup down                            |
@@ -573,6 +574,19 @@ The container falls back to `jsoa/docker-jump-container`, so a project already c
 `expose-orm-database` and `expose-orm-dsn` are worth setting when the default connection is one you would rather not plan against: they only change which database the plan comes from, since the SQL is still compiled by the project's own Django.
 
 The expression travels as a JSON environment variable rather than interpolated into a command line, so quoting inside it can't break anything, and the script's output is delimited by markers because `manage.py shell` prints banners and deprecation warnings around it.
+
+## Buffer Review
+
+`SPC c h b` (`expose-run-buffer-review`) reviews the current buffer's own uncommitted changes -- driven by the diff itself, not the code at point the way Thing at Point's own `SPC c h h r` (Review) is. For "is what I've just changed here any good", asked directly, without first selecting the change or navigating to it.
+
+```text
+SPC c h b
+  -> git diff HEAD for this file only (or `--cached` under `expose-context-git-staged-only')
+  -> review it for correctness, readability, maintainability, and potential bugs
+  -> show the result in the action buffer, same as any other SPC c h h result
+```
+
+Refuses up front, rather than sending an empty diff, if the file has no uncommitted changes. Scoped to this file specifically (`git diff -- FILE`), not the whole project -- for that, use Full Review. The result is refinable the same way any other action-buffer result is (see "Refining a result" above).
 
 ## Commit Message Insertion
 

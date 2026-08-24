@@ -603,6 +603,8 @@ To run inside a container, set it in the project's `.dir-locals.el`:
 
 The container falls back to `jsoa/docker-jump-container`, so a project already configured for remote jump-to-definition needs no second setting. All of these are marked safe, so Emacs does not prompt for them.
 
+A container name checked into `.dir-locals.el` is only as portable as everyone's `docker-compose` naming happens to be — if it doesn't exist on this machine, that's called out by name (which variable set it, and to what) rather than surfacing Docker's own "no such container" as an unexplained failure.
+
 `expose-orm-database` and `expose-orm-dsn` are worth setting when the default connection is one you would rather not plan against: they only change which database the plan comes from, since the SQL is still compiled by the project's own Django.
 
 The expression travels as a JSON environment variable rather than interpolated into a command line, so quoting inside it can't break anything, and the script's output is delimited by markers because `manage.py shell` prints banners and deprecation warnings around it.

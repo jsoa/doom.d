@@ -370,6 +370,59 @@ came back unchanged."
     (search-forward "SELECT")
     (should (eq 'font-lock-keyword-face (get-text-property (- (point) 6) 'face)))))
 
+;;; ---------------------------------------------------------------------------
+;;; expose-orm-no-result-error
+;;;
+;;; `docker exec' against a container that does not exist on this
+;;; machine -- a `.dir-locals.el' name that only ever matched one
+;;; developer's `docker-compose' naming -- fails before the Python
+;;; script even starts, so there is no result to find in its output at
+;;; all: just Docker's own complaint, buried in an otherwise-generic
+;;; "produced no result" unless called out specifically.
+;;; ---------------------------------------------------------------------------
+
+(ert-deftest expose-orm-test-no-result-error-names-a-missing-container ()
+  (let ((message (expose-orm-no-result-error
+                  "Error response from daemon: No such container: myproject-app-1\n"
+                  "myproject-app-1"
+                  "`expose-orm-container'")))
+    (should (string-match-p "myproject-app-1" message))
+    (should (string-match-p "expose-orm-container" message))
+    (should (string-match-p "docker ps" message))))
+
+(ert-deftest expose-orm-test-no-result-error-names-the-jump-container-source ()
+  (let ((message (expose-orm-no-result-error
+                  "Error response from daemon: No such container: x\n"
+                  "x"
+                  "`jsoa/docker-jump-container'")))
+    (should (string-match-p "jsoa/docker-jump-container" message))))
+
+(ert-deftest expose-orm-test-no-result-error-generic-without-a-container ()
+  "Running locally (no container at all): the Docker-specific message
+must not fire just because the raw text happens to mention containers
+for some unrelated reason -- CONTAINER itself has to be set too."
+
+  (let ((message (expose-orm-no-result-error "" nil nil)))
+    (should (string-match-p "produced no result" message))
+    (should (string-match-p "printed nothing at all" message))))
+
+(ert-deftest expose-orm-test-no-result-error-generic-for-unrelated-failures ()
+  "A container IS configured, but the failure is something else
+entirely (an ImportError, say) -- must not be misdiagnosed as a
+missing container just because one happens to be set."
+
+  (let ((message (expose-orm-no-result-error
+                  "Traceback (most recent call last):\nImportError: no module named foo\n"
+                  "myproject-app-1"
+                  "`expose-orm-container'")))
+    (should (string-match-p "produced no result" message))
+    (should (string-match-p "ImportError" message))
+    (should-not (string-match-p "does not exist here" message))))
+
+(ert-deftest expose-orm-test-no-result-error-includes-raw-output-for-generic-case ()
+  (let ((message (expose-orm-no-result-error "some raw traceback text" nil nil)))
+    (should (string-match-p "some raw traceback text" message))))
+
 (provide 'expose-orm-test)
 
 ;;; expose-orm-test.el ends here

@@ -470,6 +470,31 @@ window by the time a result comes back may be anywhere."
 ;;; Command
 ;;; ---------------------------------------------------------------------------
 
+(defun expose-orm-no-result-error (raw container container-source)
+  "Return an error message for RAW output with no result markers in it.
+
+CONTAINER and CONTAINER-SOURCE (a description of which variable set
+it, or nil when running locally) are for the one specific, common
+cause of this worth calling out by name: `docker exec' against a
+container that does not exist *here* fails before the Python script
+even starts, so there is no result to find in its output at all --
+just Docker's own complaint, which \"the project's Python produced no
+result\" would otherwise bury without saying what to actually do
+about it. A `.dir-locals.el' name that matches one developer's
+`docker-compose' naming is not guaranteed to match everyone's."
+
+  (if (and container (string-match-p "No such container" raw))
+
+      (format
+       "Docker container %S does not exist here (set by %s). Check `.dir-locals.el', or run `docker ps' to find the real name."
+       container
+       (or container-source "a project setting"))
+
+    (format "the project's Python produced no result.%s"
+            (if (string-empty-p (string-trim raw))
+                " It printed nothing at all."
+              (concat "\n\n" (string-trim raw))))))
+
 (defun expose-orm-run (extra source-window callback)
   "Analyse the queryset at point, adding EXTRA to the payload.
 
@@ -486,6 +511,15 @@ they ask for and what they do with the answer."
 
     (let* ((expression (expose-orm-expression))
            (module (expose-orm-module))
+           ;; Captured here, not re-derived inside the sentinel below:
+           ;; both `expose-orm-container' and `jsoa/docker-jump-container'
+           ;; can be buffer-local (set per project via `.dir-locals.el'),
+           ;; and the sentinel's own deferred callback has no guarantee of
+           ;; running with this buffer current by the time it fires.
+           (container (expose-orm-target-container))
+           (container-source
+            (cond (expose-orm-container "`expose-orm-container'")
+                  (container "`jsoa/docker-jump-container'")))
            (payload (json-encode
                      (append `((expression . ,expression) (module . ,module))
                              extra)))
@@ -528,10 +562,8 @@ they ask for and what they do with the answer."
                            (funcall callback result expression source-window)
                          (expose-log "orm" "No result in output: %s" raw)
                          (expose-orm-display
-                          `((error . ,(format "the project's Python produced no result.%s"
-                                              (if (string-empty-p (string-trim raw))
-                                                  " It printed nothing at all."
-                                                (concat "\n\n" (string-trim raw))))))
+                          `((error . ,(expose-orm-no-result-error
+                                       raw container container-source)))
                           expression
                           source-window))))))))))
 

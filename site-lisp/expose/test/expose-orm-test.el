@@ -4,6 +4,55 @@
 (require 'expose-orm)
 
 ;;; ---------------------------------------------------------------------------
+;;; expose-orm-strip-binding
+;;; ---------------------------------------------------------------------------
+
+(ert-deftest expose-orm-test-strip-binding-single-name ()
+  (should
+   (equal "Event.objects.all()"
+          (expose-orm-strip-binding "qs = Event.objects.all()"))))
+
+(ert-deftest expose-orm-test-strip-binding-tuple-unpacking ()
+  "Regression: `order, _ = Order.objects.get_or_create(...)' -- the
+standard way to call `get_or_create'/`update_or_create', both of which
+return a 2-tuple -- used to reach `ast.parse' in `eval' mode still
+carrying its own `order, _ =' binding, which is a statement, not an
+expression, and always failed with a bare syntax error that gave no
+hint why."
+
+  (should
+   (equal "Order.objects.get_or_create(x=1)"
+          (expose-orm-strip-binding "order, _ = Order.objects.get_or_create(x=1)"))))
+
+(ert-deftest expose-orm-test-strip-binding-three-way-tuple-unpacking ()
+  (should
+   (equal "something()"
+          (expose-orm-strip-binding "a, b, c = something()"))))
+
+(ert-deftest expose-orm-test-strip-binding-return ()
+  (should
+   (equal "Event.objects.all()"
+          (expose-orm-strip-binding "return Event.objects.all()"))))
+
+(ert-deftest expose-orm-test-strip-binding-does-not-touch-a-comparison ()
+  "`a == b' must not be mistaken for an assignment to strip -- the
+capture group's own `[^=]' right after the matched `=' is what
+prevents this: the second `=' of `==' can never satisfy it."
+
+  (should
+   (equal "a == b" (expose-orm-strip-binding "a == b"))))
+
+(ert-deftest expose-orm-test-strip-binding-does-not-touch-le-ge ()
+  (should (equal "a <= b" (expose-orm-strip-binding "a <= b")))
+  (should (equal "a >= b" (expose-orm-strip-binding "a >= b"))))
+
+(ert-deftest expose-orm-test-strip-binding-multiline-tuple-unpacking ()
+  (should
+   (equal "Order.objects.get_or_create(\n    x=1,\n)"
+          (expose-orm-strip-binding
+           "order, _ = Order.objects.get_or_create(\n    x=1,\n)"))))
+
+;;; ---------------------------------------------------------------------------
 ;;; expose-orm-display / expose-orm-display-plan: placement only -- see
 ;;; expose-side-panel-test.el for the underlying algorithm's own
 ;;; coverage. The subprocess machinery in expose-orm-run is not

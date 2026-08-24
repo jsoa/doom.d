@@ -107,16 +107,22 @@ a timeout, explaining a bad query means waiting out the bad query."
 (defun expose-orm-strip-binding (text)
   "Return TEXT without a leading assignment or `return'.
 
-Selecting the line you are looking at usually catches `qs = Event...',
-and the binding is not part of the expression Python must evaluate."
+Selecting the line you are looking at usually catches `qs = Event...'
+or `order, _ = Order.objects.get_or_create(...)', and the binding is
+not part of the expression Python must evaluate -- `order, _ = X' is
+a statement, and `ast.parse' in `eval' mode rejects any statement
+outright, tuple-unpacking assignment very much included."
 
   (let ((trimmed (string-trim text)))
     (cond
      ((string-match "\\`return[ \t\n]+\\(\\(?:.\\|\n\\)+\\)\\'" trimmed)
       (string-trim (match-string 1 trimmed)))
-     ;; A single name, then `=' that is not `==', `<=' and so on.
-     ((string-match "\\`[A-Za-z_][A-Za-z0-9_]*[ \t]*=[ \t\n]*\\([^=]\\(?:.\\|\n\\)*\\)\\'"
-                    trimmed)
+     ;; One or more comma-separated names -- a single `qs =' or a
+     ;; tuple-unpacking `order, _ =' alike -- then `=' that is not
+     ;; `==', `<=' and so on.
+     ((string-match
+       "\\`[A-Za-z_][A-Za-z0-9_]*\\(?:[ \t]*,[ \t]*[A-Za-z_][A-Za-z0-9_]*\\)*[ \t]*=[ \t\n]*\\([^=]\\(?:.\\|\n\\)*\\)\\'"
+       trimmed)
       (string-trim (match-string 1 trimmed)))
      (t trimmed))))
 

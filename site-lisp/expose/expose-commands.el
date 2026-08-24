@@ -19,12 +19,12 @@
 ;; used.
 (declare-function expose-callers-build-dot "expose-callers" ())
 (declare-function expose-callers-build-tests-dot "expose-callers" ())
-(declare-function expose-callers-collect-tests "expose-callers" ())
-(declare-function expose-callers-tests-in "expose-callers" (nodes keep))
-(declare-function expose-callers-test-xrefs "expose-callers" (tests))
 (declare-function expose-imports-build-dot "expose-imports" (&optional show-externals))
 (declare-function expose-migrations-build-dot "expose-migrations" ())
 (defvar expose-migrations-max-migrations)
+
+;; Loaded on demand by `expose-find-tests', same reason as above.
+(declare-function expose-find-tests-open "expose-find-tests" (source-window))
 
 (defcustom expose-provider-default
   'codex
@@ -1385,67 +1385,18 @@ Only tests are listed. The graph keeps the intermediate functions a test
 reaches through, which are worth seeing in a picture and are noise in a
 list of somewhere to go.
 
-Shown as an `xref' results buffer, so it reads like any other search
-result in Emacs: grouped under its file, the matching line in context,
-`n' and `p' to move, RET to visit and `M-,' to come back."
+Shown in a persistent side-panel buffer, placed beside this one --
+grouped under its file, the matching line in context, `TAB'/`S-TAB' to
+move, `RET' to open a test to the left without losing the list, `g' to
+search again."
 
   (interactive)
 
-  (require 'expose-callers)
+  (require 'expose-find-tests)
 
   (message "Expose: finding tests...")
 
-  (let* ((found (expose-callers-collect-tests))
-         (root (plist-get found :root))
-         (name (plist-get root :name))
-         (tests (expose-callers-tests-in (plist-get found :nodes)
-                                         (plist-get found :keep)))
-
-         ;; Captured so the fetcher can search again from where the
-         ;; question was asked. `g' in an xref buffer re-runs the
-         ;; fetcher, and by then point is in the results buffer -- a
-         ;; fetcher reading `thing-at-point' there would look up whatever
-         ;; word the cursor happened to land on, while one closing over
-         ;; the finished list would quietly redisplay a stale answer.
-         (origin (current-buffer))
-         (position (point)))
-
-    (expose-find-tests-report name tests (plist-get found :failures))
-
-    (xref-show-xrefs
-     (lambda ()
-       (with-current-buffer origin
-         (save-excursion
-           (goto-char position)
-           (let* ((again (expose-callers-collect-tests))
-                  (again-tests (expose-callers-tests-in (plist-get again :nodes)
-                                                        (plist-get again :keep))))
-             ;; `g' runs this fetcher and nothing else -- the initial
-             ;; call's `message' above never fires again, so a refresh
-             ;; that hits a failure has to say so itself or it silently
-             ;; presents a partial answer as a complete one.
-             (expose-find-tests-report (plist-get root :name) again-tests
-                                       (plist-get again :failures))
-             (expose-callers-test-xrefs again-tests)))))
-     nil)))
-
-(defun expose-find-tests-report (name tests failures)
-  "Report what `expose-find-tests' found for NAME: TESTS, given FAILURES.
-
-Shared between the initial search and the `g' refresh inside the results
-buffer, so a search that only partly finished says so identically either
-way -- a search the server did not finish answering looks exactly like
-one that found everything, and that has to be said out loud every time
-it happens, not just the first."
-
-  (message "Expose: %s %s%s"
-           (if (= 1 (length tests)) "1 test covers"
-             (format "%d tests cover" (length tests)))
-           name
-           (if failures
-               (format " (incomplete: %d lookup%s failed -- see the log)"
-                       (length failures) (if (= 1 (length failures)) "" "s"))
-             "")))
+  (expose-find-tests-open (selected-window)))
 
 ;;;###autoload
 (defun expose-run-test-graph ()

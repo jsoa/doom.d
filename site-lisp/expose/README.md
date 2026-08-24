@@ -54,7 +54,9 @@ project / branch / selected region / changed hunk
 
 Two things happen at point without a window of their own: the small `posframe` popup (hover, diagnostics, Watch/Review item comments -- ephemeral, gone when point moves) and inline continuation's ghost text.
 
-Everything else that opens a real buffer -- a Thing at Point or Region Review result, the Full Review dashboard, popup history, the log, an ORM result, a Watch list, a review archive viewer -- is placed beside whatever buffer it was invoked from: that buffer stays on the left wherever it started, the result lands in the window immediately to its right, splitting the frame if only one window was open. Re-derived fresh each time rather than tracked as state, so it self-corrects regardless of what happened between one open and the next. See `expose-side-panel-place`, shared by all of them.
+Everything else that opens a real buffer -- a Thing at Point or Region Review result, the Full Review dashboard, popup history, the log, an ORM result, a Watch list, a review archive viewer, a Find Tests results list -- is placed beside whatever buffer it was invoked from: that buffer stays on the left wherever it started, the result lands in the window immediately to its right, splitting the frame if only one window was open. Re-derived fresh each time rather than tracked as state, so it self-corrects regardless of what happened between one open and the next. See `expose-side-panel-place`, shared by all of them.
+
+Find Tests reuses the same left/right idea in reverse for one thing beyond just opening: the list itself keeps the fixed spot, on the right, and `RET` opens a test into the window to its *left* instead of replacing the list, so several tests can be visited in turn from the one search. See "Finding Tests" below.
 
 The one exception is Diagrams, deliberately full-frame -- see "Diagrams" below.
 
@@ -100,6 +102,7 @@ Typical local layout:
 
       expose-diagram.el
       expose-callers.el
+      expose-find-tests.el
       expose-imports.el
       expose-migrations.el
 
@@ -303,7 +306,7 @@ See [Queryset SQL](#queryset-sql). The query plan is a drawing, so it sits with 
 
 ## Finding Tests
 
-`SPC c h t` (`expose-find-tests`) answers "is this tested, and by what" as a results buffer:
+`SPC c h t` (`expose-find-tests`) answers "is this tested, and by what" as a side-panel results buffer, placed beside the code it was asked about the same way everything else in Expose is (see [Where Expose shows things](#where-expose-shows-things)):
 
 ```text
 src/tests/test_events.py
@@ -313,7 +316,7 @@ src/tests/test_permissions.py
 88:def test_permissions_denied(client):
 ```
 
-An `xref` buffer, so it reads and behaves like every other set of search results in Emacs — grouped under its file, the matching line shown in context, `n` and `p` to move, RET to visit, `M-,` to come back. `g` re-runs the search rather than redisplaying the old answer, and re-runs it *at the point the question was asked from*, not wherever the cursor sits in the results.
+Grouped under its file, the matching line shown in context. `TAB`/`S-TAB` move between tests, `RET` opens one to the *left* of the list rather than replacing it, so several tests found by the same search can be opened in turn without losing where they came from. `g` re-runs the search rather than redisplaying the old answer, and re-runs it *at the point the question was asked from*, not wherever the cursor sits in the results.
 
 The same question as the [test graph](#diagrams-1), and the same computed answer — LSP call hierarchy falling back to `xref`, plus non-call references and, for Django, tests that reach a view only by `reverse()`-ing its URL name. Which one you want depends on what you are asking: the graph shows *how* a test gets here and through which intermediate functions, while this just takes you to the test.
 

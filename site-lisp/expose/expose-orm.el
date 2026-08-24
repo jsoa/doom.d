@@ -29,6 +29,7 @@
 (require 'json)
 (require 'subr-x)
 (require 'python)
+(require 'sql)
 (require 'expose-log)
 (require 'expose-side-panel)
 (require 'expose-diagram)
@@ -98,7 +99,7 @@ a timeout, explaining a bad query means waiting out the bad query."
 (defconst expose-orm-begin "<<<EXPOSE-ORM-BEGIN>>>")
 (defconst expose-orm-end "<<<EXPOSE-ORM-END>>>")
 
-(defvar expose-orm-buffer "*expose orm*")
+(defvar expose-orm-buffer "*EXPOSE ORM*")
 
 ;;; ---------------------------------------------------------------------------
 ;;; Locating the expression and its module
@@ -382,11 +383,37 @@ alone tells you what will run, but not which part of it is the problem."
 
     (nreverse findings)))
 
+(defun expose-orm-render-sql (sql)
+  "Return SQL fontified via `sql-mode'.
+
+The same trick `expose-popup-render-body' uses for Markdown: insert
+into a temp buffer already in the real major mode, `font-lock-ensure'
+it, and take the propertized text back out -- a real mode's own
+font-lock, not a hand-rolled keyword list to keep in sync with
+whatever SQL Django's next version starts generating."
+
+  (with-temp-buffer
+    (delay-mode-hooks
+      (sql-mode))
+
+    (font-lock-mode 1)
+
+    (insert sql)
+
+    (font-lock-ensure (point-min) (point-max))
+
+    (buffer-string)))
+
 (defun expose-orm-insert (result expression)
   "Render RESULT for EXPRESSION into the current buffer."
 
   (let ((inhibit-read-only t))
     (erase-buffer)
+
+    (insert (propertize "Queryset SQL" 'face 'bold))
+    (insert "\n")
+    (insert (propertize (make-string 60 ?─) 'face 'shadow))
+    (insert "\n\n")
 
     (insert (propertize expression 'face 'font-lock-string-face) "\n\n")
 
@@ -415,7 +442,7 @@ alone tells you what will run, but not which part of it is the problem."
 
       (insert "\n")
       (if-let ((sql (alist-get 'sql result)))
-          (insert sql "\n")
+          (insert (expose-orm-render-sql sql) "\n")
         (insert (propertize (or (alist-get 'sql_note result) "no SQL") 'face 'shadow)
                 "\n")))
 
@@ -434,11 +461,9 @@ window by the time a result comes back may be anywhere."
 
   (let ((buffer (get-buffer-create expose-orm-buffer)))
     (with-current-buffer buffer
-      (let ((inhibit-read-only t))
-        (expose-orm-insert result expression))
-      (when (fboundp 'sql-mode)
-        (setq-local font-lock-defaults nil))
-      (special-mode))
+      (unless (derived-mode-p 'special-mode)
+        (special-mode))
+      (expose-orm-insert result expression))
     (select-window (expose-side-panel-place source-window buffer))))
 
 ;;; ---------------------------------------------------------------------------

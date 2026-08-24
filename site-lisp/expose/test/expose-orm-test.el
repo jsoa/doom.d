@@ -339,6 +339,37 @@ differently further down."
            (equal "EventViewSet.queryset.filter(y=2)" (expose-orm-expression))))
       (kill-buffer buffer))))
 
+;;; ---------------------------------------------------------------------------
+;;; expose-orm-render-sql / the buffer's title
+;;; ---------------------------------------------------------------------------
+
+(ert-deftest expose-orm-test-render-sql-applies-real-faces ()
+  "A real `sql-mode' font-lock pass, not a hand-rolled keyword list --
+verified by checking an actual face landed, not just that the text
+came back unchanged."
+
+  (let ((rendered (expose-orm-render-sql "SELECT id FROM widgets WHERE x = 1")))
+    (should (equal "SELECT id FROM widgets WHERE x = 1" (substring-no-properties rendered)))
+    (should (text-property-not-all 0 (length rendered) 'face nil rendered))))
+
+(ert-deftest expose-orm-test-insert-shows-a-title ()
+  (with-temp-buffer
+    (special-mode)
+    (expose-orm-insert
+     '((model . "app.Widget") (table . "app_widget") (sql . "SELECT 1"))
+     "Widget.objects.all()")
+    (should (string-match-p "\\`Queryset SQL" (buffer-string)))))
+
+(ert-deftest expose-orm-test-insert-colorizes-the-sql ()
+  (with-temp-buffer
+    (special-mode)
+    (expose-orm-insert
+     '((model . "app.Widget") (table . "app_widget") (sql . "SELECT id FROM widgets"))
+     "Widget.objects.all()")
+    (goto-char (point-min))
+    (search-forward "SELECT")
+    (should (eq 'font-lock-keyword-face (get-text-property (- (point) 6) 'face)))))
+
 (provide 'expose-orm-test)
 
 ;;; expose-orm-test.el ends here

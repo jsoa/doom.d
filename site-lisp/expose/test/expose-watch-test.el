@@ -1,6 +1,7 @@
 ;;; expose-watch-test.el --- Tests for expose-watch auto-arm -*- lexical-binding: t; -*-
 
 (require 'ert)
+(require 'cl-lib)
 (require 'expose-watch)
 
 ;;; ---------------------------------------------------------------------------
@@ -264,6 +265,47 @@ CHANGED-CONTENT -- leaves a real, computable live diff hunk for FILE that
 
     (should
      (= 3 (expose-watch-catch-up-item-cap 4)))))
+
+;;; ---------------------------------------------------------------------------
+;;; expose-watch-open-list / expose-watch-open-active-list: placement
+;;; only -- see expose-side-panel-test.el for the underlying
+;;; algorithm's own coverage. Rendering is stubbed out; it reads real
+;;; stored Watch state this suite has no fixture for, and is not what
+;;; changed here.
+;;; ---------------------------------------------------------------------------
+
+(defmacro expose-watch-test-with-clean-frame (&rest body)
+  (declare (indent 0))
+  `(cl-letf (((symbol-function 'expose-watch-project-root) (lambda () "/tmp/"))
+             ((symbol-function 'expose-watch-list-render) (lambda () nil))
+             ((symbol-function 'expose-watch-active-render) (lambda () nil)))
+     (unwind-protect
+         (progn ,@body)
+       (delete-other-windows)
+       (when (get-buffer expose-watch-list-buffer-name)
+         (kill-buffer expose-watch-list-buffer-name))
+       (when (get-buffer expose-watch-active-buffer-name)
+         (kill-buffer expose-watch-active-buffer-name)))))
+
+(ert-deftest expose-watch-test-open-list-places-beside-source ()
+  (expose-watch-test-with-clean-frame
+    (delete-other-windows)
+    (switch-to-buffer (get-buffer-create "ewt-src.py"))
+    (expose-watch-open-list)
+    (should (equal "ewt-src.py" (buffer-name (window-buffer (frame-first-window)))))
+    (should (equal expose-watch-list-buffer-name
+                   (buffer-name (window-buffer (window-in-direction 'right (frame-first-window))))))
+    (should (equal expose-watch-list-buffer-name (buffer-name (current-buffer))))))
+
+(ert-deftest expose-watch-test-open-active-list-places-beside-source ()
+  (expose-watch-test-with-clean-frame
+    (delete-other-windows)
+    (switch-to-buffer (get-buffer-create "ewt-src2.py"))
+    (expose-watch-open-active-list)
+    (should (equal "ewt-src2.py" (buffer-name (window-buffer (frame-first-window)))))
+    (should (equal expose-watch-active-buffer-name
+                   (buffer-name (window-buffer (window-in-direction 'right (frame-first-window))))))
+    (should (equal expose-watch-active-buffer-name (buffer-name (current-buffer))))))
 
 (provide 'expose-watch-test)
 

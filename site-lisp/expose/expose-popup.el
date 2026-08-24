@@ -6,6 +6,7 @@
 (require 'posframe)
 (require 'expose-history)
 (require 'expose-log)
+(require 'expose-side-panel)
 (require 'markdown-mode nil t)
 
 (declare-function posframe-hide "posframe")
@@ -745,22 +746,30 @@ with it."
       (message "Popup copied"))))
 
 (defun expose-popup-open ()
-  "Open the current popup in a normal buffer."
+  "Open the current popup in a normal buffer.
+
+Placed beside the buffer this was invoked from -- see
+`expose-side-panel-place'. SOURCE-WINDOW is captured before anything
+else runs: the posframe popup does not take keyboard focus, so
+`(selected-window)' is still the real code window underneath it, not
+the popup itself."
 
   (interactive)
 
-  (let ((source (get-buffer expose-popup-buffer-name))
+  (let ((source-window (selected-window))
+        (popup (get-buffer expose-popup-buffer-name))
         (target (generate-new-buffer "*EXPOSE Popup*")))
 
-    (when source
+    (when popup
 
       (with-current-buffer target
 
-        (insert-buffer-substring source)
+        (insert-buffer-substring popup)
 
         (goto-char (point-min)))
 
-      (pop-to-buffer target))))
+      (select-window
+       (expose-side-panel-place source-window target)))))
 
 (defun expose-popup-window ()
   "Return the visible Expose popup window, or nil."

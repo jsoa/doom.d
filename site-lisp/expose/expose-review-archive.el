@@ -6,6 +6,7 @@
 (require 'seq)
 (require 'subr-x)
 (require 'expose-log)
+(require 'expose-side-panel)
 (require 'expose-review-request)
 (require 'diff-mode nil t)
 
@@ -1175,9 +1176,15 @@ When RECURSIVE is non-nil, search recursively."
      "*EXPOSE Review Archives*")))
 
 (defun expose-review-archive-open (kind)
-  "Open archive viewer for KIND."
+  "Open archive viewer for KIND.
 
-  (let* ((project-root
+Placed beside the buffer this was invoked from -- see
+`expose-side-panel-place'."
+
+  (let* ((source-window
+          (selected-window))
+
+         (project-root
           (expose-review-archive-project-root))
 
          (buffer
@@ -1203,7 +1210,7 @@ When RECURSIVE is non-nil, search recursively."
 
       (expose-review-archive-render))
 
-    (switch-to-buffer buffer)))
+    (select-window (expose-side-panel-place source-window buffer))))
 
 ;;;###autoload
 (defun expose-review-archive-open-full ()

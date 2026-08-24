@@ -50,6 +50,14 @@ project / branch / selected region / changed hunk
   -> show item details on hover
 ```
 
+### Where Expose shows things
+
+Two things happen at point without a window of their own: the small `posframe` popup (hover, diagnostics, Watch/Review item comments -- ephemeral, gone when point moves) and inline continuation's ghost text.
+
+Everything else that opens a real buffer -- a Thing at Point or Region Review result, the Full Review dashboard, popup history, the log, an ORM result, a Watch list, a review archive viewer -- is placed beside whatever buffer it was invoked from: that buffer stays on the left wherever it started, the result lands in the window immediately to its right, splitting the frame if only one window was open. Re-derived fresh each time rather than tracked as state, so it self-corrects regardless of what happened between one open and the next. See `expose-side-panel-place`, shared by all of them.
+
+The one exception is Diagrams, deliberately full-frame -- see "Diagrams" below.
+
 ## Package Layout
 
 Typical local layout:
@@ -390,7 +398,7 @@ Expose actions are intentionally small, focused lenses over the current code con
 
 ## Diagrams
 
-Rendered with Graphviz and shown as an SVG image in a full-frame buffer. Graphviz because `dot` needs no extra toolchain; SVG because Emacs renders it natively, so zooming stays sharp.
+Rendered with Graphviz and shown as an SVG image in a full-frame buffer -- deliberately, and the one exception to the side-panel placement everything else in Expose uses (see "Where Expose shows things" above): these graphs get big, and a diagram squeezed into a side pane is unreadable in exactly the cases it's most needed. `q` restores whatever your window layout was before.
 
 | Diagram            | Answers                                            | Source     |
 |--------------------|----------------------------------------------------|------------|

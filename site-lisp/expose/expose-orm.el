@@ -26,6 +26,7 @@
 (require 'subr-x)
 (require 'python)
 (require 'expose-log)
+(require 'expose-side-panel)
 (require 'expose-diagram)
 (require 'expose-orm-plan)
 
@@ -288,8 +289,13 @@ alone tells you what will run, but not which part of it is the problem."
 
     (goto-char (point-min))))
 
-(defun expose-orm-display (result expression)
-  "Show RESULT for EXPRESSION in the Expose ORM buffer."
+(defun expose-orm-display (result expression source-window)
+  "Show RESULT for EXPRESSION in the Expose ORM buffer.
+
+Placed beside SOURCE-WINDOW -- see `expose-side-panel-place' -- the
+window the query was inspected from, captured well before this runs:
+the subprocess this is a callback for is asynchronous, so the selected
+window by the time a result comes back may be anywhere."
 
   (let ((buffer (get-buffer-create expose-orm-buffer)))
     (with-current-buffer buffer
@@ -298,16 +304,18 @@ alone tells you what will run, but not which part of it is the problem."
       (when (fboundp 'sql-mode)
         (setq-local font-lock-defaults nil))
       (special-mode))
-    (display-buffer buffer)))
+    (select-window (expose-side-panel-place source-window buffer))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Command
 ;;; ---------------------------------------------------------------------------
 
-(defun expose-orm-run (extra callback)
+(defun expose-orm-run (extra source-window callback)
   "Analyse the queryset at point, adding EXTRA to the payload.
 
-CALLBACK receives the parsed result and the expression. Shared by
+CALLBACK receives the parsed result, the expression, and SOURCE-WINDOW
+(passed through unchanged, for CALLBACK to place its own result
+beside -- this function has no display of its own to place). Shared by
 `expose-orm-inspect' and `expose-orm-explain', which differ only in what
 they ask for and what they do with the answer."
 
@@ -357,14 +365,15 @@ they ask for and what they do with the answer."
                      0 nil
                      (lambda ()
                        (if result
-                           (funcall callback result expression)
+                           (funcall callback result expression source-window)
                          (expose-log "orm" "No result in output: %s" raw)
                          (expose-orm-display
                           `((error . ,(format "the project's Python produced no result.%s"
                                               (if (string-empty-p (string-trim raw))
                                                   " It printed nothing at all."
                                                 (concat "\n\n" (string-trim raw))))))
-                          expression))))))))))
+                          expression
+                          source-window))))))))))
 
         (process-send-string process script)
         (process-send-eof process)))))
@@ -383,7 +392,7 @@ refused rather than evaluated."
   (interactive)
 
   (message "Expose ORM: compiling...")
-  (expose-orm-run nil #'expose-orm-display))
+  (expose-orm-run nil (selected-window) #'expose-orm-display))
 
 ;;;###autoload
 (defun expose-orm-explain (&optional analyze)
@@ -419,10 +428,15 @@ rolled back either way, and `expose-orm-statement-timeout' bounds it."
      (database . ,expose-orm-database)
      (dsn . ,expose-orm-dsn)
      (timeout_ms . ,expose-orm-statement-timeout))
+   (selected-window)
    #'expose-orm-display-plan))
 
-(defun expose-orm-display-plan (result expression)
-  "Draw the plan in RESULT for EXPRESSION, or explain why there isn't one."
+(defun expose-orm-display-plan (result expression source-window)
+  "Draw the plan in RESULT for EXPRESSION, or explain why there isn't one.
+
+SOURCE-WINDOW is only used by the fallback-to-static-view paths below,
+via `expose-orm-display' -- the successful, diagram-drawing path is
+unaffected by any of this and keeps its own full-frame display."
 
   (let ((plan (alist-get 'plan result))
         (plan-error (or (alist-get 'plan_error result) (alist-get 'error result))))
@@ -434,11 +448,12 @@ rolled back either way, and `expose-orm-statement-timeout' bounds it."
       ;; asked for next anyway.
       (expose-orm-display
        (cons (cons 'note (format "no plan: %s" plan-error)) result)
-       expression)
+       expression
+       source-window)
       (message "Expose ORM: no plan (%s)" plan-error))
 
      ((null plan)
-      (expose-orm-display result expression)
+      (expose-orm-display result expression source-window)
       (message "Expose ORM: the database returned no plan"))
 
      (t

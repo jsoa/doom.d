@@ -1,6 +1,7 @@
 ;;; expose-history.el -*- lexical-binding: t; -*-
 
 (require 'subr-x)
+(require 'expose-side-panel)
 
 (defconst expose-history-buffer-name
   "*EXPOSE History*")
@@ -119,12 +120,19 @@ but not restarting Emacs.")
     buffer))
 
 (defun expose-history-open ()
-  "Open the popup history."
+  "Open the popup history.
+
+Placed beside the buffer this was invoked from, splitting if needed,
+the same way `expose-action-buffer' and Full Review's dashboard are --
+see `expose-side-panel-place' -- rather than wherever
+`display-buffer''s default heuristics happened to put it."
 
   (interactive)
 
-  (pop-to-buffer
-   (expose-history-render-buffer)))
+  (select-window
+   (expose-side-panel-place
+    (selected-window)
+    (expose-history-render-buffer))))
 
 (defun expose-history-clear ()
   "Clear Expose popup history."

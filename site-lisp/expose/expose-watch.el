@@ -6,6 +6,7 @@
 (require 'project)
 (require 'expose-log)
 (require 'expose-popup)
+(require 'expose-side-panel)
 (require 'expose-provider)
 (require 'expose-hover)
 (require 'expose-review-request)
@@ -2556,11 +2557,17 @@ would."
 
 ;;;###autoload
 (defun expose-watch-open-list ()
-  "Open Expose Watch list for the current project."
+  "Open Expose Watch list for the current project.
+
+Placed beside the buffer this was invoked from -- see
+`expose-side-panel-place'."
 
   (interactive)
 
-  (let* ((project-root
+  (let* ((source-window
+          (selected-window))
+
+         (project-root
           (expose-watch-project-root))
 
          (buffer
@@ -2573,7 +2580,7 @@ would."
       (setq expose-watch-list-project-root project-root)
       (expose-watch-list-render))
 
-    (switch-to-buffer buffer)))
+    (select-window (expose-side-panel-place source-window buffer))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Active items buffer
@@ -2942,11 +2949,17 @@ navigation/jump commands work from anywhere inside it."
 
 ;;;###autoload
 (defun expose-watch-open-active-list ()
-  "Open the Expose Watch active-items buffer for the current project."
+  "Open the Expose Watch active-items buffer for the current project.
+
+Placed beside the buffer this was invoked from -- see
+`expose-side-panel-place'."
 
   (interactive)
 
-  (let* ((project-root
+  (let* ((source-window
+          (selected-window))
+
+         (project-root
           (expose-watch-project-root))
 
          (buffer
@@ -2959,7 +2972,7 @@ navigation/jump commands work from anywhere inside it."
       (setq expose-watch-active-project-root project-root)
       (expose-watch-active-render))
 
-    (switch-to-buffer buffer)))
+    (select-window (expose-side-panel-place source-window buffer))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Minor modes / commands

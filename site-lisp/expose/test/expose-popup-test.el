@@ -210,3 +210,60 @@ override in place must have no effect on them."
       (expose-popup-show-view
        (list :title "Explain" :body "the answer" :format 'plain))
       (should-not (string-match-p "tip:" (expose-popup-mode-line-info))))))
+
+;;; ---------------------------------------------------------------------------
+;;; expose-popup-open: placement only -- see expose-side-panel-test.el
+;;; for the underlying algorithm's own coverage.
+;;; ---------------------------------------------------------------------------
+
+(defmacro expose-popup-test-with-clean-frame (&rest body)
+  (declare (indent 0))
+  `(unwind-protect
+       (progn ,@body)
+     (delete-other-windows)
+     (when (get-buffer expose-popup-buffer-name)
+       (kill-buffer expose-popup-buffer-name))
+     (dolist (buffer (buffer-list))
+       (when (string-prefix-p "*EXPOSE Popup*" (buffer-name buffer))
+         (kill-buffer buffer)))))
+
+(ert-deftest expose-popup-test-open-places-beside-source ()
+  "SOURCE-WINDOW is `(selected-window)' at call time, not the popup's own
+buffer -- a posframe never has keyboard focus, so the real code window
+underneath it is still selected when this runs."
+
+  (expose-popup-test-with-clean-frame
+    (delete-other-windows)
+    (switch-to-buffer (get-buffer-create "ept-src.py"))
+    ;; inhibit-read-only: expose-popup-buffer-name is a shared singleton
+    ;; that an earlier test in the same run may have left in
+    ;; expose-popup-mode (read-only), not a fresh buffer every time.
+    (with-current-buffer (get-buffer-create expose-popup-buffer-name)
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (insert "hover content")))
+    (expose-popup-open)
+    (should (equal "ept-src.py" (buffer-name (window-buffer (frame-first-window)))))
+    (should (string-prefix-p "*EXPOSE Popup*"
+                             (buffer-name (window-buffer (window-in-direction 'right (frame-first-window))))))))
+
+(ert-deftest expose-popup-test-open-copies-popup-content ()
+  (expose-popup-test-with-clean-frame
+    (delete-other-windows)
+    (switch-to-buffer (get-buffer-create "ept-src2.py"))
+    (with-current-buffer (get-buffer-create expose-popup-buffer-name)
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (insert "hover content")))
+    (expose-popup-open)
+    (should (equal "hover content" (buffer-string)))))
+
+(ert-deftest expose-popup-test-open-does-nothing-without-a-popup-buffer ()
+  (expose-popup-test-with-clean-frame
+    (when (get-buffer expose-popup-buffer-name)
+      (kill-buffer expose-popup-buffer-name))
+    (delete-other-windows)
+    (switch-to-buffer (get-buffer-create "ept-src3.py"))
+    (let ((before (window-list)))
+      (expose-popup-open)
+      (should (equal before (window-list))))))

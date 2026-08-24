@@ -1,5 +1,7 @@
 ;;; expose-log.el -*- lexical-binding: t; -*-
 
+(require 'expose-side-panel)
+
 (defgroup expose-log nil
   "Logging for Expose."
   :group 'tools)
@@ -90,12 +92,17 @@ does not have to run again on almost every subsequent log call."
         (expose-log-trim-buffer)))))
 
 (defun expose-log-open ()
-  "Open the EXPOSE log buffer."
+  "Open the EXPOSE log buffer.
+
+Placed beside the buffer this was invoked from -- see
+`expose-side-panel-place'."
 
   (interactive)
 
-  (pop-to-buffer
-   (expose-log-buffer)))
+  (select-window
+   (expose-side-panel-place
+    (selected-window)
+    (expose-log-buffer))))
 
 (defun expose-log-clear ()
   "Clear the EXPOSE log buffer."

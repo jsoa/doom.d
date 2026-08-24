@@ -462,7 +462,11 @@ def analyse(expression, module_path, payload=None):
     except NameError as exc:
         return {
             "error": "%s -- this expression depends on a name that only exists "
-            "where it was written (a local, `self', or `request')." % exc,
+            "where it was written (a local, `self', or `request'). If it is the "
+            "query's shape you want and not this particular value, replace it "
+            "with a literal (`event=1` instead of `event=event`) and try "
+            "again -- the SQL, indexes, and joins are the same either way; "
+            "only the bound parameter differs." % exc,
             "note": note,
         }
     except Exception as exc:

@@ -618,11 +618,56 @@ def resolve_field(model, path):
     return field, lookup
 
 
+def is_q_call(node, namespace):
+    """Return True if NODE is a call to Django's own `Q', resolved
+    through NAMESPACE rather than matched by the literal name `Q' --
+    `from django.db.models import Q as DQ' is real, if uncommon, code,
+    and a plain string match would miss it."""
+
+    if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)):
+        return False
+
+    from django.db.models import Q
+
+    return namespace.get(node.func.id) is Q
+
+
+def collect_lookup_keywords(call, namespace):
+    """Return every field-lookup `ast.keyword' in CALL's arguments.
+
+    Not just CALL's own direct keywords: also every keyword of any
+    `Q(...)' reachable within its positional arguments, however deeply
+    combined with `|'/`&'/`~' or nested inside further `Q(...)' calls --
+    `filter(Q(a=1) | Q(b=self.request.user))' has its real field
+    lookups one level down from `.filter()' itself, inside the `Q's,
+    not as `.filter()`'s own keywords, but they are exactly the same
+    *kind* of thing: a field lookup name paired with a value, just
+    wrapped in a `Q()` constructor instead of passed directly."""
+
+    keywords = list(call.keywords)
+
+    def walk(node):
+        if is_q_call(node, namespace):
+            keywords.extend(node.keywords)
+            for arg in node.args:
+                walk(arg)
+        elif isinstance(node, (ast.BinOp, ast.UnaryOp, ast.BoolOp)):
+            for child in ast.iter_child_nodes(node):
+                walk(child)
+
+    for arg in call.args:
+        walk(arg)
+
+    return keywords
+
+
 def mock_unresolvable_arguments(tree, namespace):
     """Return (TREE, MOCKED): TREE with unresolvable keyword-argument
-    values in filter()/exclude()/get()/aget() calls replaced by a
-    plausible value for the field being compared. MOCKED lists what was
-    replaced and with what, for the result's note.
+    values in filter()/exclude()/get()/aget() calls (including ones
+    reached through a Q(...) in their arguments -- see
+    `collect_lookup_keywords') replaced by a plausible value for the
+    field being compared. MOCKED lists what was replaced and with what,
+    for the result's note.
 
     Structural, not reactive: every keyword argument on every matching
     call is tried in isolation and only ever replaced *whole* -- never
@@ -657,7 +702,7 @@ def mock_unresolvable_arguments(tree, namespace):
         except Exception:
             model = None
 
-        for keyword in node.keywords:
+        for keyword in collect_lookup_keywords(node, namespace):
             if keyword.arg is None:  # a **kwargs spread -- nothing to resolve
                 continue
 

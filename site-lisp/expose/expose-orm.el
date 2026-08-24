@@ -14,7 +14,11 @@
 ;;; finding comes from the query object or the model's metadata. That is what
 ;;; makes it safe to run against a project whose DB_HOST points somewhere you
 ;;; would rather not send a query -- see `expose-orm.py', which also refuses
-;;; to evaluate an expression containing a write.
+;;; to evaluate an expression containing a write, and refuses a real
+;;; connection outright for the duration of evaluation regardless of what
+;;; code path might have opened one (a denylist of dangerous method names
+;;; can never be complete -- Django's own contrib apps have methods that
+;;; connect for real without looking dangerous by name).
 ;;;
 ;;; `expose-orm-explain' is the exception and the only thing here that
 ;;; connects, because a plan is the planner's opinion and only the planner

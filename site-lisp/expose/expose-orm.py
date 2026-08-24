@@ -10,7 +10,11 @@ By default nothing here opens a database connection. `str(queryset.query)'
 compiles SQL through the backend's operations without connecting, and every
 fact reported below comes from the query object or the model's `_meta' -- so
 the default path is safe to point at a project whose DB_HOST is production,
-or whose database isn't running at all.
+or whose database isn't running at all. Enforced, not just intended: real
+connections are refused outright while the expression is evaluated (see
+`connections_refused'), so a method this doesn't recognise as dangerous --
+a contrib app's `ContentType.objects.get_for_model', a project's own custom
+manager method -- fails cleanly instead of quietly connecting anyway.
 
 Asking for a plan (`explain' in the payload) is the exception, and the only
 thing here that connects: EXPLAIN needs the planner's own statistics, and
@@ -20,6 +24,7 @@ regardless.
 """
 
 import ast
+import contextlib
 import importlib
 import json
 import os
@@ -71,6 +76,59 @@ UNINDEXABLE_LOOKUPS = {
     "contains", "icontains", "iexact", "endswith", "iendswith",
     "regex", "iregex", "istartswith", "search", "trigram_similar",
 }
+
+
+class ConnectionRefused(Exception):
+    """Raised in place of a real database connection during evaluation --
+    caught and reported like any other evaluation failure, never allowed
+    to actually reach a socket call."""
+
+
+@contextlib.contextmanager
+def connections_refused():
+    """Make every Django database backend refuse to open a real
+    connection for the duration of this context.
+
+    `refusal' below catches known write/evaluate method *names* --
+    a denylist, and necessarily an incomplete one: Django's own contrib
+    apps have methods that connect for real without looking like it
+    (`ContentType.objects.get_for_model' looks up or creates a row),
+    and any project's own custom manager/queryset method is
+    unenumerable in advance. This is the backstop for all of that: it
+    catches the one thing that actually matters -- a real connection
+    was about to open -- at the one place every built-in backend
+    (postgres, mysql, sqlite, oracle) actually does it. `connect' is
+    defined exactly once, on `BaseDatabaseWrapper' itself; none of them
+    override it, only the lower-level `get_new_connection', so patching
+    it here catches all of them uniformly rather than needing a
+    per-backend patch."""
+
+    from django.db.backends.base.base import BaseDatabaseWrapper
+
+    original = BaseDatabaseWrapper.connect
+
+    def refuse(self, *args, **kwargs):
+        raise ConnectionRefused(
+            "opened a real database connection, which this refuses except "
+            "for `expose-orm-explain'. Likely a manager/queryset method "
+            "that queries for real rather than only building a lazy "
+            "QuerySet -- Django's own `ContentType.objects.get_for_model' "
+            "is exactly this shape."
+        )
+
+    BaseDatabaseWrapper.connect = refuse
+    try:
+        yield
+    finally:
+        BaseDatabaseWrapper.connect = original
+
+
+def guarded_eval(node, namespace):
+    """Evaluate NODE (an `ast.Expression') in NAMESPACE with real database
+    connections refused for the duration -- see `connections_refused'."""
+
+    with connections_refused():
+        return eval(compile(node, "<expose-orm>", "eval"), namespace)  # noqa: S307
 
 
 def refusal(tree):
@@ -594,10 +652,7 @@ def mock_unresolvable_arguments(tree, namespace):
 
         model = None
         try:
-            base = eval(  # noqa: S307
-                compile(ast.Expression(body=node.func.value), "<expose-orm>", "eval"),
-                namespace,
-            )
+            base = guarded_eval(ast.Expression(body=node.func.value), namespace)
             model = getattr(base, "model", None)
         except Exception:
             model = None
@@ -607,10 +662,7 @@ def mock_unresolvable_arguments(tree, namespace):
                 continue
 
             try:
-                eval(  # noqa: S307
-                    compile(ast.Expression(body=keyword.value), "<expose-orm>", "eval"),
-                    namespace,
-                )
+                guarded_eval(ast.Expression(body=keyword.value), namespace)
             except Exception:
                 pass
             else:
@@ -662,7 +714,7 @@ def analyse(expression, module_path, payload=None):
     note = combine_notes(import_note, rewrite_note, mock_note)
 
     try:
-        value = eval(compile(tree, "<expose-orm>", "eval"), namespace)  # noqa: S307
+        value = guarded_eval(tree, namespace)
     except NameError as exc:
         return {
             "error": "%s -- this expression depends on a name that only exists "
@@ -673,6 +725,8 @@ def analyse(expression, module_path, payload=None):
             "only the bound parameter differs." % exc,
             "note": note,
         }
+    except ConnectionRefused as exc:
+        return {"error": str(exc), "note": note, "refused": True}
     except Exception as exc:
         return {"error": "%s: %s" % (exc.__class__.__name__, exc), "note": note}
 

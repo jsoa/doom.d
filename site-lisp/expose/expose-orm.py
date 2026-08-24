@@ -440,6 +440,201 @@ def combine_notes(*notes):
     return "; ".join(joined) if joined else None
 
 
+# django.db.models.lookups' own names, not reconstructed: a lookup
+# doesn't change what *field* a keyword argument targets, only how it's
+# compared, so `created_at__gte` and `created_at__isnull` both target
+# `created_at` -- the suffix just has to be recognised and peeled off to
+# find it.
+LOOKUP_SUFFIXES = {
+    "exact", "iexact", "contains", "icontains", "in", "gt", "gte", "lt", "lte",
+    "startswith", "istartswith", "endswith", "iendswith", "range", "date",
+    "year", "iso_year", "month", "day", "week", "week_day", "quarter", "time",
+    "hour", "minute", "second", "isnull", "regex", "iregex", "search",
+    "trigram_similar",
+}
+
+# Only these actually take field-shaped keyword arguments worth mocking.
+# `annotate()`/`aggregate()` keywords name the *output*, not a field, and
+# `order_by()`/`values()' take positional field names as strings, not
+# keywords -- none of that is what this is for.
+LOOKUP_METHODS = {"filter", "afilter", "exclude", "aexclude", "get", "aget"}
+
+
+def field_mock_value(field):
+    """Return an AST literal for a plausible value of FIELD's own type.
+
+    Django's `to_python'/`get_prep_value' generally accept a same-shaped
+    string in place of a real `date'/`datetime'/`time'/`UUID' object --
+    ISO 8601 for the first three, the standard hyphenated form for the
+    last -- so a real one of those never has to be constructed here."""
+
+    internal = field.get_internal_type() if field is not None else None
+
+    integer_types = {
+        "AutoField", "BigAutoField", "SmallAutoField", "IntegerField",
+        "BigIntegerField", "SmallIntegerField", "PositiveIntegerField",
+        "PositiveSmallIntegerField", "PositiveBigIntegerField",
+        "ForeignKey", "OneToOneField", "ManyToManyField",
+    }
+    char_types = {
+        "CharField", "TextField", "SlugField", "EmailField", "URLField",
+        "GenericIPAddressField", "FilePathField", "FileField", "ImageField",
+    }
+
+    if internal in integer_types:
+        return ast.Constant(value=1)
+    if internal in char_types:
+        return ast.Constant(value="x")
+    if internal in ("FloatField", "DecimalField"):
+        return ast.Constant(value=0)
+    if internal in ("BooleanField", "NullBooleanField"):
+        return ast.Constant(value=True)
+    if internal == "DateField":
+        return ast.Constant(value="2024-01-01")
+    if internal == "DateTimeField":
+        return ast.Constant(value="2024-01-01T00:00:00")
+    if internal == "TimeField":
+        return ast.Constant(value="00:00:00")
+    if internal == "DurationField":
+        return ast.Constant(value="0:00:00")
+    if internal == "UUIDField":
+        return ast.Constant(value="00000000-0000-0000-0000-000000000001")
+    if internal == "JSONField":
+        return ast.Dict(keys=[], values=[])
+    if internal == "BinaryField":
+        return ast.Constant(value=b"")
+
+    # Unresolved field, or a type not listed above: an integer is the
+    # single most likely to compile without a validation error of
+    # anything that could be guessed blind (it is what a ForeignKey, by
+    # far the most common miss, needs).
+    return ast.Constant(value=1)
+
+
+def field_mock(field, lookup):
+    """Return an AST literal for FIELD, shaped for LOOKUP.
+
+    `isnull' ignores the field's own type -- it is always a plain bool.
+    `in'/`range' wrap the field's own mock the way those lookups need
+    their argument shaped, rather than mocking a list/tuple directly,
+    so e.g. an `in' lookup on a ForeignKey still gets a list of a
+    plausible *pk*, not a list of something else."""
+
+    if lookup == "isnull":
+        return ast.Constant(value=True)
+
+    base = field_mock_value(field)
+
+    if lookup == "in":
+        return ast.List(elts=[base], ctx=ast.Load())
+    if lookup == "range":
+        return ast.Tuple(elts=[base, base], ctx=ast.Load())
+
+    return base
+
+
+def resolve_field(model, path):
+    """Return (FIELD, LOOKUP) for dotted lookup PATH on MODEL.
+
+    FIELD is None when MODEL is unknown or PATH does not resolve --
+    field_mock_value's own fallback still applies, this just means it
+    could not be more specific than that."""
+
+    parts = path.split("__")
+
+    lookup = None
+    if len(parts) > 1 and parts[-1] in LOOKUP_SUFFIXES:
+        lookup = parts.pop()
+
+    field = None
+    current_model = model
+    for part in parts:
+        if current_model is None:
+            return None, lookup
+        try:
+            field = current_model._meta.get_field(part)
+        except Exception:
+            return None, lookup
+        current_model = getattr(field, "related_model", None)
+
+    return field, lookup
+
+
+def mock_unresolvable_arguments(tree, namespace):
+    """Return (TREE, MOCKED): TREE with unresolvable keyword-argument
+    values in filter()/exclude()/get()/aget() calls replaced by a
+    plausible value for the field being compared. MOCKED lists what was
+    replaced and with what, for the result's note.
+
+    Structural, not reactive: every keyword argument on every matching
+    call is tried in isolation and only ever replaced *whole* -- never
+    a bare name found buried somewhere inside a larger expression -- so
+    `created_by=self.request.user` is mocked as one unit, the same way
+    `created_by=request.user.pk` or `created_by=some_helper(request)`
+    would be, without needing to know why evaluating it failed, only
+    that it did.
+
+    A post-order walk, children before parents: a chained
+    `Model.objects.filter(a=X).filter(b=1)' needs the inner call's `a'
+    mocked before the outer call evaluates that inner call to find out
+    what model `b' belongs to -- otherwise the inner failure would
+    still be unresolved at the moment the outer call's own model
+    lookup tries to evaluate it."""
+
+    mocked = []
+
+    def visit(node):
+        for child in ast.iter_child_nodes(node):
+            visit(child)
+
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
+            return
+        if node.func.attr not in LOOKUP_METHODS:
+            return
+
+        model = None
+        try:
+            base = eval(  # noqa: S307
+                compile(ast.Expression(body=node.func.value), "<expose-orm>", "eval"),
+                namespace,
+            )
+            model = getattr(base, "model", None)
+        except Exception:
+            model = None
+
+        for keyword in node.keywords:
+            if keyword.arg is None:  # a **kwargs spread -- nothing to resolve
+                continue
+
+            try:
+                eval(  # noqa: S307
+                    compile(ast.Expression(body=keyword.value), "<expose-orm>", "eval"),
+                    namespace,
+                )
+            except Exception:
+                pass
+            else:
+                continue  # already resolves fine -- leave it alone
+
+            field, lookup = resolve_field(model, keyword.arg)
+            original = ast.unparse(keyword.value)
+            keyword.value = field_mock(field, lookup)
+            ast.fix_missing_locations(keyword.value)
+
+            mocked.append(
+                "`%s=%s` mocked as `%s`%s"
+                % (
+                    keyword.arg,
+                    original,
+                    ast.unparse(keyword.value),
+                    " (%s)" % field.get_internal_type() if field is not None else "",
+                )
+            )
+
+    visit(tree.body)
+    return tree, mocked
+
+
 def analyse(expression, module_path, payload=None):
     from django.db.models import Manager, QuerySet
 
@@ -455,7 +650,16 @@ def analyse(expression, module_path, payload=None):
         return {"error": blocked, "refused": True}
 
     namespace, import_note = build_namespace(module_path)
-    note = combine_notes(import_note, rewrite_note)
+
+    tree, mocked = mock_unresolvable_arguments(tree, namespace)
+    mock_note = (
+        "mocked, since the query's shape doesn't depend on the actual value: "
+        + "; ".join(mocked)
+        if mocked
+        else None
+    )
+
+    note = combine_notes(import_note, rewrite_note, mock_note)
 
     try:
         value = eval(compile(tree, "<expose-orm>", "eval"), namespace)  # noqa: S307

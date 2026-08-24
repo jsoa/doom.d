@@ -228,11 +228,11 @@ Expose installs bindings under `SPC c h` by default.
 | `SPC c h o` | `expose-popup-open`                 | Open popup in a normal buffer                |
 | `SPC c h l` | `expose-log-open`                   | Open Expose log                              |
 | `SPC c h L` | `expose-log-clear`                  | Clear Expose log                             |
-| `SPC c h s` | `expose-orm-inspect`                | SQL a Django queryset compiles to            |
 | `SPC c h t` | `expose-find-tests`                 | List the tests covering the code at point    |
 | `SPC c h ?` | `expose-hover-debug-current-buffer` | Debug current buffer hover state             |
 | `SPC c h h` | Thing at Point prefix               | Focused code-context actions                 |
-| `SPC c h G` | Diagrams prefix                     | Rendered flow, ER and call graphs            |
+| `SPC c h G` | Diagrams prefix                     | Rendered flow and call graphs                |
+| `SPC c h D` | Django prefix                       | Queryset SQL, query plans, and Django-specific diagrams |
 | `SPC c h R` | Full Review prefix                  | Persistent branch/session reviews            |
 | `SPC c h M` | Region Review prefix                | Persistent selected-region reviews           |
 | `SPC c h W` | Watch prefix                        | Background review for watched source buffers |
@@ -288,22 +288,26 @@ Every refinement you ask for is kept, including "undo that" or "nvm" -- there is
 | `SPC c h G c` | `expose-run-control-flow-diagram`   | Control flow of the code at point        |
 | `SPC c h G C` | `expose-run-call-flow-diagram`      | What the code at point calls             |
 | `SPC c h G d` | `expose-run-data-flow-diagram`      | How values move through the code         |
-| `SPC c h G R` | `expose-run-request-flow-diagram`   | Django request pipeline for a view       |
 | `SPC c h G s` | `expose-run-side-effects-diagram`   | What this changes outside itself         |
 | `SPC c h G m` | `expose-run-import-graph`           | What this file imports, transitively     |
 | `SPC c h G t` | `expose-run-test-graph`             | Which tests reach the code at point      |
-| `SPC c h G h` | `expose-run-migration-history`      | How a Django model was shaped over time (`C-u` for all) |
-| `SPC c h G e` | `expose-run-er-diagram`             | Models and their relationships           |
 | `SPC c h G r` | `expose-run-reverse-call-graph`     | What calls the function at point         |
-| `SPC c h G p` | `expose-orm-explain`                | Query plan for the queryset at point     |
 
 See [Diagrams](#diagrams-1) for what each one draws and how far to trust it.
 
-| Key           | Command              | Purpose                                     |
-|---------------|----------------------|---------------------------------------------|
-| `SPC c h s`   | `expose-orm-inspect` | SQL a Django queryset compiles to           |
+### Django
 
-See [Queryset SQL](#queryset-sql). The query plan is a drawing, so it sits with the diagrams as `SPC c h G p`.
+Meaningless outside a Django project, so kept under its own prefix rather than crowding the generic keys above.
+
+| Key           | Command                             | Description                                  |
+|---------------|--------------------------------------|-----------------------------------------------|
+| `SPC c h D s` | `expose-orm-inspect`                | SQL a Django queryset compiles to             |
+| `SPC c h D p` | `expose-orm-explain`                | Query plan for the queryset at point          |
+| `SPC c h D e` | `expose-run-er-diagram`             | Models and their relationships                |
+| `SPC c h D h` | `expose-run-migration-history`      | How a Django model was shaped over time (`C-u` for all) |
+| `SPC c h D R` | `expose-run-request-flow-diagram`   | Django request pipeline for a view            |
+
+See [Queryset SQL](#queryset-sql) and [Diagrams](#diagrams-1) -- the entity relations, migration history, and request flow diagrams are described there alongside the rest, even though their keys live here.
 
 ## Finding Tests
 
@@ -404,19 +408,21 @@ Expose actions are intentionally small, focused lenses over the current code con
 
 Rendered with Graphviz and shown as an SVG image in a full-frame buffer -- deliberately, and the one exception to the side-panel placement everything else in Expose uses (see "Where Expose shows things" above): these graphs get big, and a diagram squeezed into a side pane is unreadable in exactly the cases it's most needed. `q` restores whatever your window layout was before.
 
-| Diagram            | Answers                                            | Source     |
-|--------------------|----------------------------------------------------|------------|
-| Control flow       | Which paths run through this code                  | Provider   |
-| Call flow          | What this code calls, and what those call          | Provider   |
-| Data flow          | Where values come from, and where they end up      | Provider   |
-| Request flow       | A Django request through its pipeline layers       | Provider   |
-| Side effects       | What this changes outside itself, and what survives a rollback | Provider |
-| Import graph       | What this file imports, and its cycles             | Parsed     |
-| Tests              | Which tests reach this code, and how               | LSP / xref |
-| Migration history  | How a Django model was shaped over time            | Parsed     |
-| Query plan         | How the database will actually run this queryset   | Database   |
-| Entity relations   | Which models exist and how they relate             | Provider   |
-| Reverse call graph | What calls this, transitively                      | LSP / xref |
+| Diagram            | Answers                                            | Source     | Key           |
+|--------------------|-----------------------------------------------------|------------|---------------|
+| Control flow       | Which paths run through this code                  | Provider   | `SPC c h G c` |
+| Call flow          | What this code calls, and what those call          | Provider   | `SPC c h G C` |
+| Data flow          | Where values come from, and where they end up      | Provider   | `SPC c h G d` |
+| Side effects       | What this changes outside itself, and what survives a rollback | Provider | `SPC c h G s` |
+| Import graph       | What this file imports, and its cycles             | Parsed     | `SPC c h G m` |
+| Tests              | Which tests reach this code, and how               | LSP / xref | `SPC c h G t` |
+| Reverse call graph | What calls this, transitively                      | LSP / xref | `SPC c h G r` |
+| Request flow       | A Django request through its pipeline layers       | Provider   | `SPC c h D R` |
+| Migration history  | How a Django model was shaped over time            | Parsed     | `SPC c h D h` |
+| Query plan         | How the database will actually run this queryset   | Database   | `SPC c h D p` |
+| Entity relations   | Which models exist and how they relate             | Provider   | `SPC c h D e` |
+
+The last four are Django-specific and live under their own prefix (`SPC c h D`, see "Django" under Default Keybindings above) rather than crowding the generic ones -- everything below still applies to all of them equally, since the key prefix is the only thing that differs.
 
 Nodes are colored by what they represent — entry, condition, error, exit, external dependency, I/O — classified from the shapes each request asks for rather than from colors chosen by the provider, which vary run to run. Relationship edges in the ER diagram are colored by kind (foreign key, many-to-many, one-to-one), and the model you invoked it from is outlined.
 
@@ -489,7 +495,7 @@ Parsed, not generated: migration files are mechanically regular, a project accum
 
 Long histories are trimmed to the most recent `expose-migrations-max-migrations` (24) — and the diagram says so, reading `last 24 of 301 migrations (277 earlier not shown)`, because a truncated history that looks complete is worse than no history. The newest are kept: the model's current shape is the part you can least afford to lose. The cap counts migrations rather than operations for the same reason it is stated at all — one migration routinely alters a dozen fields, so a budget expressed in operations silently drew five tables out of three hundred migrations.
 
-**With a prefix argument (`C-u SPC c h G h`) it draws the complete history**, however long. The limit is a default, not a ceiling; set `expose-migrations-max-migrations` to nil to make that the normal behaviour. It exists because every table lists every field the model had at that point, so width grows with migrations and height with the model — three hundred of them is a picture to scroll rather than read, and the diagram buffer's zoom (`+`/`-`) is what makes it usable at all.
+**With a prefix argument (`C-u SPC c h D h`) it draws the complete history**, however long. The limit is a default, not a ceiling; set `expose-migrations-max-migrations` to nil to make that the normal behaviour. It exists because every table lists every field the model had at that point, so width grows with migrations and height with the model — three hundred of them is a picture to scroll rather than read, and the diagram buffer's zoom (`+`/`-`) is what makes it usable at all.
 
 Django numbers migrations per app, so ordering is exact within an app but not comparable across them — `orders/0003` and `events/0032` carry no relative order in their names. Operations from different apps are therefore grouped rather than interleaved into a timeline that would be invented.
 
@@ -507,7 +513,7 @@ Requires the `dot` binary; the commands say so plainly if it is missing.
 
 ## Queryset SQL
 
-`SPC c h s` (`expose-orm-inspect`) shows the SQL a Django queryset compiles to, and what about it will be slow. It uses the region when there is one, otherwise the whole statement at point — which is what you want for a chain wrapped over several lines, where the line under the cursor is a fragment that wouldn't parse.
+`SPC c h D s` (`expose-orm-inspect`) shows the SQL a Django queryset compiles to, and what about it will be slow. It uses the region when there is one, otherwise the whole statement at point — which is what you want for a chain wrapped over several lines, where the line under the cursor is a fragment that wouldn't parse.
 
 **No AI, and no reconstruction.** The expression is handed to the project's own Python and compiled by Django itself, so the SQL is the SQL. Guessing at it from source would defeat the purpose: the questions worth asking a queryset — how many joins is this, does that filter hit an index — are worthless answered approximately.
 
@@ -537,7 +543,7 @@ What that cannot reach is **locals**: `request`, a loop variable, anything only 
 
 ### Query plans
 
-`SPC c h G p` (`expose-orm-explain`) draws the plan the database will actually use, as a graph. `C-u SPC c h G p` runs `EXPLAIN ANALYZE` instead, which **executes the query** and replaces the planner's estimates with what really happened.
+`SPC c h D p` (`expose-orm-explain`) draws the plan the database will actually use, as a graph. `C-u SPC c h D p` runs `EXPLAIN ANALYZE` instead, which **executes the query** and replaces the planner's estimates with what really happened.
 
 This is the one command here that connects — a plan is the planner's opinion and only the planner holds it. It runs against `expose-orm-dsn` if set, otherwise the `expose-orm-database` alias, so you can take plans from a replica rather than whatever `DATABASES["default"]` points at. Either way the transaction is rolled back and `expose-orm-statement-timeout` (10s) bounds it, because explaining a slow query otherwise means waiting out the slow query. Writes are still refused before anything is evaluated.
 

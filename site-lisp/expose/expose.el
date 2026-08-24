@@ -78,12 +78,6 @@
                :desc "Buffer Review"     "b" #'expose-run-buffer-review
                :desc "Commit Message"    "g" #'expose-run-commit-message
                :desc "Changelog"         "n" #'expose-run-changelog
-
-               ;; Not `q': that closes the popup, and rebinding it would
-               ;; break a key used constantly. The query *plan* is not here
-               ;; at all -- it draws a picture, so it lives with the
-               ;; diagrams, same as everything else that does.
-               :desc "Queryset SQL"      "s" #'expose-orm-inspect
                :desc "Find tests"        "t" #'expose-find-tests
 
                :desc "Popup scroll down" "j" #'expose-popup-scroll-down
@@ -124,19 +118,29 @@
                ;; entries under "Thing at Point": they answer with a
                ;; picture in a dedicated buffer instead of popup text,
                ;; and the reverse call graph isn't a provider action at
-               ;; all.
+               ;; all. Django-specific diagrams live under their own
+               ;; prefix instead (see "D" below), not here.
                (:prefix-map ("G" . "Diagrams")
                 :desc "Control flow"      "c" #'expose-run-control-flow-diagram
                 :desc "Call flow"         "C" #'expose-run-call-flow-diagram
                 :desc "Data flow"         "d" #'expose-run-data-flow-diagram
-                :desc "Request flow"      "R" #'expose-run-request-flow-diagram
                 :desc "Side effects"      "s" #'expose-run-side-effects-diagram
                 :desc "Import graph"      "m" #'expose-run-import-graph
-                :desc "Migration history" "h" #'expose-run-migration-history
                 :desc "Tests for this"    "t" #'expose-run-test-graph
+                :desc "Reverse call graph" "r" #'expose-run-reverse-call-graph)
+
+               ;; Everything here is meaningless outside a Django
+               ;; project -- kept apart from the generic Diagrams group
+               ;; above rather than mixed into it, and apart from the
+               ;; general top-level keys, for the same reason: none of
+               ;; it applies to a project that isn't Django, so it
+               ;; shouldn't crowd the keys that do.
+               (:prefix-map ("D" . "Django")
+                :desc "Queryset SQL"      "s" #'expose-orm-inspect
+                :desc "Query plan"        "p" #'expose-orm-explain
                 :desc "Entity relations"  "e" #'expose-run-er-diagram
-                :desc "Reverse call graph" "r" #'expose-run-reverse-call-graph
-                :desc "Query plan"        "p" #'expose-orm-explain)
+                :desc "Migration history" "h" #'expose-run-migration-history
+                :desc "Request flow"      "R" #'expose-run-request-flow-diagram)
 
                (:prefix-map ("R" . "Full Review")
                 :desc "Open/start review" "r" #'expose-review-open-or-start

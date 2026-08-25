@@ -279,6 +279,91 @@ context passed in."
       (expose-request-select-with-git '(:project "demo") :project)
       '(:project "demo" :git-status "clean" :git-diff "diff --git a/x b/x")))))
 
+;;; ---------------------------------------------------------------------------
+;;; expose-request-signal-flow-diagram
+;;; ---------------------------------------------------------------------------
+
+(ert-deftest expose-request-test-signal-flow-diagram-is-raw-and-dispatched ()
+  (let ((request
+         (expose-request-build 'signal-flow-diagram '(:project "demo"))))
+
+    (should (eq 'signal-flow-diagram (plist-get request :type)))
+    (should
+     (string-match-p
+      (regexp-quote expose-request-raw-output-instruction)
+      (plist-get request :instruction)))
+    (should
+     (string-match-p "digraph" (plist-get request :instruction)))))
+
+;;; ---------------------------------------------------------------------------
+;;; expose-request-merge-conflict
+;;; ---------------------------------------------------------------------------
+
+(ert-deftest expose-request-test-merge-conflict-includes-both-sides ()
+  (let ((request
+         (expose-request-merge-conflict
+          (list :project "demo" :file "views.py"
+                :ours "ours code" :ours-label "HEAD"
+                :theirs "theirs code" :theirs-label "feature"
+                :code "surrounding"))))
+
+    (should (eq 'merge-conflict (plist-get request :type)))
+    (should
+     (equal
+      '(:project "demo" :file "views.py"
+        :ours "ours code" :ours-label "HEAD"
+        :theirs "theirs code" :theirs-label "feature"
+        :code "surrounding")
+      (plist-get request :context)))))
+
+(ert-deftest expose-request-test-merge-conflict-is-not-raw ()
+  (let ((request
+         (expose-request-merge-conflict (list :ours "a" :theirs "b"))))
+
+    (should
+     (string-match-p
+      (regexp-quote expose-request-output-instruction)
+      (plist-get request :instruction)))))
+
+(ert-deftest expose-request-test-build-dispatches-merge-conflict ()
+  (let ((request
+         (expose-request-build 'merge-conflict '(:ours "a" :theirs "b"))))
+
+    (should (eq 'merge-conflict (plist-get request :type)))))
+
+;;; ---------------------------------------------------------------------------
+;;; expose-request-explain-traceback
+;;; ---------------------------------------------------------------------------
+
+(ert-deftest expose-request-test-explain-traceback-includes-traceback-and-frames ()
+  (let ((request
+         (expose-request-explain-traceback
+          (list :project "demo" :language "Python"
+                :traceback "Traceback...\nValueError: boom"
+                :frames (list (list :file "views.py" :line 10 :snippet "code"))))))
+
+    (should (eq 'explain-traceback (plist-get request :type)))
+    (should
+     (equal "Traceback...\nValueError: boom"
+            (plist-get (plist-get request :context) :traceback)))
+    (should
+     (equal (list (list :file "views.py" :line 10 :snippet "code"))
+            (plist-get (plist-get request :context) :frames)))))
+
+(ert-deftest expose-request-test-explain-traceback-omits-frames-when-none-resolved ()
+  (let ((request
+         (expose-request-explain-traceback
+          (list :traceback "some traceback text" :frames nil))))
+
+    (should-not (plist-get (plist-get request :context) :frames))
+    (should (equal "some traceback text" (plist-get (plist-get request :context) :traceback)))))
+
+(ert-deftest expose-request-test-build-dispatches-explain-traceback ()
+  (let ((request
+         (expose-request-build 'explain-traceback '(:traceback "boom"))))
+
+    (should (eq 'explain-traceback (plist-get request :type)))))
+
 (provide 'expose-request-test)
 
 ;;; expose-request-test.el ends here

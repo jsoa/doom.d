@@ -218,8 +218,10 @@ Expose installs bindings under `SPC c h` by default.
 |-------------|-------------------------------------|----------------------------------------------|
 | `SPC c h c` | `expose-continue-at-point`          | Inline continuation at point                 |
 | `SPC c h b` | `expose-run-buffer-review`          | Review the current buffer's uncommitted changes |
+| `SPC c h m` | `expose-run-merge-conflict`         | Explain and propose a resolution for the conflict at point |
 | `SPC c h g` | `expose-run-commit-message`         | Insert generated commit message at point     |
 | `SPC c h n` | `expose-run-changelog`              | Generate changelog entry from Git changes    |
+| `SPC c h T` | `expose-run-explain-traceback`      | Explain a pasted error/traceback             |
 | `SPC c h j` | `expose-popup-scroll-down`          | Scroll popup down                            |
 | `SPC c h k` | `expose-popup-scroll-up`            | Scroll popup up                              |
 | `SPC c h q` | `expose-popup-hide`                 | Close popup                                  |
@@ -262,7 +264,11 @@ These actions use the active region when one is selected, falling back to the po
 | `SPC c h h !` | `expose-run-risks`                   | Identify practical risks             |
 | `SPC c h h y` | `expose-run-why`                     | Explain likely design intent         |
 | `SPC c h h m` | `expose-run-mental-model`            | Build a mental model                 |
+| `SPC c h h z` | `expose-run-dead-code-check`         | Is anything calling this at all?     |
+| `SPC c h h n` | `expose-run-rename-impact`           | What would renaming this break?      |
 | `SPC c h h ?` | `expose-hover-debug-current-buffer`  | Debug current buffer hover state     |
+
+`expose-run-dead-code-check` and `expose-run-rename-impact` are not sent to a provider -- see [Dead Code Check & Rename Impact](#dead-code-check--rename-impact) below, alongside Finding Tests, whose side-panel results buffer they share the shape of.
 
 A Thing at Point result does not show in the small hover popup -- these answers routinely ran longer than a hover has room for. Instead it opens in a persistent, colorized `*EXPOSE Action*` window: the buffer you actioned always ends up on the left, and the result always ends up in the window immediately to its right, splitting the frame if there was only one window open. It stays open, showing only the most recent action's result, until you close it (`q`) or run another action anywhere. Each result is also recorded to popup history (`SPC c h H`), same as before. Region Review's own results share this same window -- see "Region Reviews" below. Watch and Full Review are unaffected -- their hovers and source popups still work exactly as before.
 
@@ -303,9 +309,12 @@ Meaningless outside a Django project, so kept under its own prefix rather than c
 |---------------|--------------------------------------|-----------------------------------------------|
 | `SPC c h D s` | `expose-orm-inspect`                | SQL a Django queryset compiles to             |
 | `SPC c h D p` | `expose-orm-explain`                | Query plan for the queryset at point          |
+| `SPC c h D i` | `expose-orm-suggest-indexes`        | Which filters/ordering at point have no index |
+| `SPC c h D n` | `expose-orm-detect-n-plus-one`      | N+1 check for the function at point           |
 | `SPC c h D e` | `expose-run-er-diagram`             | Models and their relationships                |
 | `SPC c h D h` | `expose-run-migration-history`      | How a Django model was shaped over time (`C-u` for all) |
 | `SPC c h D R` | `expose-run-request-flow-diagram`   | Django request pipeline for a view            |
+| `SPC c h D S` | `expose-run-signal-flow-diagram`    | What fires from a signal, and what responds   |
 
 See [Queryset SQL](#queryset-sql) and [Diagrams](#diagrams-1) -- the entity relations, migration history, and request flow diagrams are described there alongside the rest, even though their keys live here.
 
@@ -332,6 +341,38 @@ When nothing reaches it, that is stated plainly rather than shown as an empty li
 A search the language server stopped answering says so instead of reporting a negative. "Nothing tests this" and "the search did not finish" are opposite answers, and the second passed off as the first is what somebody acts on before deleting code.
 
 No AI: "which tests cover this" is worthless answered plausibly.
+
+## Dead Code Check & Rename Impact
+
+`SPC c h h z` (`expose-run-dead-code-check`) and `SPC c h h n` (`expose-run-rename-impact`) ask two different questions of the exact same search: the direct callers/references of the symbol at point, one level -- no further climbing, unlike the reverse call graph these share their walk with. Shown as a side-panel results buffer beside the source, same shape and keys as Finding Tests (`TAB`/`S-TAB` between call sites, `RET` opens one to the left without losing the list, `g` searches again).
+
+**No AI in either.** Both need whole-project knowledge no provider has, and a confident, invented answer to "is this dead" or "what would this rename break" is worse than none -- same reasoning as the reverse call graph, which this is built on.
+
+**Dead code check** asks whether anything calls or references the symbol at all:
+
+```text
+Dead code check: unused_helper
+
+Nothing calls or references unused_helper within this project.
+
+This only sees this project: a public API used elsewhere -- another
+package, a different repo -- would not show up here either way.
+```
+
+Nothing found is the useful answer, not a failure -- but it only ever means *within this project*, stated plainly rather than implied, since a public API used from elsewhere is invisible to a search that only covers here.
+
+**Rename impact** lists every call site before you commit to a rename, and marks the ones outside the symbol's own top-level directory as `OUTSIDE`:
+
+```text
+Rename impact: get_active_users
+
+app/views.py
+      12  def list_view(self):
+OUTSIDE   app/other_package/tasks.py
+      40      for u in get_active_users():
+```
+
+A caller inside the symbol's own directory is exactly what an editor-wide rename already catches for you; the ones marked `OUTSIDE` are not, and are worth a look by hand before the rename goes ahead.
 
 ### Full Review
 
@@ -418,11 +459,12 @@ Rendered with Graphviz and shown as an SVG image in a full-frame buffer -- delib
 | Tests              | Which tests reach this code, and how               | LSP / xref | `SPC c h G t` |
 | Reverse call graph | What calls this, transitively                      | LSP / xref | `SPC c h G r` |
 | Request flow       | A Django request through its pipeline layers       | Provider   | `SPC c h D R` |
+| Signal flow        | What fires a Django signal, and what each receiver does | Provider | `SPC c h D S` |
 | Migration history  | How a Django model was shaped over time            | Parsed     | `SPC c h D h` |
 | Query plan         | How the database will actually run this queryset   | Database   | `SPC c h D p` |
 | Entity relations   | Which models exist and how they relate             | Provider   | `SPC c h D e` |
 
-The last four are Django-specific and live under their own prefix (`SPC c h D`, see "Django" under Default Keybindings above) rather than crowding the generic ones -- everything below still applies to all of them equally, since the key prefix is the only thing that differs.
+The last five are Django-specific and live under their own prefix (`SPC c h D`, see "Django" under Default Keybindings above) rather than crowding the generic ones -- everything below still applies to all of them equally, since the key prefix is the only thing that differs.
 
 Nodes are colored by what they represent — entry, condition, error, exit, external dependency, I/O — classified from the shapes each request asks for rather than from colors chosen by the provider, which vary run to run. Relationship edges in the ER diagram are colored by kind (foreign key, many-to-many, one-to-one), and the model you invoked it from is outlined.
 
@@ -446,6 +488,8 @@ The first three are provider-generated and advisory, like the rest of Expose. A 
 Request flow groups the same territory as call flow into the layers a request passes through -- view, permissions, validation, domain, data, response -- drawn as labelled boxes. Order and layering are the point: a missing layer reads as an absence, so a view with no permission gate, or one reaching straight into the ORM, is visible as a gap rather than something you have to notice isn't there. Gates that can reject the request are drawn as conditions and their failure paths are asked for explicitly, since a gate shown with only its success edge is worse than not drawing it.
 
 Routing is included only when the URL configuration is in the code being looked at, which from a views module it usually isn't. Rather than inventing a plausible route, it starts at the view -- use the reverse call graph to find what actually routes there, which reports the `urls.py` reference as a module-level usage.
+
+**Signal flow** traces what happens from a `.save()`/`.delete()` or an explicit `Signal().send()` through every receiver that responds, and what each receiver itself then does. This is the one link nothing else in Expose follows: a receiver connects to a signal by `@receiver(post_save, sender=Order)` or a plain `signal.connect(...)` call that routinely lives in a different app's `signals.py` than the model it watches, so reading the model or the `.save()` call alone shows none of it. Conditions that skip a receiver -- `raw=True`, a particular `sender`, `update_fields` -- are labelled on the edge into it rather than drawn as an unconditional response, for the same reason a rejection path matters on the request-flow diagram.
 
 Side effects answers a question none of the others quite do: if I call this, what happens to the world? Rows written, mail sent, jobs queued, services called — including effects several frames down, where the body is visible. Effects inside `transaction.atomic` are grouped in their own box, because the useful question is usually which of them survive a rollback: mail and queued tasks do, so a failure after that point leaves a notification about a row that no longer exists. Those keep their own shape inside the box rather than being redrawn as writes, so the hazard stays visible.
 
@@ -563,6 +607,39 @@ This reaches into a `Q(...)` too, however deeply combined with `|`/`&`/`~` — `
 
 Only an argument *value* is ever replaced — never the queryset itself. `some_local_queryset.filter(x=1)`, where the unresolvable name is what you're filtering rather than an argument to it, still reports the name it couldn't resolve; there's no field to mock a starting point against, only a different expression to select instead (`Model.objects.filter(x=1)`, say).
 
+### Missing Indexes
+
+`SPC c h D i` (`expose-orm-suggest-indexes`) runs on the same expression `expose-orm-inspect` does, and is not a second analysis -- `describe_filters`/`describe_ordering` already compute `indexed`/why for every filter and ordering term as part of `expose-orm-inspect`'s own output (see "What it reports" above). This just narrows that same, already-real data down to the terms with no index, instead of reading them out of a wall of SQL and joins:
+
+```text
+blog.Post
+
+  ! filters blog_post.color (exact) -- no index
+```
+
+"Every filter and ordering term here is indexed" when there's nothing to report -- stated plainly, the same convention as everywhere else in Expose that computes something exact.
+
+### N+1 Queries
+
+`SPC c h D n` (`expose-orm-detect-n-plus-one`) checks the function at point -- or the region, when one is active -- for a `for` loop or comprehension whose body accesses an unfetched relation on the row it's iterating:
+
+```python
+for post in Post.objects.all():
+    print(post.author.name)   # a query per row
+```
+
+```text
+Checked 1 loop over a queryset
+
+  ! line 2: `.author` inside the loop (starting line 1) -- add `select_related('author')` to avoid a query per row
+```
+
+**Computed against the model's real metadata, the same way the rest of Queryset SQL is.** The loop's own iterable is resolved exactly like any other queryset expression here -- refused if it's a real write or a real read (`.get()`, `.delete()`, and the rest of the same denylist `expose-orm-inspect` uses), never connecting for real either way (`connections_refused` applies here too) -- and each attribute access on the loop variable is checked against `_meta.get_field` to see whether it's a relation, and whether that relation is already covered by `select_related`/`prefetch_related` on the queryset being iterated.
+
+**Only a single hop is checked** -- `row.category`, not `row.category.parent` -- a further hop is a question about `category`'s own model, not this loop.
+
+**A loop whose iterable can't be resolved statically is counted, not silently skipped.** `for post in self.get_queryset():` depends on `self`, which only exists where the code actually runs, so it's reported as unresolved rather than folded into either "clean" or "found nothing" -- those are different answers, and only one of them means the code was actually looked at.
+
 ### Query plans
 
 `SPC c h D p` (`expose-orm-explain`) draws the plan the database will actually use, as a graph. `C-u SPC c h D p` runs `EXPLAIN ANALYZE` instead, which **executes the query** and replaces the planner's estimates with what really happened.
@@ -621,6 +698,28 @@ SPC c h b
 ```
 
 Refuses up front, rather than sending an empty diff, if the file has no uncommitted changes. Scoped to this file specifically (`git diff -- FILE`), not the whole project -- for that, use Full Review. The result is refinable the same way any other action-buffer result is (see "Refining a result" above).
+
+## Merge Conflict Resolution
+
+`SPC c h m` (`expose-run-merge-conflict`) explains both sides of the `<<<<<<< ... ======= ... >>>>>>>` hunk at point and proposes a resolution:
+
+```text
+SPC c h m
+  -> find the <<<<<<</=======/>>>>>>> hunk enclosing point
+  -> send both sides, their branch labels, and surrounding code
+  -> explain what each side was trying to do, and propose a resolution
+  -> show the result in the action buffer, same as any other SPC c h h result
+```
+
+Refuses up front, like Buffer Review, if point is not actually inside a conflict hunk -- rather than sending nothing real to explain. Advisory like Explain/Fix: it proposes a resolution in a fenced code block, it does not apply one -- nothing in the buffer changes until you make it. The result is refinable the same way any other action-buffer result is (see "Refining a result" above).
+
+## Traceback Explanation
+
+`SPC c h T` (`expose-run-explain-traceback`) is the one Expose action whose input is not the buffer at all: a traceback is pasted text, which has no natural single-line prompt the way a refinement's one-line `read-string` has. It opens a scratch buffer to paste into -- `C-c C-c` sends it, `C-c C-k` cancels without sending anything.
+
+**Every `File "...", line N` frame found in the pasted text is resolved against the current project and its real source read directly off disk**, sent alongside the raw traceback text rather than left for the model to guess at code it was never shown -- Expose can read the project's files and the model cannot, so whatever this can resolve locally travels as fact. A frame whose file can't be found locally (moved, renamed, inside a container with a different path) is still included, file and line named, just without a snippet.
+
+Python tracebacks only -- that frame format (`File "...", line N, in ...`) is Python's own. Capped to `expose-traceback-max-frames` (12) frames, keeping the ones nearest either end of the stack when there are more than that, since that's usually where the interesting code is on a long one.
 
 ## Commit Message Insertion
 

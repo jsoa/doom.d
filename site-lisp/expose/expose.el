@@ -22,6 +22,7 @@
 (require 'expose-commands)
 (require 'expose-review-source)
 (require 'expose-orm)
+(require 'expose-usages)
 
 ;;; ---------------------------------------------------------------------------
 ;;; Keybindings
@@ -76,9 +77,11 @@
                ;; Keep these directly under SPC c h.
                :desc "Continue at point" "c" #'expose-continue-at-point
                :desc "Buffer Review"     "b" #'expose-run-buffer-review
+               :desc "Merge Conflict"    "m" #'expose-run-merge-conflict
                :desc "Commit Message"    "g" #'expose-run-commit-message
                :desc "Changelog"         "n" #'expose-run-changelog
                :desc "Find tests"        "t" #'expose-find-tests
+               :desc "Explain Traceback" "T" #'expose-run-explain-traceback
 
                :desc "Popup scroll down" "j" #'expose-popup-scroll-down
                :desc "Popup scroll up"   "k" #'expose-popup-scroll-up
@@ -112,6 +115,8 @@
                 :desc "Risks"            "!" #'expose-run-risks
                 :desc "Why"              "y" #'expose-run-why
                 :desc "Mental Model"     "m" #'expose-run-mental-model
+                :desc "Dead Code Check"  "z" #'expose-run-dead-code-check
+                :desc "Rename Impact"    "n" #'expose-run-rename-impact
                 :desc "Debug Buffer"     "?" #'expose-hover-debug-current-buffer)
 
                ;; Rendered diagrams. Their own group rather than more
@@ -138,9 +143,12 @@
                (:prefix-map ("D" . "Django")
                 :desc "Queryset SQL"      "s" #'expose-orm-inspect
                 :desc "Query plan"        "p" #'expose-orm-explain
+                :desc "Missing indexes"   "i" #'expose-orm-suggest-indexes
+                :desc "N+1 check"         "n" #'expose-orm-detect-n-plus-one
                 :desc "Entity relations"  "e" #'expose-run-er-diagram
                 :desc "Migration history" "h" #'expose-run-migration-history
-                :desc "Request flow"      "R" #'expose-run-request-flow-diagram)
+                :desc "Request flow"      "R" #'expose-run-request-flow-diagram
+                :desc "Signal flow"       "S" #'expose-run-signal-flow-diagram)
 
                (:prefix-map ("R" . "Full Review")
                 :desc "Open/start review" "r" #'expose-review-open-or-start

@@ -846,6 +846,251 @@ TARGET-POSITION is cleared after insertion."
     (set-marker target-position nil)))
 
 ;;; ---------------------------------------------------------------------------
+;;; Traceback Explanation
+;;; ---------------------------------------------------------------------------
+;;
+;; The one Expose action whose input is not the buffer at all: a
+;; traceback is pasted text, which has no natural single-line prompt the
+;; way `expose-commands-refine-action-buffer''s one-line `read-string' has
+;; -- so this opens a scratch buffer to paste it into instead, `C-c C-c'
+;; to send, `C-c C-k' to cancel.
+;;
+;; What makes this worth more than pasting the same text at a general
+;; chat prompt: every `File "...", line N' frame found in it is resolved
+;; against the current project and its actual source read directly off
+;; disk (see `expose-traceback-parse-frames'), and sent alongside the raw
+;; text. Expose can read the project's files and the model cannot, so
+;; whatever this can resolve locally travels as fact rather than being
+;; left for the model to invent.
+
+(defcustom expose-traceback-frame-context-lines 4
+  "Lines of source context to read around each resolved traceback frame."
+  :type 'integer
+  :group 'expose)
+
+(defcustom expose-traceback-max-frames 12
+  "Maximum traceback frames to resolve real source for.
+
+A traceback through a deep stack, or through library code with a `File'
+line for nearly every frame, could otherwise mean reading dozens
+of files off disk for one request. Capped to the frames nearest the top
+and bottom of the stack -- nearest where the error was raised and where
+it was ultimately triggered, which is generally where the interesting
+code is on a long one."
+  :type 'integer
+  :group 'expose)
+
+(defconst expose-traceback-buffer-name "*EXPOSE Traceback*")
+
+(defvar-local expose-traceback-source-window nil
+  "The window `expose-run-explain-traceback' was invoked from.")
+
+(defvar-local expose-traceback-source-buffer nil
+  "The buffer `expose-run-explain-traceback' was invoked from.
+
+Read for project/language context and to resolve relative frame paths
+against the right project root -- not assumed to still be the window's
+buffer by the time `C-c C-c' is pressed, since nothing stops switching
+buffers in that window in between.")
+
+(defun expose-traceback-frame-file (path project-root)
+  "Return a readable local file matching PATH, or nil.
+
+PATH is whatever a traceback's `File \"...\"' names. Tried as an
+absolute path first, then relative to PROJECT-ROOT, since a traceback
+produced inside Docker or a different checkout will not always share
+this machine's exact absolute layout. When neither is a real, readable
+file, this returns nil rather than guessing at a match -- see
+`expose-traceback-parse-frames'."
+
+  (or
+   (and (file-name-absolute-p path)
+        (file-readable-p path)
+        path)
+
+   (and project-root
+        (let ((candidate (expand-file-name path project-root)))
+          (and (file-readable-p candidate) candidate)))))
+
+(defun expose-traceback-read-context (file line context-lines)
+  "Return CONTEXT-LINES of FILE's source around LINE, or nil."
+
+  (when (file-readable-p file)
+    (with-temp-buffer
+      (insert-file-contents file)
+
+      (let* ((total (line-number-at-pos (point-max)))
+             (start (max 1 (- line context-lines)))
+             (end (min total (+ line context-lines))))
+
+        (goto-char (point-min))
+        (forward-line (1- start))
+
+        (let ((from (point)))
+          (goto-char (point-min))
+          (forward-line end)
+          (buffer-substring-no-properties from (point)))))))
+
+(defun expose-traceback-raw-frames (text)
+  "Return every `File \"PATH\", line N[, in FUNCTION]' frame in TEXT.
+
+Python only: that frame format is Python's own, and Expose is a
+Django-focused tool. Each result is a plist of `:file', `:line',
+`:function' -- unresolved against the local disk yet, see
+`expose-traceback-parse-frames'."
+
+  (let (frames)
+    (with-temp-buffer
+      (insert text)
+      (goto-char (point-min))
+
+      (while (re-search-forward
+              "^[ \t]*File \"\\([^\"]+\\)\", line \\([0-9]+\\)\\(?:, in \\(.*\\)\\)?$"
+              nil t)
+
+        (push
+         (list :file (match-string 1)
+               :line (string-to-number (match-string 2))
+               :function (match-string 3))
+         frames)))
+
+    (nreverse frames)))
+
+(defun expose-traceback-cap-frames (frames)
+  "Return at most `expose-traceback-max-frames' of FRAMES.
+
+Keeps the ones nearest either end of the stack when there are more than
+that -- see `expose-traceback-max-frames'."
+
+  (if (<= (length frames) expose-traceback-max-frames)
+      frames
+
+    (let ((head (/ expose-traceback-max-frames 2)))
+      (append
+       (seq-take frames head)
+       (seq-drop frames (- (length frames) (- expose-traceback-max-frames head)))))))
+
+(defun expose-traceback-parse-frames (text project-root)
+  "Return frame plists parsed from traceback TEXT, source resolved
+against PROJECT-ROOT where possible.
+
+Each plist carries `:file', `:line', `:function' as named in the
+traceback, plus `:snippet' -- real source read off disk (see
+`expose-traceback-frame-file'/`expose-traceback-read-context') when the
+file could be found locally, omitted rather than fabricated otherwise."
+
+  (mapcar
+   (lambda (frame)
+     (let* ((path (plist-get frame :file))
+            (line (plist-get frame :line))
+            (file (expose-traceback-frame-file path project-root))
+            (snippet
+             (and file line
+                  (expose-traceback-read-context
+                   file line expose-traceback-frame-context-lines))))
+
+       (append frame (list :snippet snippet))))
+   (expose-traceback-cap-frames (expose-traceback-raw-frames text))))
+
+(defvar expose-traceback-input-mode-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "C-c C-c") #'expose-traceback-submit)
+    (define-key map (kbd "C-c C-k") #'expose-traceback-cancel)
+    map)
+  "Keymap for `expose-traceback-input-mode'.")
+
+(define-derived-mode expose-traceback-input-mode text-mode "Expose-Traceback"
+  "Major mode for pasting a traceback for `expose-run-explain-traceback'.")
+
+(defun expose-traceback-cancel ()
+  "Cancel the pending traceback explanation."
+
+  (interactive)
+
+  (quit-window t)
+  (message "Expose traceback explanation cancelled."))
+
+(defun expose-traceback-submit ()
+  "Send the pasted traceback for explanation."
+
+  (interactive)
+
+  (let ((text
+         (string-trim (buffer-substring-no-properties (point-min) (point-max))))
+
+        (source-window expose-traceback-source-window)
+        (source-buffer expose-traceback-source-buffer))
+
+    (when (string-empty-p text)
+      (user-error "Nothing pasted"))
+
+    (quit-window t)
+
+    (let* ((live (buffer-live-p source-buffer))
+
+           (project-root
+            (if live
+                (with-current-buffer source-buffer
+                  (expose-commands-project-root-or-default))
+              default-directory))
+
+           (project
+            (and live (with-current-buffer source-buffer (expose-context-project))))
+
+           (language
+            (and live (with-current-buffer source-buffer (expose-context-language))))
+
+           (frames
+            (expose-traceback-parse-frames text project-root))
+
+           (context
+            (list :project project :language language
+                  :traceback text :frames frames))
+
+           (window
+            (if (window-live-p source-window) source-window (selected-window))))
+
+      (message "Expose: explaining traceback...")
+
+      (expose-log
+       "Commands"
+       "Explaining traceback (%d frame(s) found, %d resolved to real source)."
+       (length frames)
+       (seq-count (lambda (frame) (plist-get frame :snippet)) frames))
+
+      (expose-action-buffer-show (expose-popup-loading-view "Explain Traceback") window)
+
+      (expose-send-view-action-async
+       'explain-traceback
+       "Explain Traceback"
+       (lambda (view) (expose-action-buffer-show view window))
+       context))))
+
+;;;###autoload
+(defun expose-run-explain-traceback ()
+  "Explain a pasted error/traceback, using real source read off disk.
+
+Opens a scratch buffer to paste the traceback into. `C-c C-c' sends it;
+`C-c C-k' cancels without sending anything."
+
+  (interactive)
+
+  (let ((source-window (selected-window))
+        (source-buffer (current-buffer))
+        (buffer (get-buffer-create expose-traceback-buffer-name)))
+
+    (with-current-buffer buffer
+      (unless (derived-mode-p 'expose-traceback-input-mode)
+        (expose-traceback-input-mode))
+
+      (erase-buffer)
+      (setq expose-traceback-source-window source-window)
+      (setq expose-traceback-source-buffer source-buffer))
+
+    (pop-to-buffer buffer)
+    (message "Expose: paste the traceback, then `C-c C-c' to explain it (`C-c C-k' to cancel).")))
+
+;;; ---------------------------------------------------------------------------
 ;;; Popup Commands
 ;;; ---------------------------------------------------------------------------
 
@@ -886,6 +1131,122 @@ nothing."
                   (file-name-nondirectory buffer-file-name))))
 
   (expose-popup-run-action ?b))
+
+;;; ---------------------------------------------------------------------------
+;;; Merge Conflict
+;;; ---------------------------------------------------------------------------
+
+(defcustom expose-conflict-context-lines 15
+  "Lines of source context to send around a merge conflict hunk."
+  :type 'integer
+  :group 'expose)
+
+(defun expose-conflict-bounds ()
+  "Return (START SEP-START SEP-END END) for the conflict hunk enclosing
+point, or nil when point is not inside one.
+
+START is the `<<<<<<<' line's beginning; SEP-START/SEP-END bound the
+`=======' line; END is just past the `>>>>>>>' line's newline.
+
+Found by searching backward from point for the nearest `<<<<<<<' --
+the innermost enclosing one when hunks are nested inside a larger
+conflicted region, not necessarily the first one in the buffer -- then
+forward for its own `=======' and `>>>>>>>'. Requiring point to actually
+fall within [START, END] afterward is what rejects the case where point
+sits *after* an earlier, already-bounded hunk entirely: the backward
+search would still find that hunk's `<<<<<<<', but point being past its
+`>>>>>>>' means point isn't really inside any conflict at all."
+
+  (save-excursion
+    (let ((origin (point)))
+      (goto-char origin)
+      (end-of-line)
+
+      (when-let* ((start
+                   (and (re-search-backward "^<<<<<<<[ \t]?.*$" nil t)
+                        (line-beginning-position))))
+
+        (goto-char start)
+        (forward-line 1)
+
+        (when-let* ((sep-start
+                     (and (re-search-forward "^=======[ \t]*$" nil t)
+                          (line-beginning-position)))
+                    (sep-end
+                     (line-end-position)))
+
+          (forward-line 1)
+
+          (when-let* ((end
+                       (and (re-search-forward "^>>>>>>>[ \t]?.*$" nil t)
+                            (min (point-max) (1+ (line-end-position))))))
+
+            ;; Strictly less than END, not `<=': END is the position right
+            ;; after the `>>>>>>>' line's own newline, which is the same
+            ;; position as the *start* of whatever comes next -- and point
+            ;; sitting exactly there means point is on that next line, not
+            ;; inside the conflict.
+            (when (and (<= start origin) (< origin end))
+              (list start sep-start sep-end end))))))))
+
+(defun expose-conflict-marker-label (position)
+  "Return the branch name on the marker line at POSITION, or nil."
+
+  (save-excursion
+    (goto-char position)
+    (when (looking-at "^\\(?:<<<<<<<\\|>>>>>>>\\)[ \t]*\\(.*\\)$")
+      (let ((label (string-trim (match-string 1))))
+        (unless (string-empty-p label) label)))))
+
+(defun expose-conflict-at-point ()
+  "Return a plist describing the conflict hunk at point, or nil.
+
+Keys: `:start', `:end', `:ours', `:ours-label', `:theirs',
+`:theirs-label'. `:start'/`:end' are kept for
+`expose-commands-context-around' to build surrounding context from,
+same as any other target position elsewhere in this file."
+
+  (when-let ((bounds (expose-conflict-bounds)))
+    (let ((start (nth 0 bounds))
+          (sep-start (nth 1 bounds))
+          (sep-end (nth 2 bounds))
+          (end (nth 3 bounds)))
+
+      (list
+       :start start
+       :end end
+
+       :ours
+       (buffer-substring-no-properties
+        (save-excursion (goto-char start) (forward-line 1) (point))
+        sep-start)
+
+       :ours-label
+       (expose-conflict-marker-label start)
+
+       :theirs
+       (buffer-substring-no-properties
+        (save-excursion (goto-char sep-end) (forward-line 1) (point))
+        (save-excursion (goto-char end) (forward-line -1) (line-beginning-position)))
+
+       :theirs-label
+       (expose-conflict-marker-label
+        (save-excursion (goto-char end) (forward-line -1) (line-beginning-position)))))))
+
+;;;###autoload
+(defun expose-run-merge-conflict ()
+  "Explain and propose a resolution for the merge conflict at point.
+
+Refuses up front, like `expose-run-buffer-review', if point is not
+inside a `<<<<<<< ... ======= ... >>>>>>>' hunk -- rather than starting
+a request with nothing real to explain."
+
+  (interactive)
+
+  (unless (expose-conflict-at-point)
+    (user-error "Point is not inside a merge conflict"))
+
+  (expose-popup-run-action ?k))
 
 (defun expose-run-diagnostics ()
   "Run the registered Expose diagnostics action."
@@ -1682,6 +2043,31 @@ but `s' to check against the DOT source is the real safeguard."
    "Call Flow"
    #'expose-run-call-flow-diagram))
 
+;;;###autoload
+(defun expose-run-signal-flow-diagram ()
+  "Render a Django signal-flow diagram for the model or code at point.
+
+Traces a signal from what fires it (a `.save()'/`.delete()' or an
+explicit `Signal().send()') through every receiver that responds, and
+what each receiver itself then does. Nothing else in Expose follows
+this link: a receiver connects to a signal by decorator or `.connect()'
+call that routinely lives in a different app's `signals.py' than the
+model it watches, so reading the model or the `save()' call alone shows
+none of it.
+
+Provider-generated, so worth checking: a decorator's `sender=' is
+declarative and hard to get wrong, but whether a plain `.save()' call
+actually fires the signal -- `raw=True' and a fixture loader suppress it
+-- takes understanding the model, not just finding the decorator. Press
+`s' in the diagram buffer to check the DOT it was built from."
+
+  (interactive)
+
+  (expose-run-diagram
+   'signal-flow-diagram
+   "Signal Flow"
+   #'expose-run-signal-flow-diagram))
+
 (defun expose-run-changelog ()
   "Run the registered Expose changelog action."
 
@@ -1816,6 +2202,38 @@ what it has is a file and a diff."
      "Buffer Review"
      callback
      context)))
+
+(defun expose-merge-conflict-async (callback)
+  "Explain and propose a resolution for the conflict at point and call
+CALLBACK with a popup view.
+
+`expose-run-merge-conflict' already refused up front if point is not
+inside a conflict, before this ever ran -- so a nil here means point
+moved in between, which cannot actually happen (both run synchronously
+in the same call), but is still guarded rather than assumed."
+
+  (let ((conflict
+         (or (expose-conflict-at-point)
+             (user-error "Point is not inside a merge conflict"))))
+
+    (let ((context
+           (list
+            :project (expose-context-project)
+            :language (expose-context-language)
+            :file (expose-context-relative-file)
+            :ours (plist-get conflict :ours)
+            :ours-label (plist-get conflict :ours-label)
+            :theirs (plist-get conflict :theirs)
+            :theirs-label (plist-get conflict :theirs-label)
+            :code (expose-commands-context-around
+                   (plist-get conflict :start)
+                   expose-conflict-context-lines))))
+
+      (expose-send-view-action-async
+       'merge-conflict
+       "Merge Conflict"
+       callback
+       context))))
 
 (defun expose-diagnostics ()
   "Explain diagnostics at point asynchronously."
@@ -2136,6 +2554,13 @@ what it has is a file and a diff."
    "Buffer Review"
    'view
    #'expose-buffer-review-async
+   :async t)
+
+  (expose-popup-register-action
+   ?k
+   "Merge Conflict"
+   'view
+   #'expose-merge-conflict-async
    :async t)
 
   (expose-popup-register-action

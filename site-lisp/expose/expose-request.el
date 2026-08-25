@@ -587,6 +587,60 @@ routing only when it's actually in the provided code."
 
    'raw))
 
+(defun expose-request-signal-flow-diagram (context)
+  "Build a Django signal-flow diagram request.
+
+Signals are the one part of Django where reading the code at the send
+site tells you almost nothing: `post_save.send(...)' names no receiver,
+and a receiver connects to it by decorator or `.connect()' call that can
+live in any app's `signals.py', wired up nowhere near the model it
+watches. Nothing else in Expose traces that link, which is exactly why
+it is worth its own diagram rather than folding into call flow.
+
+Like the other Django diagrams, this is generated: a receiver's own
+`@receiver(post_save, sender=Order)' is declarative and easy to get
+right, but which signal a plain call to `.save()' or `.delete()' fires
+-- and whether `raw=True' or `update_fields' suppresses it -- takes
+reading the model, not just grepping for a decorator."
+
+  (expose-request-create
+   'signal-flow-diagram
+   'xml
+
+   (string-join
+    (list
+     "Produce a DJANGO SIGNAL FLOW diagram of the current code as Graphviz DOT."
+     ""
+     "Rules:"
+     "- Output a single `digraph' and nothing else. No prose, no Markdown, no code fences."
+     "- Trace what happens from a save/delete/custom signal being fired to each receiver that responds, and what each receiver itself then does (write, send mail, enqueue a task, raise)."
+     "- Shapes carry meaning, so use exactly these:"
+     "  `ellipse' for the entry point (the model action or explicit `.send()' that fires a signal);"
+     "  `diamond' for a signal itself (`post_save', `pre_delete', a custom `Signal()' instance), labelled with its name;"
+     "  `box' for a receiver function;"
+     "  `cylinder' for a database, cache or queue write performed by a receiver;"
+     "  `component' for a receiver defined in a third-party app whose body isn't shown;"
+     "  `doubleoctagon' for a raise."
+     "- Label the edge from a model action to a signal with what triggers it (\"on save\", \"on delete\", \"raw=True\" when that's why a receiver is skipped)."
+     "- If a receiver is conditional on `sender', `created', `raw', or `update_fields', label the edge into it with that condition rather than drawing it unconditionally."
+     "- Only signals and receivers visible in the provided code, or resolvable from a `@receiver' decorator or `signal.connect(receiver, sender=...)' call in it. Do not invent a receiver you cannot see connected."
+     "- Quote every label, and escape any embedded double quotes. A label is a single quoted string: never place text after the closing quote."
+     "- Set `rankdir=LR' and give the graph a short `label' naming what it depicts.")
+    "\n")
+
+   (expose-request-select
+    context
+    :project
+    :language
+    :file
+    :imports
+    :focus
+    :scope
+    :parent-scope
+    :code)
+
+   'raw))
+
 (defun expose-request-er-diagram (context)
   "Build an entity-relationship diagram request.
 
@@ -865,6 +919,58 @@ than a change to what `expose-context-with-git' does by default."
     :focus
     :scope)))
 
+(defun expose-request-merge-conflict (context)
+  "Build a merge-conflict resolution request.
+
+Unlike every other request type, CONTEXT here has no `:scope'/`:focus' --
+a conflict hunk is not a semantic unit Tree-sitter recognises, so it is
+built directly from the marker text instead (`:ours'/`:theirs' plus
+their branch labels, see `expose-conflict-context'). Surrounding code is
+still included as `:code', for the same reason a fix needs to see more
+than the line it's about."
+
+  (expose-request-create
+   'merge-conflict
+   'xml
+
+   "Explain what each side of this merge conflict was trying to do, then propose a resolution that keeps the intent of both where they don't genuinely disagree. If they truly conflict, say what the real disagreement is and which side you'd keep, and why. Return the proposed resolved code in a fenced code block, with a short explanation above it."
+
+   (expose-request-select
+    context
+    :project
+    :language
+    :file
+    :ours
+    :ours-label
+    :theirs
+    :theirs-label
+    :code)))
+
+(defun expose-request-explain-traceback (context)
+  "Build a traceback-explanation request.
+
+The one request type whose primary input is not the buffer at all --
+`:traceback' is pasted text (see `expose-traceback-read'), naming files
+the current buffer may have nothing to do with. `:frames' carries real
+source read directly off disk at each parsed frame (see
+`expose-traceback-parse-frames'/`expose-traceback-frame-context') rather
+than trusting the model to already know files it was never shown --
+Expose can read the project's disk and the model cannot, so whatever
+this can resolve locally is sent as fact, not left for it to guess."
+
+  (expose-request-create
+   'explain-traceback
+   'xml
+
+   "Explain this traceback: what raised it, the most likely root cause, and where in the code to look first. Use the source shown for each frame when it's present; when a frame's source could not be read, reason from the traceback text alone and say so rather than guessing at code you were not shown."
+
+   (expose-request-select
+    context
+    :project
+    :language
+    :traceback
+    :frames)))
+
 ;;; ---------------------------------------------------------------------------
 ;;; Dispatcher
 ;;; ---------------------------------------------------------------------------
@@ -922,6 +1028,9 @@ by the time a follow-up was asked."
       ('call-flow-diagram
        (expose-request-call-flow-diagram context))
 
+      ('signal-flow-diagram
+       (expose-request-signal-flow-diagram context))
+
       ('er-diagram
        (expose-request-er-diagram context))
 
@@ -967,6 +1076,12 @@ by the time a follow-up was asked."
       ('changelog
        (expose-request-changelog context))
 
+      ('merge-conflict
+       (expose-request-merge-conflict context))
+
+      ('explain-traceback
+       (expose-request-explain-traceback context))
+
       (_
        (error "Unknown request type: %s" type)))))
 
@@ -1002,7 +1117,9 @@ by the time a follow-up was asked."
         why
         mental-model
         commit-message
-        changelog)))))
+        changelog
+        merge-conflict
+        explain-traceback)))))
 
   (let ((buffer
          (get-buffer-create

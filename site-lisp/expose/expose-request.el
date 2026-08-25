@@ -601,7 +601,17 @@ Like the other Django diagrams, this is generated: a receiver's own
 `@receiver(post_save, sender=Order)' is declarative and easy to get
 right, but which signal a plain call to `.save()' or `.delete()' fires
 -- and whether `raw=True' or `update_fields' suppresses it -- takes
-reading the model, not just grepping for a decorator."
+reading the model, not just grepping for a decorator.
+
+CONTEXT's `:receivers' -- when present -- is not part of the code at
+point at all: it is real receiver bodies found *elsewhere in the
+project* by grepping for `sender=' matching the model at point (see
+`expose-signals-find-receivers'), included precisely because a
+receiver's connection to its signal is invisible from the model's own
+source. Without it, asked from inside the model rather than the
+receiver, this diagram would have nothing local to draw from and could
+only, correctly, report nothing connected -- which reads as \"nothing
+is connected\" when the truth is only \"nothing visible from here is\"."
 
   (expose-request-create
    'signal-flow-diagram
@@ -624,6 +634,7 @@ reading the model, not just grepping for a decorator."
      "- Label the edge from a model action to a signal with what triggers it (\"on save\", \"on delete\", \"raw=True\" when that's why a receiver is skipped)."
      "- If a receiver is conditional on `sender', `created', `raw', or `update_fields', label the edge into it with that condition rather than drawing it unconditionally."
      "- Only signals and receivers visible in the provided code, or resolvable from a `@receiver' decorator or `signal.connect(receiver, sender=...)' call in it. Do not invent a receiver you cannot see connected."
+     "- If `<receivers>' entries are provided separately from the main code, they are REAL receiver functions found elsewhere in the project that connect to the signal being diagrammed -- draw each one exactly as if its body were part of the provided code, not as something to second-guess or omit for not being physically adjacent to the model."
      "- Quote every label, and escape any embedded double quotes. A label is a single quoted string: never place text after the closing quote."
      "- Set `rankdir=LR' and give the graph a short `label' naming what it depicts.")
     "\n")
@@ -637,7 +648,8 @@ reading the model, not just grepping for a decorator."
     :focus
     :scope
     :parent-scope
-    :code)
+    :code
+    :receivers)
 
    'raw))
 

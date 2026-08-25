@@ -30,6 +30,10 @@
 (declare-function expose-migrations-build-dot "expose-migrations" ())
 (defvar expose-migrations-max-migrations)
 
+;; Loaded on demand by `expose-run-signal-flow-diagram', same reason as
+;; the rest of this group.
+(declare-function expose-signals-find-receivers "expose-signals" (model-name))
+
 ;; Loaded on demand by `expose-find-tests', same reason as above.
 (declare-function expose-find-tests-open "expose-find-tests" (source-window))
 
@@ -1559,12 +1563,18 @@ placeholder with the generated result (or an error message)."
         "Expose commit message failed: %s"
         (error-message-string error-data))))))
 
-(defun expose-run-diagram (type title command &optional focus direction)
+(defun expose-run-diagram (type title command &optional focus direction context)
   "Request a TYPE diagram, render it, and display it under TITLE.
 
 COMMAND is the interactive command that produced this, recorded so the
 diagram buffer's `g' can re-run the right one. FOCUS, when given, names
 the node to emphasize -- the model the command was invoked from.
+CONTEXT, when given, is used as-is instead of a freshly built
+`(expose-context-build)' -- passed straight through to
+`expose-send-view-action-async', same meaning as there. Only
+`expose-run-signal-flow-diagram' currently passes one, to fold in real
+receiver bodies found elsewhere in the project; every other diagram
+command omits it and gets the ordinary point-based context.
 
 Shared by every diagram command: the only thing that differs between
 them is the request type and what the result is called -- extraction,
@@ -1637,7 +1647,8 @@ rendering, display, and both failure paths are identical."
                    (cdr result))
 
                   (expose-diagram-display-failure dot (cdr result) title)
-                  (message "Expose %s diagram: dot failed" (downcase title))))))))))))
+                  (message "Expose %s diagram: dot failed" (downcase title)))))))))
+     context)))
 
 ;;;###autoload
 (defun expose-run-control-flow-diagram ()
@@ -2051,6 +2062,24 @@ but `s' to check against the DOT source is the real safeguard."
    #'expose-run-call-flow-diagram))
 
 ;;;###autoload
+(defun expose-run-signal-flow-diagram-context (model-name)
+  "Return a signal-flow context, folding in real receivers of MODEL-NAME.
+
+Built on top of the ordinary point-based `(expose-context-build)'
+rather than replacing it -- `:receivers' is additional fact the model's
+own code cannot show, not a substitute for it. Nil MODEL-NAME (nothing
+resolved at point) or no receivers found for it both leave the base
+context untouched, so this is a pure no-op exactly when there is
+nothing more to add -- most visibly when run from inside the receiver
+function itself, which already has its own `@receiver' visible in its
+own code."
+
+  (let ((base (expose-context-build)))
+    (if-let* ((model-name)
+              (receivers (expose-signals-find-receivers model-name)))
+        (plist-put base :receivers receivers)
+      base)))
+
 (defun expose-run-signal-flow-diagram ()
   "Render a Django signal-flow diagram for the model or code at point.
 
@@ -2060,7 +2089,14 @@ what each receiver itself then does. Nothing else in Expose follows
 this link: a receiver connects to a signal by decorator or `.connect()'
 call that routinely lives in a different app's `signals.py' than the
 model it watches, so reading the model or the `save()' call alone shows
-none of it.
+none of it -- which is exactly the case this command's own context
+building compensates for: `expose-signals-find-receivers' greps the
+whole project for `@receiver(...)' functions whose `sender=' names the
+model at point, and folds their real bodies into what gets sent,
+rather than asking the provider to draw a link it was never shown any
+evidence of. Run from inside the receiver itself, its own `@receiver'
+is already visible in the ordinary code context and this search
+correctly finds nothing more to add.
 
 Provider-generated, so worth checking: a decorator's `sender=' is
 declarative and hard to get wrong, but whether a plain `.save()' call
@@ -2070,10 +2106,21 @@ actually fires the signal -- `raw=True' and a fixture loader suppress it
 
   (interactive)
 
-  (expose-run-diagram
-   'signal-flow-diagram
-   "Signal Flow"
-   #'expose-run-signal-flow-diagram))
+  (require 'expose-signals)
+
+  (let* ((model-name
+          (or (expose-context-scope-name) (expose-context-parent-scope-name)))
+
+         (context
+          (expose-run-signal-flow-diagram-context model-name)))
+
+    (expose-run-diagram
+     'signal-flow-diagram
+     "Signal Flow"
+     #'expose-run-signal-flow-diagram
+     model-name
+     nil
+     context)))
 
 (defun expose-run-changelog ()
   "Run the registered Expose changelog action."

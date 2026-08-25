@@ -93,6 +93,69 @@
       (should (string-match-p "\\`tip: SPC c h " tip)))))
 
 ;;; ---------------------------------------------------------------------------
+;;; Regression: a real Doom/`map!'/general.el keymap attaches each
+;;; `:desc' string directly into the binding itself -- a leaf is
+;;; `(KEY "label" . COMMAND)', a sub-keymap `(KEY "label" keymap ...)',
+;;; not the plain `(KEY . COMMAND)'/`(KEY . KEYMAP)' pairs a bare
+;;; `define-key' with no description produces. `map-keymap' hands the
+;;; whole `("label" . COMMAND)' cons back as the binding, which is
+;;; neither `keymapp' nor `commandp' on its own -- so every entry in a
+;;; real installed keymap was silently invisible to the collector until
+;;; that leading string was peeled off. `expose-popup-test-keymap'
+;;; above never exercised this, since `define-key' with no description
+;;; produces the plain, unwrapped shape -- which is exactly how this
+;;; shipped with a pool that was always empty against the real thing.
+;;; ---------------------------------------------------------------------------
+
+(defun expose-popup-test-described-keymap ()
+  "Return a keymap shaped like a real Doom `map!' install: every binding
+-- leaf and sub-keymap alike -- carries a `:desc' string, the same way
+`(define-key KEYMAP KEY (cons \"label\" DEFINITION))' produces it."
+
+  (let ((h (make-sparse-keymap))
+        (top (make-sparse-keymap)))
+    (define-key h "e" (cons "Explain" #'jsoa-tip-explain))
+    (define-key h "y" (cons "Why" #'jsoa-tip-why))
+    (define-key top "h" (cons "Thing at Point" h))
+    (define-key top "j" (cons "Scroll" #'jsoa-tip-scroll))
+    top))
+
+(ert-deftest expose-popup-test-unwrap-binding-peels-a-leaf-description ()
+  (should
+   (eq 'jsoa-tip-explain
+       (expose-popup-tip-unwrap-binding (cons "Explain" 'jsoa-tip-explain)))))
+
+(ert-deftest expose-popup-test-unwrap-binding-peels-a-submap-description ()
+  (let ((keymap (make-sparse-keymap)))
+    (should
+     (eq keymap
+         (expose-popup-tip-unwrap-binding (cons "Thing at Point" keymap))))))
+
+(ert-deftest expose-popup-test-unwrap-binding-passthrough-without-a-description ()
+  "A plain binding with no description string -- what a bare `define-key'
+without one produces -- must come back unchanged, not be mistaken for
+having a description just because it happens to be a cons (a keymap
+always is one)."
+
+  (should (eq 'jsoa-tip-explain (expose-popup-tip-unwrap-binding 'jsoa-tip-explain)))
+
+  (let ((keymap (make-sparse-keymap)))
+    (should (eq keymap (expose-popup-tip-unwrap-binding keymap)))))
+
+(ert-deftest expose-popup-test-collect-finds-commands-through-descriptions ()
+  (let* ((expose-popup-tip-exclude-commands nil)
+         (pairs (expose-popup-tip-collect (expose-popup-test-described-keymap) [])))
+
+    (should (= 3 (length pairs)))
+    (should (equal "h e" (car (rassoc 'jsoa-tip-explain pairs))))
+    (should (equal "h y" (car (rassoc 'jsoa-tip-why pairs))))
+    (should (equal "j" (car (rassoc 'jsoa-tip-scroll pairs))))))
+
+(ert-deftest expose-popup-test-random-tip-works-against-a-described-keymap ()
+  (expose-popup-test-with-pool (expose-popup-test-described-keymap)
+    (should (string-match-p "\\`tip: SPC c h " (expose-popup-random-tip)))))
+
+;;; ---------------------------------------------------------------------------
 ;;; Regression: the tip must be picked once per hover, not once per
 ;;; mode-line redisplay.
 ;;;

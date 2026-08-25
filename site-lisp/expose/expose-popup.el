@@ -134,6 +134,25 @@ so this is computed once and reused -- walking it is cheap by keymap
 standards, but there is no reason to repeat identical work on every
 hover in a session that shows hundreds of them.")
 
+(defun expose-popup-tip-unwrap-binding (raw-binding)
+  "Return the real command/keymap RAW-BINDING stands for.
+
+`map!'/`general.el' attach a `:desc' string directly into the keymap
+entry itself -- a leaf is `(KEY \"label\" . COMMAND)', not the plain
+`(KEY . COMMAND)' a bare `define-key' produces, and a sub-keymap is
+`(KEY \"label\" keymap ...)' rather than `(KEY keymap ...)'. `map-keymap'
+hands back the whole `cdr' of that entry as BINDING -- `(\"label\" .
+COMMAND)' or `(\"label\" keymap ...)' -- which is neither `commandp' nor
+`keymapp' on its own, so every real Doom-installed binding was
+silently invisible to this before that leading description string was
+peeled off. A plain keymap with no such description (the shape a
+hand-built `define-key' keymap has) is returned unchanged -- this only
+ever unwraps when the entry actually starts with one."
+
+  (if (and (consp raw-binding) (stringp (car raw-binding)))
+      (cdr raw-binding)
+    raw-binding))
+
 (defun expose-popup-tip-collect (keymap prefix)
   "Return (KEY-STRING . COMMAND) pairs for every command bound in KEYMAP.
 
@@ -144,8 +163,9 @@ found. Recurses into sub-keymaps, which is how `SPC c h h'/`G'/`R'/`M'/
   (let (found)
     (when (keymapp keymap)
       (map-keymap
-       (lambda (event binding)
-         (let ((path (vconcat prefix (vector event))))
+       (lambda (event raw-binding)
+         (let ((path (vconcat prefix (vector event)))
+               (binding (expose-popup-tip-unwrap-binding raw-binding)))
            (cond
             ((keymapp binding)
              (setq found (append found (expose-popup-tip-collect binding path))))

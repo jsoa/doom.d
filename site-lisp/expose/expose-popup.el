@@ -110,13 +110,14 @@ tip about it."
   :type '(repeat symbol)
   :group 'expose-popup)
 
-(defcustom expose-popup-tip-max-length 46
-  "Longest a tip's description may be before it is cut with an ellipsis.
+(defcustom expose-popup-tip-key-face 'help-key-binding
+  "Face used to highlight a tip's key sequence, set apart from its label.
 
-Keeps a long first line of some command's docstring from pushing the
-tip mode-line segment wide enough to wrap or run off the edge of a
-posframe capped at `expose-popup-max-width'."
-  :type 'integer
+`help-key-binding' -- the face Emacs itself uses to render a key
+sequence in `*Help*' and `substitute-command-keys' output -- rather
+than a face invented for this one place, so a tip's `SPC c h h d'
+reads the same way a keybinding does everywhere else."
+  :type 'face
   :group 'expose-popup)
 
 (defvar expose-popup--tip-pool-computed nil
@@ -187,28 +188,46 @@ found. Recurses into sub-keymaps, which is how `SPC c h h'/`G'/`R'/`M'/
                 (expose-popup-tip-collect keymap []))))))
   expose-popup--tip-pool)
 
-(defun expose-popup-tip-description (command)
-  "Return a short description of COMMAND from its own docstring.
+(defun expose-popup-humanize-command-name (command)
+  "Return a human-readable label for COMMAND's own symbol name.
 
-Not a separately maintained label: the first line of the docstring is
-the same sentence `C-h f' would show, so it cannot describe a command
-differently from what the command actually is."
+Strips the leading `expose-' every command in this package shares,
+then title-cases each remaining hyphen-separated word --
+`expose-run-diagnostics' becomes \"Run Diagnostics\". A mechanical
+transform of the command itself, not the curated `:desc' string
+sitting next to it in the keymap (see
+`expose-popup-tip-unwrap-binding') and not its docstring -- naming the
+actual command that runs, in the same words `M-x' would show it under,
+rather than a separately-worded description of what it does."
 
-  (let* ((doc (or (documentation command) ""))
-         (line (car (split-string doc "\n"))))
-    (if (> (length line) expose-popup-tip-max-length)
-        (concat (substring line 0 expose-popup-tip-max-length) "…")
-      line)))
+  (let* ((name (symbol-name command))
+         (stripped
+          (if (string-prefix-p "expose-" name)
+              (substring name (length "expose-"))
+            name)))
+    (mapconcat #'capitalize (split-string stripped "-" t) " ")))
 
 (defun expose-popup-random-tip ()
-  "Return a random \"did you know\" string, or nil if there is nothing to show."
+  "Return a random \"did you know\" string, or nil if there is nothing to show.
+
+Faced here, on the string itself, rather than left for the caller to
+propertize as one flat run the way the rest of the mode-line segments
+are (see `expose-popup-mode-line-info') -- that would overwrite the key
+sequence's own `expose-popup-tip-key-face' with whatever uniform face
+the caller applied, since a later `propertize' call replaces a face
+already set on a region rather than blending with it."
 
   (when-let* ((pool (expose-popup-tip-pool))
               (entry (nth (random (length pool)) pool))
               (label (expose-popup-key-prefix-label)))
-    (format "tip: %s %s -- %s"
-            label (car entry)
-            (expose-popup-tip-description (cdr entry)))))
+    (concat
+     (propertize "tip: " 'face 'shadow)
+     (propertize
+      (format "%s %s" label (car entry))
+      'face expose-popup-tip-key-face)
+     (propertize
+      (format " -- %s" (expose-popup-humanize-command-name (cdr entry)))
+      'face 'shadow))))
 
 (defun expose-popup-key-prefix-label ()
   "Return the Expose key prefix label."
@@ -263,8 +282,11 @@ rather than holding still long enough to read.")
 
      expose-popup-mode-line-status
 
+     ;; Not re-propertized here: `expose-popup-random-tip' already faces
+     ;; itself, key sequence set apart from the rest -- wrapping the
+     ;; whole string in one face at this end would overwrite that.
      (when (and expose-popup--showing-hover expose-popup--current-tip)
-       (propertize expose-popup--current-tip 'face 'shadow))))
+       expose-popup--current-tip)))
    "   "))
 
 (defun expose-popup-mode-line-format ()

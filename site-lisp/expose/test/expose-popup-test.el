@@ -76,21 +76,53 @@
     (should-not (expose-popup-tip-pool))
     (should-not (expose-popup-random-tip))))
 
-(ert-deftest expose-popup-test-description-is-first-docstring-line ()
-  (should
-   (equal "Explain what this code does and why."
-          (expose-popup-tip-description 'jsoa-tip-explain))))
+(defun expose-tip-test-run-a-thing () "Do a thing." (interactive))
 
-(ert-deftest expose-popup-test-description-truncates-long-lines ()
-  (let ((expose-popup-tip-max-length 20))
-    (let ((description (expose-popup-tip-description 'jsoa-tip-graph)))
-      (should (= 21 (length description)))
-      (should (string-suffix-p "…" description)))))
+(ert-deftest expose-popup-test-humanize-command-name-strips-expose-prefix ()
+  (should
+   (equal "Tip Test Run A Thing"
+          (expose-popup-humanize-command-name 'expose-tip-test-run-a-thing))))
+
+(ert-deftest expose-popup-test-humanize-command-name-leaves-non-expose-names-alone ()
+  "A symbol with no `expose-' prefix -- shouldn't occur among this
+package's own commands, but nothing here assumes it can't -- is still
+title-cased rather than left as raw hyphens, just not stripped."
+
+  (should (equal "Jsoa Tip Explain" (expose-popup-humanize-command-name 'jsoa-tip-explain))))
+
+(ert-deftest expose-popup-test-random-tip-shows-humanized-command-not-docstring ()
+  (expose-popup-test-with-pool (expose-popup-test-keymap)
+    (let ((tip (expose-popup-random-tip)))
+      (should (string-match-p "-- Jsoa Tip \\(Explain\\|Why\\|Graph\\|Scroll\\)\\'" tip))
+      (should-not (string-match-p "does and why\\|calls this\\|Scroll the Expose" tip)))))
 
 (ert-deftest expose-popup-test-random-tip-names-the-full-key-path ()
   (expose-popup-test-with-pool (expose-popup-test-keymap)
     (let ((tip (expose-popup-random-tip)))
       (should (string-match-p "\\`tip: SPC c h " tip)))))
+
+(ert-deftest expose-popup-test-random-tip-highlights-only-the-key-sequence ()
+  (expose-popup-test-with-pool (expose-popup-test-keymap)
+    (let* ((tip (expose-popup-random-tip))
+           (key-start (length "tip: "))
+           (separator (string-match " -- " tip)))
+
+      (should separator)
+
+      ;; "tip: " itself is shadow, not the key face.
+      (should (eq 'shadow (get-text-property 0 'face tip)))
+
+      ;; The key sequence -- from right after "tip: " up to the " -- "
+      ;; separator -- carries the highlight face throughout.
+      (let ((position key-start))
+        (while (< position separator)
+          (should (eq expose-popup-tip-key-face (get-text-property position 'face tip)))
+          (setq position (1+ position))))
+
+      ;; Everything from the separator onward (the humanized command
+      ;; name) is back to shadow, not the key face.
+      (should (eq 'shadow (get-text-property separator 'face tip)))
+      (should (eq 'shadow (get-text-property (1- (length tip)) 'face tip))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Regression: a real Doom/`map!'/general.el keymap attaches each

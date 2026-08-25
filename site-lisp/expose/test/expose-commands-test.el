@@ -317,6 +317,73 @@ kept -- nothing is ever popped, matching the design this was built to."
     (should (equal "widgets.py" (plist-get sent-context :file)))))
 
 ;;; ---------------------------------------------------------------------------
+;;; expose-run-pr-description / expose-pr-description-async
+;;; ---------------------------------------------------------------------------
+
+(ert-deftest expose-commands-test-pr-description-diff-uses-three-dot-range ()
+  (let (captured-args)
+    (cl-letf (((symbol-function 'expose-review-context-git-string)
+               (lambda (_root &rest args) (setq captured-args args) "the diff")))
+      (should (equal "the diff" (expose-pr-description-diff "/repo" "main"))))
+    (should (equal '("diff" "main...HEAD" "--no-ext-diff") captured-args))))
+
+(ert-deftest expose-commands-test-pr-description-commits-uses-two-dot-range ()
+  (let (captured-args)
+    (cl-letf (((symbol-function 'expose-review-context-git-string)
+               (lambda (_root &rest args) (setq captured-args args) "commit subjects")))
+      (should (equal "commit subjects" (expose-pr-description-commits "/repo" "main"))))
+    (should (equal '("log" "main..HEAD" "--pretty=format:%s") captured-args))))
+
+(ert-deftest expose-commands-test-run-pr-description-refuses-without-a-base-branch ()
+  (cl-letf (((symbol-function 'expose-review-context-project-root) (lambda () "/repo"))
+            ((symbol-function 'expose-review-context-detect-base-branch) (lambda (_root) nil)))
+    (should-error (expose-run-pr-description) :type 'user-error)))
+
+(ert-deftest expose-commands-test-run-pr-description-refuses-with-no-diff ()
+  (cl-letf (((symbol-function 'expose-review-context-project-root) (lambda () "/repo"))
+            ((symbol-function 'expose-review-context-detect-base-branch) (lambda (_root) "main"))
+            ((symbol-function 'expose-pr-description-diff) (lambda (_root _base) nil)))
+    (should-error (expose-run-pr-description) :type 'user-error)))
+
+(ert-deftest expose-commands-test-run-pr-description-refuses-with-blank-diff ()
+  (cl-letf (((symbol-function 'expose-review-context-project-root) (lambda () "/repo"))
+            ((symbol-function 'expose-review-context-detect-base-branch) (lambda (_root) "main"))
+            ((symbol-function 'expose-pr-description-diff) (lambda (_root _base) "   \n")))
+    (should-error (expose-run-pr-description) :type 'user-error)))
+
+(ert-deftest expose-commands-test-run-pr-description-proceeds-with-a-real-diff ()
+  (let (ran)
+    (cl-letf (((symbol-function 'expose-review-context-project-root) (lambda () "/repo"))
+              ((symbol-function 'expose-review-context-detect-base-branch) (lambda (_root) "main"))
+              ((symbol-function 'expose-pr-description-diff) (lambda (_root _base) "@@ real diff @@"))
+              ((symbol-function 'expose-popup-run-action) (lambda (key) (setq ran key))))
+      (expose-run-pr-description))
+    (should (eq ?P ran))))
+
+(ert-deftest expose-commands-test-pr-description-async-context-carries-branch-diff-and-commits ()
+  (let (sent-type sent-title sent-context)
+    (cl-letf (((symbol-function 'expose-context-project) (lambda () "demo"))
+              ((symbol-function 'expose-context-language) (lambda () "Python"))
+              ((symbol-function 'expose-review-context-project-root) (lambda () "/repo"))
+              ((symbol-function 'expose-review-context-detect-base-branch) (lambda (_root) "main"))
+              ((symbol-function 'expose-review-context-current-branch) (lambda (_root) "feature/x"))
+              ((symbol-function 'expose-pr-description-diff) (lambda (_root _base) "@@ the diff @@"))
+              ((symbol-function 'expose-pr-description-commits) (lambda (_root _base) "add widget"))
+              ((symbol-function 'expose-send-view-action-async)
+               (lambda (type title callback &optional context)
+                 (setq sent-type type sent-title title sent-context context)
+                 (funcall callback nil))))
+
+      (expose-pr-description-async #'ignore))
+
+    (should (eq 'pr-description sent-type))
+    (should (equal "PR Description" sent-title))
+    (should (equal "feature/x" (plist-get sent-context :branch)))
+    (should (equal "main" (plist-get sent-context :base-branch)))
+    (should (equal "add widget" (plist-get sent-context :commits)))
+    (should (equal "@@ the diff @@" (plist-get sent-context :diff)))))
+
+;;; ---------------------------------------------------------------------------
 ;;; expose-conflict-bounds / expose-conflict-at-point
 ;;; ---------------------------------------------------------------------------
 

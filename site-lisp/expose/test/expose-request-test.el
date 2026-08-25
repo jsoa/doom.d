@@ -296,6 +296,58 @@ context passed in."
      (string-match-p "digraph" (plist-get request :instruction)))))
 
 ;;; ---------------------------------------------------------------------------
+;;; expose-request-pr-description
+;;; ---------------------------------------------------------------------------
+
+(ert-deftest expose-request-test-pr-description-includes-branch-and-diff ()
+  (let ((request
+         (expose-request-pr-description
+          (list :project "demo" :language "Python"
+                :branch "feature/x" :base-branch "main"
+                :commits "add widget\nfix typo"
+                :diff "@@ -1,2 +1,3 @@\n+# a change"))))
+
+    (should (eq 'pr-description (plist-get request :type)))
+    (should
+     (equal
+      '(:project "demo" :language "Python"
+        :branch "feature/x" :base-branch "main"
+        :commits "add widget\nfix typo"
+        :diff "@@ -1,2 +1,3 @@\n+# a change")
+      (plist-get request :context)))))
+
+(ert-deftest expose-request-test-pr-description-is-not-raw ()
+  (let ((request
+         (expose-request-pr-description (list :branch "x" :base-branch "main" :diff "d"))))
+
+    (should
+     (string-match-p
+      (regexp-quote expose-request-output-instruction)
+      (plist-get request :instruction)))
+    (should-not
+     (string-match-p
+      (regexp-quote expose-request-raw-output-instruction)
+      (plist-get request :instruction)))))
+
+(ert-deftest expose-request-test-pr-description-omits-scope-and-focus ()
+  "Point/selection-shaped keys have no meaning for a whole-branch diff
+and must not leak in even if present on the context passed in."
+
+  (let ((request
+         (expose-request-pr-description
+          (list :branch "x" :base-branch "main" :diff "d"
+                :scope "should not appear" :focus "should not appear either"))))
+
+    (should (equal '(:branch "x" :base-branch "main" :diff "d")
+                    (plist-get request :context)))))
+
+(ert-deftest expose-request-test-build-dispatches-pr-description ()
+  (let ((request
+         (expose-request-build 'pr-description '(:branch "x" :diff "d"))))
+
+    (should (eq 'pr-description (plist-get request :type)))))
+
+;;; ---------------------------------------------------------------------------
 ;;; expose-request-merge-conflict
 ;;; ---------------------------------------------------------------------------
 

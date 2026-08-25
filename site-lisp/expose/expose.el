@@ -80,6 +80,7 @@
                :desc "Merge Conflict"    "m" #'expose-run-merge-conflict
                :desc "Commit Message"    "g" #'expose-run-commit-message
                :desc "Changelog"         "n" #'expose-run-changelog
+               :desc "PR Description"    "P" #'expose-run-pr-description
                :desc "Find tests"        "t" #'expose-find-tests
                :desc "Explain Traceback" "T" #'expose-run-explain-traceback
 

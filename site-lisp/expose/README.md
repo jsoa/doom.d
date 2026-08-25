@@ -221,6 +221,7 @@ Expose installs bindings under `SPC c h` by default.
 | `SPC c h m` | `expose-run-merge-conflict`         | Explain and propose a resolution for the conflict at point |
 | `SPC c h g` | `expose-run-commit-message`         | Insert generated commit message at point     |
 | `SPC c h n` | `expose-run-changelog`              | Generate changelog entry from Git changes    |
+| `SPC c h P` | `expose-run-pr-description`         | Write a PR description for the current branch |
 | `SPC c h T` | `expose-run-explain-traceback`      | Explain a pasted error/traceback             |
 | `SPC c h j` | `expose-popup-scroll-down`          | Scroll popup down                            |
 | `SPC c h k` | `expose-popup-scroll-up`            | Scroll popup up                              |
@@ -734,6 +735,24 @@ SPC c h g
 ```
 
 This is useful inside Magit commit buffers or any scratch/edit buffer where you want the commit message placed directly into the buffer.
+
+## PR Description
+
+`SPC c h P` (`expose-run-pr-description`) writes a GitHub pull request description for the whole current branch, shown in the action buffer like Changelog rather than inserted anywhere -- there's no natural buffer for a PR description the way a commit message has one.
+
+```text
+SPC c h P
+  -> detect the base branch (main/master/develop, or `expose-review-base-branch')
+  -> git diff BASE...HEAD, and the branch's own commit subjects (BASE..HEAD)
+  -> write a summary, a "How to test" section, and a note of risk
+  -> show the result in the action buffer, same as any other SPC c h h result
+```
+
+**Scoped to the whole branch against its base, not the working tree.** This is the one difference from Commit Message and Changelog, which both describe uncommitted/staged changes -- a PR is about everything the branch has added since it forked, so this reuses the exact base-branch detection and merge-base diff range `expose-review-open-pr-diff` already shows locally as a Magit diff (three dots: `BASE...HEAD` compares against the merge-base, so commits landed on `BASE` after the fork don't show up as this branch's own changes).
+
+**The commit log travels alongside the diff, not instead of it.** A commit message routinely states intent a diff of the end result cannot, especially once a rebase or a run of `fixup!` commits has flattened the actual path taken -- so both are sent, and the instruction asks for the diff as the primary source of truth for *what* changed, the log as a second signal for *why*.
+
+Refuses up front, like Buffer Review, if no base branch could be detected or the branch has no changes relative to it -- rather than sending an empty diff and getting back a description of nothing. The result is refinable the same way any other action-buffer result is (see "Refining a result" above).
 
 ## Inline Continuation
 

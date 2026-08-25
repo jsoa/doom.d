@@ -13,6 +13,13 @@
 (require 'expose-context)
 (require 'expose-document)
 (require 'expose-request)
+;; For base-branch detection only (`expose-review-context-detect-base-branch'
+;; and its git-info helpers) -- reused by `expose-pr-description-async'
+;; rather than duplicated, since it's the exact same comparison
+;; `expose-review-open-pr-diff' already shows locally as a Magit diff.
+;; None of the heavier linter/diagnostic machinery this module also
+;; contains is touched.
+(require 'expose-review-context)
 
 ;; Loaded on demand by `expose-run-reverse-call-graph' rather than up
 ;; front: it pulls in `xref' and only matters if that one command is
@@ -2076,6 +2083,71 @@ actually fires the signal -- `raw=True' and a fixture loader suppress it
   (expose-popup-run-action ?n))
 
 ;;; ---------------------------------------------------------------------------
+;;; PR Description
+;;; ---------------------------------------------------------------------------
+
+(defun expose-pr-description-diff (project-root base-branch)
+  "Return the diff of the current branch in PROJECT-ROOT against BASE-BRANCH.
+
+`BASE-BRANCH...HEAD' rather than `BASE-BRANCH..HEAD' -- the three-dot
+form compares against the merge-base, so commits landed on BASE-BRANCH
+after this branch forked from it don't show up as \"changes\" here, the
+same range `expose-review-open-pr-diff' shows locally as a Magit diff
+and GitHub itself uses for a PR's own \"Files changed\" tab."
+
+  (expose-context-truncate
+   (expose-review-context-git-string
+    project-root "diff" (format "%s...HEAD" base-branch) "--no-ext-diff")
+   expose-context-git-diff-max-length))
+
+(defun expose-pr-description-commits (project-root base-branch)
+  "Return one-line commit subjects unique to the current branch in
+PROJECT-ROOT, relative to BASE-BRANCH.
+
+Two dots, not three: unlike the diff above, the commit log wants
+exactly what this branch added -- BASE-BRANCH's own history since the
+fork is not part of that story and would only pad it. Worth more than
+the diff alone would say on its own: a commit message routinely states
+intent (\"why\") that a diff of the end result cannot -- particularly
+after a rebase or several `fixup!' commits have flattened the path
+actually taken into a diff that only shows where it ended up."
+
+  (expose-review-context-git-string
+   project-root "log" (format "%s..HEAD" base-branch) "--pretty=format:%s"))
+
+;;;###autoload
+(defun expose-run-pr-description ()
+  "Write a GitHub pull request description for the current branch.
+
+Scoped to the whole branch against its detected base (`main'/`master'/
+`develop', or `expose-review-base-branch' when set) -- the same
+project-root and base-branch detection `expose-review-open-pr-diff'
+and Full Review share (`expose-review-context-project-root'/
+`expose-review-context-detect-base-branch') -- not to just the working
+tree's uncommitted changes the way `expose-run-changelog' is. Refuses
+up front, like `expose-run-buffer-review', if no base branch could be
+detected (which, since that detection itself falls back to plain
+`default-directory' when nothing else resolves a project root, is also
+what happens outside a Git repository entirely) or the branch has no
+changes relative to it."
+
+  (interactive)
+
+  (let* ((project-root
+          (expose-review-context-project-root))
+
+         (base-branch
+          (or (expose-review-context-detect-base-branch project-root)
+              (user-error "Could not detect a base branch to compare against (tried %s)"
+                          (string-join expose-review-context-base-branch-candidates ", ")))))
+
+    (let ((diff (expose-pr-description-diff project-root base-branch)))
+      (when (or (null diff) (string-blank-p diff))
+        (user-error "No changes on this branch relative to %s" base-branch))))
+
+  (expose-popup-run-action ?P))
+
+;;; ---------------------------------------------------------------------------
 ;;; Views
 ;;; ---------------------------------------------------------------------------
 
@@ -2535,6 +2607,36 @@ in the same call), but is still guarded rather than assumed."
    "Changelog"
    callback))
 
+(defun expose-pr-description-async (callback)
+  "Write a PR description for the current branch and call CALLBACK with a
+popup view.
+
+Built from a plist of its own, not `expose-context-build' -- same
+reason `expose-buffer-review-async' is: the generic context builder is
+about point/selection within one file, and a PR description has
+neither, only a branch and what it changed relative to its base."
+
+  (let* ((project-root
+          (expose-review-context-project-root))
+
+         (base-branch
+          (expose-review-context-detect-base-branch project-root))
+
+         (context
+          (list
+           :project (expose-context-project)
+           :language (expose-context-language)
+           :branch (expose-review-context-current-branch project-root)
+           :base-branch base-branch
+           :commits (expose-pr-description-commits project-root base-branch)
+           :diff (expose-pr-description-diff project-root base-branch))))
+
+    (expose-send-view-action-async
+     'pr-description
+     "PR Description"
+     callback
+     context)))
+
 ;;; ---------------------------------------------------------------------------
 ;;; Actions
 ;;; ---------------------------------------------------------------------------
@@ -2701,6 +2803,13 @@ in the same call), but is still guarded rather than assumed."
    "Changelog"
    'view
    #'expose-changelog-async
+   :async t)
+
+  (expose-popup-register-action
+   ?P
+   "PR Description"
+   'view
+   #'expose-pr-description-async
    :async t))
 
 ;;; ---------------------------------------------------------------------------

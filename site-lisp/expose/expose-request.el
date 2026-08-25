@@ -919,6 +919,34 @@ than a change to what `expose-context-with-git' does by default."
     :focus
     :scope)))
 
+(defun expose-request-pr-description (context)
+  "Build a pull-request description request.
+
+Unlike `expose-request-changelog', which is scoped to the working
+tree's uncommitted changes, this is scoped to the whole *branch* --
+CONTEXT's `:diff'/`:commits' compare against the detected base branch
+(see `expose-pr-description-async'), the same comparison
+`expose-review-open-pr-diff' shows locally as a Magit diff. Not raw:
+read as Markdown in the action buffer and copied out from there, the
+same as `expose-request-changelog' -- there is no natural buffer to
+insert a PR description directly into the way a commit message has
+one."
+
+  (expose-request-create
+   'pr-description
+   'xml
+
+   "Write a clear GitHub pull request description for the changes on this branch, compared against its base. Use the diff and commit log as the primary source of truth -- do not invent changes that are not present in the diff. Structure it with a short summary of what changed and why, a \"How to test\" section with concrete steps when the diff makes them apparent, and a brief note of any risk or things a reviewer should pay closer attention to. Prefer clear prose and bullet lists over forcing a rigid template onto changes that don't fit one."
+
+   (expose-request-select
+    context
+    :project
+    :language
+    :branch
+    :base-branch
+    :commits
+    :diff)))
+
 (defun expose-request-merge-conflict (context)
   "Build a merge-conflict resolution request.
 
@@ -1076,6 +1104,9 @@ by the time a follow-up was asked."
       ('changelog
        (expose-request-changelog context))
 
+      ('pr-description
+       (expose-request-pr-description context))
+
       ('merge-conflict
        (expose-request-merge-conflict context))
 
@@ -1118,6 +1149,7 @@ by the time a follow-up was asked."
         mental-model
         commit-message
         changelog
+        pr-description
         merge-conflict
         explain-traceback)))))
 

@@ -316,6 +316,8 @@ Meaningless outside a Django project, so kept under its own prefix rather than c
 | `SPC c h D h` | `expose-run-migration-history`      | How a Django model was shaped over time (`C-u` for all) |
 | `SPC c h D R` | `expose-run-request-flow-diagram`   | Django request pipeline for a view            |
 | `SPC c h D S` | `expose-run-signal-flow-diagram`    | What fires from a signal, and what responds   |
+| `SPC c h D m` | `expose-run-middleware-diagram`     | The project's middleware stack, in request order |
+| `SPC c h D u` | `expose-run-urls-diagram`           | The project's whole URL routing tree          |
 
 See [Queryset SQL](#queryset-sql) and [Diagrams](#diagrams-1) -- the entity relations, migration history, and request flow diagrams are described there alongside the rest, even though their keys live here.
 
@@ -464,8 +466,10 @@ Rendered with Graphviz and shown as an SVG image in a full-frame buffer -- delib
 | Migration history  | How a Django model was shaped over time            | Parsed     | `SPC c h D h` |
 | Query plan         | How the database will actually run this queryset   | Database   | `SPC c h D p` |
 | Entity relations   | Which models exist and how they relate             | Provider   | `SPC c h D e` |
+| Middleware         | The project's whole middleware stack, in request order | Parsed | `SPC c h D m` |
+| URL routes         | The project's whole URL routing tree               | Parsed     | `SPC c h D u` |
 
-The last five are Django-specific and live under their own prefix (`SPC c h D`, see "Django" under Default Keybindings above) rather than crowding the generic ones -- everything below still applies to all of them equally, since the key prefix is the only thing that differs.
+The last seven are Django-specific and live under their own prefix (`SPC c h D`, see "Django" under Default Keybindings above) rather than crowding the generic ones -- everything below still applies to all of them equally, since the key prefix is the only thing that differs.
 
 Nodes are colored by what they represent — entry, condition, error, exit, external dependency, I/O — classified from the shapes each request asks for rather than from colors chosen by the provider, which vary run to run. Relationship edges in the ER diagram are colored by kind (foreign key, many-to-many, one-to-one), and the model you invoked it from is outlined.
 
@@ -551,6 +555,10 @@ Django numbers migrations per app, so ordering is exact within an app but not co
 **The import graph has no AI in it either**, for the same reason: imports are trivially parseable, so asking a provider to describe them would trade an exact answer for a plausible one. It follows project-local imports and stops at the boundary — third-party and standard library packages are leaves, shown only with a prefix argument, since hiding them usually makes the project's own shape far easier to read. Python and TypeScript/JavaScript; tests, migrations and `node_modules` are excluded by `expose-imports-exclude-regexps`.
 
 Its main reason to exist is **cycle detection**, drawn in red: an import cycle is invisible in any single file and in Python is a real failure rather than a style problem.
+
+**Middleware has no AI in it either.** `MIDDLEWARE` is a literal Python list in the overwhelming common case, so "what order do these run in" is read, not guessed at from a settings file a provider may not even have been shown. Drawn as the onion it actually is, not a flat list: Django runs `MIDDLEWARE` in list order on the way *in* to a view and in *reverse* order on the way back *out*, so the first entry is the outermost layer — first to see the request, last to see the response. Two edges connect each adjacent pair, one each direction, rather than implying a single straight pipe. Project-local middleware are drawn with their own docstring when they have one; third-party and Django built-in middleware, not in the project's own tree to read, are named only. A `MIDDLEWARE` built up dynamically across more than one settings file (a `+=` in an environment-specific override) is read only as far as the one file its base list is actually declared in — a real, stated limit.
+
+**The URL tree has no AI in it either.** Starts from `ROOT_URLCONF` and follows every `path()`/`re_path()`/`url()` entry, recursing through `include("app.urls")` from there, so the tree covers everywhere routing actually leads rather than just the one `urls.py` file you happen to have open. A DRF router's own `....register(...)` calls are read too, wherever they appear, and shown as their own nodes rather than as the `include(router.urls)` call site that mounts them — that call site names no view a parser could show, so drawing it literally would show the word "include" as if it were one. `include(router.urls)` and any other bare-identifier `include(...)` are left alone for the same reason: only the common string-argument form, `include("app.urls")`, names a module this can actually resolve and follow. Bounded by `expose-urls-max-depth` and `expose-urls-max-nodes`; a walk trimmed by either says so in the diagram's own title.
 
 **The reverse call graph has no AI in it.** Finding callers needs whole-project knowledge that no provider has, and a fabricated answer to "is it safe to change this?" is worse than none, so its edges come from LSP call hierarchy — or `xref` when the server can't answer, which the graph says on its title since references are not the same as calls.
 

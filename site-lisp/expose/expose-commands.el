@@ -34,6 +34,11 @@
 ;; the rest of this group.
 (declare-function expose-signals-find-receivers "expose-signals" (model-name))
 
+;; Loaded on demand by `expose-run-middleware-diagram'/
+;; `expose-run-urls-diagram', same reason as the rest of this group.
+(declare-function expose-middleware-build-dot "expose-middleware" ())
+(declare-function expose-urls-build-dot "expose-urls" (&optional root-file))
+
 ;; Loaded on demand by `expose-find-tests', same reason as above.
 (declare-function expose-find-tests-open "expose-find-tests" (source-window))
 
@@ -1903,6 +1908,100 @@ contain."
       (expose-log "Commands" "Migration history: dot failed: %s" (cdr result))
       (expose-diagram-display-failure dot (cdr result) "Migration History")
       (message "Expose migration history: dot failed"))))
+
+;;;###autoload
+(defun expose-run-middleware-diagram ()
+  "Draw the Django middleware stack for the current project, in real
+request order.
+
+`expose-run-request-flow-diagram' draws a single view's own pipeline;
+this is the layer above every one of them, that every request passes
+through before any view runs at all, and it lives in one project-wide
+list in settings.py that no per-view diagram can show. Drawn as the
+onion it actually is: the first entry is outermost, first to see the
+request and last to see the response, so two edges connect each
+adjacent pair -- one each direction -- rather than implying a single
+straight pipe.
+
+Computed by parsing `MIDDLEWARE', not generated: it is a literal
+Python list in the overwhelming common case, and \"what order do these
+run in\" is exactly the kind of question a parser answers exactly where
+a provider could only guess at a settings file it may not even have
+been shown. Project-local middleware are shown with their own
+docstring when they have one; third-party and Django built-in
+middleware, not in this project's own tree to read, are named only."
+
+  (interactive)
+
+  (unless (executable-find expose-diagram-dot-executable)
+    (user-error
+     "Graphviz `%s' not found on PATH; needed to render Expose diagrams"
+     expose-diagram-dot-executable))
+
+  (require 'expose-middleware)
+
+  (message "Expose middleware pipeline: reading settings...")
+
+  (let* ((origin (list (current-buffer) (point) #'expose-run-middleware-diagram))
+         (dot (expose-middleware-build-dot))
+         (result (expose-diagram-render-svg dot nil "TB")))
+
+    (if (car result)
+        (progn
+          (expose-diagram-display (cdr result) dot "Middleware" origin)
+          (message "Expose middleware pipeline: done"))
+
+      (expose-log "Commands" "Middleware pipeline: dot failed: %s" (cdr result))
+      (expose-diagram-display-failure dot (cdr result) "Middleware")
+      (message "Expose middleware pipeline: dot failed"))))
+
+;;;###autoload
+(defun expose-run-urls-diagram ()
+  "Draw the Django URL routing tree for the current project.
+
+Starts from `ROOT_URLCONF' and follows every `path()'/`re_path()'/
+`url()' entry, recursing through `include(\"app.urls\")' from there --
+so the tree is not just the file you happen to be looking at, but
+everywhere routing actually leads, the same way a request itself
+travels through it.
+
+Computed by parsing, not generated: routing is declarative,
+mechanically regular Python spread across as many files as the project
+has `include()'d, which is exactly the shape a parser reconstructs
+exactly and a provider, shown only one urls.py at a time, cannot. A DRF
+router's own registrations are read too, wherever `....register(...)'
+appears, alongside plain `path()' entries.
+
+Bounded by `expose-urls-max-depth' and `expose-urls-max-nodes'; a walk
+trimmed by either says so in the diagram's own title rather than
+drawing a partial tree that looks complete. `include(router.urls)' and
+other bare-identifier includes are not followed -- only the common
+string-argument form, `include(\"app.urls\")', is -- a real, stated
+limit rather than a silent one."
+
+  (interactive)
+
+  (unless (executable-find expose-diagram-dot-executable)
+    (user-error
+     "Graphviz `%s' not found on PATH; needed to render Expose diagrams"
+     expose-diagram-dot-executable))
+
+  (require 'expose-urls)
+
+  (message "Expose URL tree: reading routes...")
+
+  (let* ((origin (list (current-buffer) (point) #'expose-run-urls-diagram))
+         (dot (expose-urls-build-dot))
+         (result (expose-diagram-render-svg dot nil "LR")))
+
+    (if (car result)
+        (progn
+          (expose-diagram-display (cdr result) dot "URL Routes" origin)
+          (message "Expose URL tree: done"))
+
+      (expose-log "Commands" "URL tree: dot failed: %s" (cdr result))
+      (expose-diagram-display-failure dot (cdr result) "URL Routes")
+      (message "Expose URL tree: dot failed"))))
 
 ;;;###autoload
 (defun expose-run-import-graph (&optional show-externals)

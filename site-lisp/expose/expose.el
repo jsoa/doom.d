@@ -149,7 +149,9 @@
                 :desc "Entity relations"  "e" #'expose-run-er-diagram
                 :desc "Migration history" "h" #'expose-run-migration-history
                 :desc "Request flow"      "R" #'expose-run-request-flow-diagram
-                :desc "Signal flow"       "S" #'expose-run-signal-flow-diagram)
+                :desc "Signal flow"       "S" #'expose-run-signal-flow-diagram
+                :desc "Middleware"        "m" #'expose-run-middleware-diagram
+                :desc "URL routes"        "u" #'expose-run-urls-diagram)
 
                (:prefix-map ("R" . "Full Review")
                 :desc "Open/start review" "r" #'expose-review-open-or-start

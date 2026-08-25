@@ -826,13 +826,220 @@ def analyse(expression, module_path, payload=None):
     return result
 
 
-def main():
-    payload = json.loads(os.environ.get("EXPOSE_ORM_PAYLOAD", "{}"))
+def loop_clauses(tree):
+    """Yield (TARGET, ITER, BODY) for every `for' loop and comprehension
+    clause in TREE.
+
+    A `for' statement and a comprehension's `for' clause carry the same
+    three things -- what gets bound, what it iterates, and what runs per
+    iteration -- under different attribute names (`.body` vs `.elt`/
+    `.key`/`.value`), so this is the one place that has to know both
+    shapes; everything downstream just gets a uniform triple."""
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.For):
+            yield node.target, node.iter, node.body
+        elif isinstance(node, ast.DictComp):
+            for gen in node.generators:
+                yield gen.target, gen.iter, [node.key, node.value]
+        elif isinstance(node, (ast.ListComp, ast.SetComp, ast.GeneratorExp)):
+            for gen in node.generators:
+                yield gen.target, gen.iter, [node.elt]
+
+
+def target_names(target):
+    """Return the simple names a `for' loop's TARGET binds.
+
+    `for e in qs' binds one name; `for e, i in enumerate(qs)' binds more
+    than one, any of which could be the queryset row an attribute access
+    later reaches through."""
+
+    if isinstance(target, ast.Name):
+        return {target.id}
+    if isinstance(target, (ast.Tuple, ast.List)):
+        names = set()
+        for elt in target.elts:
+            names |= target_names(elt)
+        return names
+    return set()
+
+
+def resolve_queryset(node, namespace):
+    """Return the QuerySet NODE evaluates to, or None.
+
+    Checked against `refusal' first and evaluated via `guarded_eval',
+    the same two-layer defense `analyse' applies to a whole expression:
+    `refusal' statically refuses a known-dangerous call by name -- so
+    `Model.objects.get(pk=1)' as a loop's whole iterable, or nested
+    inside one of its filter values, is refused before any evaluation
+    is attempted at all, exactly as it would be if inspected directly
+    with `expose-orm-inspect' -- and `connections_refused' is the
+    backstop underneath that for whatever `refusal' doesn't recognise
+    by name. Neither alone is enough on its own: `refusal' only knows
+    the methods listed by name, and `connections_refused' only reliably
+    fires when this is the first thing in the process to try opening a
+    connection.
+
+    Also reuses `mock_unresolvable_arguments' on this subtree, the same
+    way `analyse' does on a whole expression -- a loop's own iterable is
+    exactly as likely to filter on `self.request.user' or a local as any
+    other queryset expression, and there is no reason its filter values
+    should be any more resolvable here than there."""
+
+    expr = ast.Expression(body=node)
+    ast.fix_missing_locations(expr)
+
+    if refusal(expr):
+        return None
 
     try:
-        result = analyse(
-            payload.get("expression", ""), payload.get("module"), payload
-        )
+        expr, _ = mock_unresolvable_arguments(expr, namespace)
+        value = guarded_eval(expr, namespace)
+    except Exception:
+        return None
+
+    from django.db.models import Manager, QuerySet
+
+    if isinstance(value, Manager):
+        value = value.all()
+
+    return value if isinstance(value, QuerySet) else None
+
+
+def n_plus_one_in_loop(target, iter_node, body, namespace):
+    """Return N+1 findings for one loop, or None if its iterable does not
+    resolve to a queryset at all.
+
+    Only single-hop relation access is checked (`row.category`, not
+    `row.category.parent`) -- a further hop is a question about
+    `category`'s own model, not this loop, and attempting it would mean
+    re-deriving a whole second model's metadata for one loop clause.
+    Each relation is reported once per loop even if accessed more than
+    once in the body, and only when it is not already covered by
+    `select_related'/`prefetch_related' on the loop's own queryset."""
+
+    queryset = resolve_queryset(iter_node, namespace)
+    if queryset is None:
+        return None
+
+    raw_selected = queryset.query.select_related
+    select_related_all = raw_selected is True
+    selected = set(raw_selected) if isinstance(raw_selected, dict) else set()
+    prefetched = {
+        str(lookup).split("__")[0]
+        for lookup in (queryset._prefetch_related_lookups or ())
+    }
+    covered = selected | prefetched
+
+    names = target_names(target)
+    if not names:
+        return []
+
+    model = queryset.query.model
+    findings = []
+    reported = set()
+
+    for statement in body:
+        if statement is None:
+            continue
+        for node in ast.walk(statement):
+            if not isinstance(node, ast.Attribute):
+                continue
+            if not (isinstance(node.value, ast.Name) and node.value.id in names):
+                continue
+
+            attr = node.attr
+            if attr in covered or attr in reported or select_related_all:
+                continue
+
+            try:
+                field = model._meta.get_field(attr)
+            except Exception:
+                continue
+
+            relation = (
+                field.many_to_one or field.one_to_one or field.many_to_many
+            )
+            if not relation:
+                continue
+
+            reported.add(attr)
+            findings.append(
+                {
+                    "line": getattr(node, "lineno", None),
+                    "attribute": attr,
+                    "relation": field.get_internal_type()
+                    if hasattr(field, "get_internal_type")
+                    else type(field).__name__,
+                    "suggestion": (
+                        "select_related(%r)" % attr
+                        if (field.many_to_one or field.one_to_one)
+                        else "prefetch_related(%r)" % attr
+                    ),
+                }
+            )
+
+    return findings
+
+
+def detect_n_plus_one(source, module_path):
+    """Return N+1 findings for every resolvable queryset loop in SOURCE.
+
+    SOURCE is a block of code -- a whole function/method, ordinarily --
+    not a single expression: an N+1 pattern is a relationship between a
+    loop and what happens inside it, which one line can't show on its
+    own, so this parses in `exec' mode rather than `eval' mode like
+    `analyse' does.
+
+    A loop whose iterable can't be resolved (depends on `self', a
+    request, an argument with no default in scope) is counted but not
+    inspected further -- reported as `unresolved_loops' rather than
+    silently ignored, so \"nothing found\" here can be told apart from
+    \"nothing could be checked\"."""
+
+    try:
+        tree = ast.parse(source.strip() or "pass")
+    except SyntaxError as exc:
+        return {"error": "not valid Python: %s" % exc, "refused": True}
+
+    namespace, import_note = build_namespace(module_path)
+
+    loops_checked = 0
+    unresolved_loops = 0
+    findings = []
+
+    for target, iter_node, body in loop_clauses(tree):
+        loop_findings = n_plus_one_in_loop(target, iter_node, body, namespace)
+
+        if loop_findings is None:
+            unresolved_loops += 1
+            continue
+
+        loops_checked += 1
+        loop_line = getattr(iter_node, "lineno", None)
+        for finding in loop_findings:
+            finding["loop_line"] = loop_line
+            findings.append(finding)
+
+    return {
+        "loops_checked": loops_checked,
+        "unresolved_loops": unresolved_loops,
+        "findings": findings,
+        "note": import_note,
+    }
+
+
+def main():
+    payload = json.loads(os.environ.get("EXPOSE_ORM_PAYLOAD", "{}"))
+    mode = payload.get("mode")
+
+    try:
+        if mode == "n_plus_one":
+            result = detect_n_plus_one(payload.get("source", ""), payload.get("module"))
+        else:
+            result = analyse(
+                payload.get("expression", ""), payload.get("module"), payload
+            )
     except Exception as exc:  # noqa: BLE001 - reported, never swallowed
         import traceback
 

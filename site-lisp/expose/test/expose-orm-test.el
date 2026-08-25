@@ -423,6 +423,152 @@ missing container just because one happens to be set."
   (let ((message (expose-orm-no-result-error "some raw traceback text" nil nil)))
     (should (string-match-p "some raw traceback text" message))))
 
+;;; ---------------------------------------------------------------------------
+;;; expose-orm-missing-indexes / expose-orm-insert-indexes
+;;;
+;;; No new Python here: `analyse' in expose-orm.py already computes
+;;; `indexed'/`why' for every filter and ordering term (the same data
+;;; `expose-orm-findings' surfaces as warnings in the full SQL view),
+;;; so this is pure Elisp filtering of an already-real result shape.
+;;; ---------------------------------------------------------------------------
+
+(ert-deftest expose-orm-test-missing-indexes-filters-to-unindexed ()
+  (let* ((result '((filters . (((table . "app_widget") (column . "name") (lookup . "exact") (indexed . t))
+                                ((table . "app_widget") (column . "color") (lookup . "exact") (indexed . nil))))
+                    (ordering . (((term . "color") (source . "order_by()") (indexed . nil) (why . "no index"))
+                                 ((term . "id") (source . "order_by()") (indexed . t) (why . "primary key"))))))
+         (missing (expose-orm-missing-indexes result)))
+    (should (= 1 (length (car missing))))
+    (should (equal "color" (alist-get 'column (car (car missing)))))
+    (should (= 1 (length (cdr missing))))
+    (should (equal "color" (alist-get 'term (car (cdr missing)))))))
+
+(ert-deftest expose-orm-test-missing-indexes-ignores-ordering-with-no-why ()
+  "A `__' traversal's ordering term has `why' left nil (see
+`describe-ordering' in expose-orm.py -- whether it's indexed is a
+question about a different model), and must not be reported as
+missing rather than simply unknown."
+
+  (let* ((result '((filters . nil)
+                    (ordering . (((term . "author__name") (source . "order_by()") (indexed . nil) (why . nil))))))
+         (missing (expose-orm-missing-indexes result)))
+    (should-not (cdr missing))))
+
+(ert-deftest expose-orm-test-missing-indexes-empty-when-all-indexed ()
+  (let* ((result '((filters . (((table . "app_widget") (column . "id") (lookup . "exact") (indexed . t))))
+                    (ordering . nil)))
+         (missing (expose-orm-missing-indexes result)))
+    (should-not (car missing))
+    (should-not (cdr missing))))
+
+(ert-deftest expose-orm-test-insert-indexes-shows-title-and-model ()
+  (with-temp-buffer
+    (special-mode)
+    (expose-orm-insert-indexes
+     '((model . "app.Widget") (filters . nil) (ordering . nil))
+     "Widget.objects.all()")
+    (should (string-match-p "\\`Missing Indexes" (buffer-string)))
+    (should (string-match-p "app.Widget" (buffer-string)))
+    (should (string-match-p "Every filter and ordering term here is indexed" (buffer-string)))))
+
+(ert-deftest expose-orm-test-insert-indexes-lists-unindexed-terms ()
+  (with-temp-buffer
+    (special-mode)
+    (expose-orm-insert-indexes
+     '((model . "app.Widget")
+       (filters . (((table . "app_widget") (column . "color") (lookup . "exact") (indexed . nil) (why . "no index"))))
+       (ordering . nil))
+     "Widget.objects.filter(color=1)")
+    (should (string-match-p "filters app_widget.color" (buffer-string)))
+    (should (string-match-p "no index" (buffer-string)))))
+
+(ert-deftest expose-orm-test-insert-indexes-shows-refused ()
+  (with-temp-buffer
+    (special-mode)
+    (expose-orm-insert-indexes
+     '((error . "`.delete()' writes to the database.") (refused . t))
+     "Widget.objects.all().delete()")
+    (should (string-match-p "Refused" (buffer-string)))))
+
+;;; ---------------------------------------------------------------------------
+;;; expose-orm-n-plus-one-source: region takes priority, then the
+;;; enclosing scope, matching expose-orm-expression's own priority.
+;;; ---------------------------------------------------------------------------
+
+(ert-deftest expose-orm-test-n-plus-one-source-uses-active-region ()
+  (with-temp-buffer
+    (python-mode)
+    (insert "for e in Event.objects.all():\n    print(e.category)\n")
+    (let ((transient-mark-mode t))
+      (set-mark (point-min))
+      (goto-char (point-max))
+      (activate-mark)
+      (should (string-match-p "for e in Event" (expose-orm-n-plus-one-source)))
+      (deactivate-mark))))
+
+(ert-deftest expose-orm-test-n-plus-one-source-errors-without-region-or-scope ()
+  "The enclosing-function fallback (`expose-context-scope-code', Tree-
+sitter based) is not exercised here -- same reason the rest of this
+suite leaves Tree-sitter out: no grammar is guaranteed present in a
+batch test environment. Verified live instead. This only confirms the
+no-region/no-scope case fails loudly rather than inspecting nothing."
+
+  (with-temp-buffer
+    (fundamental-mode)
+    (insert "not python at all")
+    (should-error (expose-orm-n-plus-one-source) :type 'user-error)))
+
+;;; ---------------------------------------------------------------------------
+;;; expose-orm-insert-n-plus-one
+;;; ---------------------------------------------------------------------------
+
+(ert-deftest expose-orm-test-insert-n-plus-one-no-loops-found ()
+  (with-temp-buffer
+    (special-mode)
+    (expose-orm-insert-n-plus-one
+     '((loops_checked . 0) (unresolved_loops . 0) (findings . nil))
+     "def f():\n    return 1\n")
+    (should (string-match-p "\\`N\\+1 Query Check" (buffer-string)))
+    (should (string-match-p "No `for' loop or comprehension" (buffer-string)))))
+
+(ert-deftest expose-orm-test-insert-n-plus-one-clean-loop ()
+  (with-temp-buffer
+    (special-mode)
+    (expose-orm-insert-n-plus-one
+     '((loops_checked . 1) (unresolved_loops . 0) (findings . nil))
+     "for e in Event.objects.select_related('category'):\n    print(e.category)\n")
+    (should (string-match-p "Checked 1 loop" (buffer-string)))
+    (should (string-match-p "No unfetched relation access found" (buffer-string)))))
+
+(ert-deftest expose-orm-test-insert-n-plus-one-lists-findings ()
+  (with-temp-buffer
+    (special-mode)
+    (expose-orm-insert-n-plus-one
+     '((loops_checked . 1) (unresolved_loops . 0)
+       (findings . (((line . 2) (attribute . "category") (relation . "ForeignKey")
+                     (suggestion . "select_related('category')") (loop_line . 1)))))
+     "for e in Event.objects.all():\n    print(e.category)\n")
+    (should (string-match-p "line 2" (buffer-string)))
+    (should (string-match-p "`.category'" (buffer-string)))
+    (should (string-match-p "select_related" (buffer-string)))))
+
+(ert-deftest expose-orm-test-insert-n-plus-one-unresolved-loops-only ()
+  (with-temp-buffer
+    (special-mode)
+    (expose-orm-insert-n-plus-one
+     '((loops_checked . 0) (unresolved_loops . 2) (findings . nil))
+     "for e in self.get_queryset():\n    print(e.category)\n")
+    (should (string-match-p "Found 2 loops" (buffer-string)))
+    (should (string-match-p "none could be resolved statically" (buffer-string)))))
+
+(ert-deftest expose-orm-test-insert-n-plus-one-shows-refused ()
+  (with-temp-buffer
+    (special-mode)
+    (expose-orm-insert-n-plus-one
+     '((error . "not valid Python: invalid syntax") (refused . t))
+     "def f(:\n")
+    (should (string-match-p "Refused" (buffer-string)))))
+
 (provide 'expose-orm-test)
 
 ;;; expose-orm-test.el ends here

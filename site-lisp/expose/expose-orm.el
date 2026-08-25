@@ -34,6 +34,7 @@
 (require 'expose-side-panel)
 (require 'expose-diagram)
 (require 'expose-orm-plan)
+(require 'expose-context)
 
 (defgroup expose-orm nil
   "Django queryset inspection for Expose."
@@ -495,21 +496,34 @@ about it. A `.dir-locals.el' name that matches one developer's
                 " It printed nothing at all."
               (concat "\n\n" (string-trim raw))))))
 
-(defun expose-orm-run (extra source-window callback)
+(defun expose-orm-run (extra source-window callback &optional subject)
   "Analyse the queryset at point, adding EXTRA to the payload.
 
-CALLBACK receives the parsed result, the expression, and SOURCE-WINDOW
-(passed through unchanged, for CALLBACK to place its own result
-beside -- this function has no display of its own to place). Shared by
-`expose-orm-inspect' and `expose-orm-explain', which differ only in what
-they ask for and what they do with the answer."
+CALLBACK receives the parsed result, the subject's value, and
+SOURCE-WINDOW (passed through unchanged, for CALLBACK to place its own
+result beside -- this function has no display of its own to place).
+Shared by `expose-orm-inspect', `expose-orm-explain',
+`expose-orm-suggest-indexes' (all three the queryset expression at
+point), and `expose-orm-detect-n-plus-one' (a whole block of code, not
+one expression) -- which differ only in what they ask for and what
+they do with the answer.
+
+SUBJECT, when given, is a (KEY . VALUE) pair naming what to inspect and
+under what payload key -- `(expression . (expose-orm-expression))' by
+default, which the three expression-based commands above all want and
+so never have to pass explicitly. `expose-orm-detect-n-plus-one' passes
+`(source . BLOCK)' instead: same payload plumbing underneath, a
+different EXPOSE_ORM_PAYLOAD key for `expose-orm.py' to dispatch on via
+EXTRA's `mode'."
 
   (let ((root (expose-orm-project-root)))
     (unless root
       (user-error "No manage.py above %s -- not a Django project"
                   (or buffer-file-name "this buffer")))
 
-    (let* ((expression (expose-orm-expression))
+    (let* ((subject (or subject (cons 'expression (expose-orm-expression))))
+           (subject-key (car subject))
+           (subject-value (cdr subject))
            (module (expose-orm-module))
            ;; Captured here, not re-derived inside the sentinel below:
            ;; both `expose-orm-container' and `jsoa/docker-jump-container'
@@ -521,7 +535,7 @@ they ask for and what they do with the answer."
             (cond (expose-orm-container "`expose-orm-container'")
                   (container "`jsoa/docker-jump-container'")))
            (payload (json-encode
-                     (append `((expression . ,expression) (module . ,module))
+                     (append (list (cons subject-key subject-value) (cons 'module module))
                              extra)))
            (command (expose-orm-command payload))
            (script (with-temp-buffer
@@ -534,10 +548,10 @@ they ask for and what they do with the answer."
            (process-environment
             (cons (concat "EXPOSE_ORM_PAYLOAD=" payload) process-environment)))
 
-      (when (string-empty-p (string-trim expression))
+      (when (string-empty-p (string-trim (format "%s" subject-value)))
         (user-error "Nothing to inspect at point"))
 
-      (expose-log "orm" "Inspecting %s (module %s)" expression (or module "none"))
+      (expose-log "orm" "Inspecting via %s (module %s)" subject-key (or module "none"))
 
       (let ((process
              (make-process
@@ -559,12 +573,12 @@ they ask for and what they do with the answer."
                      0 nil
                      (lambda ()
                        (if result
-                           (funcall callback result expression source-window)
+                           (funcall callback result subject-value source-window)
                          (expose-log "orm" "No result in output: %s" raw)
                          (expose-orm-display
                           `((error . ,(expose-orm-no-result-error
                                        raw container container-source)))
-                          expression
+                          subject-value
                           source-window))))))))))
 
         (process-send-string process script)
@@ -667,5 +681,227 @@ unaffected by any of this and keeps its own full-frame display."
           (expose-log "orm" "Plan: dot failed: %s" (cdr rendered))
           (expose-diagram-display-failure dot (cdr rendered) "Query Plan")
           (message "Expose ORM: dot failed")))))))
+
+;;; ---------------------------------------------------------------------------
+;;; Missing indexes
+;;; ---------------------------------------------------------------------------
+;;
+;; Not a second analysis: `analyse' in `expose-orm.py' already computes
+;; `indexed'/`why' for every filter and ordering term, since
+;; `expose-orm-findings' already surfaces the unindexed ones as warnings
+;; inside the full SQL view. This runs the exact same request as
+;; `expose-orm-inspect' and just narrows the same data down to a
+;; focused answer to one question -- "what here isn't indexed" -- rather
+;; than reading it out of a wall of SQL and joins.
+
+(defun expose-orm-missing-indexes (result)
+  "Return (FILTERS . ORDERING) from RESULT that are not indexed."
+
+  (cons
+   (seq-remove
+    (lambda (filter) (alist-get 'indexed filter))
+    (alist-get 'filters result))
+
+   (seq-filter
+    (lambda (term) (eq (alist-get 'indexed term) nil))
+    (seq-filter
+     (lambda (term) (alist-get 'why term))
+     (alist-get 'ordering result)))))
+
+(defun expose-orm-insert-indexes (result expression)
+  "Render RESULT's missing-index report for EXPRESSION into the current buffer."
+
+  (let ((inhibit-read-only t))
+    (erase-buffer)
+
+    (insert (propertize "Missing Indexes" 'face 'bold))
+    (insert "\n")
+    (insert (propertize (make-string 60 ?─) 'face 'shadow))
+    (insert "\n\n")
+
+    (insert (propertize expression 'face 'font-lock-string-face) "\n\n")
+
+    (if-let ((error-text (alist-get 'error result)))
+        (progn
+          (insert (propertize
+                   (if (alist-get 'refused result) "Refused\n" "Failed\n")
+                   'face 'error))
+          (insert "  " error-text "\n"))
+
+      (let* ((missing (expose-orm-missing-indexes result))
+             (filters (car missing))
+             (ordering (cdr missing)))
+
+        (insert (format "%s\n\n" (propertize (alist-get 'model result) 'face 'font-lock-type-face)))
+
+        (if (and (null filters) (null ordering))
+
+            (insert (propertize "Every filter and ordering term here is indexed.\n" 'face 'success))
+
+          (progn
+            (dolist (filter filters)
+              (insert (propertize "  ! " 'face 'warning))
+              (insert (format "filters %s.%s (%s) -- %s\n"
+                              (alist-get 'table filter)
+                              (alist-get 'column filter)
+                              (alist-get 'lookup filter)
+                              (alist-get 'why filter))))
+
+            (dolist (term ordering)
+              (insert (propertize "  ! " 'face 'warning))
+              (insert (format "orders by %s (%s) -- %s\n"
+                              (alist-get 'term term)
+                              (alist-get 'source term)
+                              (alist-get 'why term))))))))
+
+    (when-let ((note (alist-get 'note result)))
+      (insert "\n" (propertize (concat "note: " note) 'face 'shadow) "\n"))
+
+    (goto-char (point-min))))
+
+(defun expose-orm-display-indexes (result expression source-window)
+  "Show RESULT's missing-index report for EXPRESSION beside SOURCE-WINDOW."
+
+  (let ((buffer (get-buffer-create expose-orm-buffer)))
+    (with-current-buffer buffer
+      (unless (derived-mode-p 'special-mode)
+        (special-mode))
+      (expose-orm-insert-indexes result expression))
+    (select-window (expose-side-panel-place source-window buffer))))
+
+;;;###autoload
+(defun expose-orm-suggest-indexes ()
+  "Check the Django queryset at point for filters or ordering with no index.
+
+Uses the region when there is one, otherwise the statement at point,
+exactly like `expose-orm-inspect' -- this runs the identical analysis
+and just narrows its output to the unindexed terms, rather than reading
+them out of the full SQL view.
+
+No database connection is opened, same guarantee as `expose-orm-inspect'."
+
+  (interactive)
+
+  (message "Expose ORM: checking indexes...")
+  (expose-orm-run nil (selected-window) #'expose-orm-display-indexes))
+
+;;; ---------------------------------------------------------------------------
+;;; N+1 query detection
+;;; ---------------------------------------------------------------------------
+
+(defun expose-orm-n-plus-one-source ()
+  "Return the Python source to check for N+1 query patterns.
+
+The active region when there is one, otherwise the whole enclosing
+function/method (`expose-context-scope-code') -- an N+1 pattern is a
+relationship between a loop and what happens inside it, which a single
+selected line can't show on its own, unlike `expose-orm-expression''s
+single statement."
+
+  (or
+   (and (use-region-p)
+        (buffer-substring-no-properties (region-beginning) (region-end)))
+   (expose-context-scope-code)
+   (user-error "No enclosing function found at point, and no region selected")))
+
+(defun expose-orm-insert-n-plus-one (result source)
+  "Render RESULT, an N+1 check of SOURCE, into the current buffer.
+
+SOURCE itself is not shown in full -- it is a whole function body, not
+the one-line expression `expose-orm-insert' shows -- only its first
+line, as a reminder of what was checked."
+
+  (let ((inhibit-read-only t))
+    (erase-buffer)
+
+    (insert (propertize "N+1 Query Check" 'face 'bold))
+    (insert "\n")
+    (insert (propertize (make-string 60 ?─) 'face 'shadow))
+    (insert "\n\n")
+
+    (insert (propertize (car (split-string (string-trim source) "\n"))
+                        'face 'font-lock-string-face))
+    (insert "\n\n")
+
+    (if-let ((error-text (alist-get 'error result)))
+        (progn
+          (insert (propertize
+                   (if (alist-get 'refused result) "Refused\n" "Failed\n")
+                   'face 'error))
+          (insert "  " error-text "\n"))
+
+      (let* ((checked (or (alist-get 'loops_checked result) 0))
+             (unresolved (or (alist-get 'unresolved_loops result) 0))
+             (findings (alist-get 'findings result)))
+
+        (cond
+         ((and (= checked 0) (= unresolved 0))
+          (insert "No `for' loop or comprehension over a queryset found in this code.\n"))
+
+         ((= checked 0)
+          (insert (format "Found %d loop%s over what looks like a queryset, but none could be resolved statically%s\n"
+                          unresolved (if (= unresolved 1) "" "s")
+                          (if (= unresolved 1) "" " -- ")))
+          (insert "  (its iterable depends on `self', a request, or an argument with no default in scope.)\n"))
+
+         (t
+          (insert (format "Checked %d loop%s over a queryset%s\n\n"
+                          checked (if (= checked 1) "" "s")
+                          (if (> unresolved 0)
+                              (format " (%d more skipped: iterable not resolvable)" unresolved)
+                            "")))
+
+          (if (null findings)
+              (insert (propertize "No unfetched relation access found in the loop(s) checked.\n" 'face 'success))
+
+            (dolist (finding findings)
+              (insert (propertize "  ! " 'face 'warning))
+              (insert (format "line %s: `.%s' inside the loop (starting line %s) -- add `%s' to avoid a query per row\n"
+                              (or (alist-get 'line finding) "?")
+                              (alist-get 'attribute finding)
+                              (or (alist-get 'loop_line finding) "?")
+                              (alist-get 'suggestion finding))))))))
+
+      (when-let ((note (alist-get 'note result)))
+        (insert "\n" (propertize (concat "note: " note) 'face 'shadow) "\n")))
+
+    (goto-char (point-min))))
+
+(defun expose-orm-display-n-plus-one (result source source-window)
+  "Show RESULT for an N+1 check of SOURCE beside SOURCE-WINDOW."
+
+  (let ((buffer (get-buffer-create expose-orm-buffer)))
+    (with-current-buffer buffer
+      (unless (derived-mode-p 'special-mode)
+        (special-mode))
+      (expose-orm-insert-n-plus-one result source))
+    (select-window (expose-side-panel-place source-window buffer))))
+
+;;;###autoload
+(defun expose-orm-detect-n-plus-one ()
+  "Check the function at point for an N+1 query pattern.
+
+Looks at every `for' loop and comprehension in the function/method at
+point (or the region, when one is active): if its iterable resolves to
+a queryset, each attribute access on the loop variable that reaches a
+relation not covered by `select_related'/`prefetch_related' is flagged.
+
+Only a single hop is checked (`row.category', not `row.category.parent'
+-- a further hop is a question about `category''s own model, not this
+loop). A loop whose iterable can't be resolved statically (depends on
+`self', a request, an argument with no default in scope) is counted
+but not inspected, and said so plainly rather than silently treated as
+clean.
+
+No database connection is opened, same guarantee as `expose-orm-inspect'."
+
+  (interactive)
+
+  (message "Expose ORM: checking for N+1 queries...")
+  (expose-orm-run
+   '((mode . "n_plus_one"))
+   (selected-window)
+   #'expose-orm-display-n-plus-one
+   (cons 'source (expose-orm-n-plus-one-source))))
 
 (provide 'expose-orm)

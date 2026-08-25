@@ -169,11 +169,59 @@
                 "identifier")))
     (expose-context-node-text identifier)))
 
+(defun expose-context-decorator-wrapper-types ()
+  "Return the Tree-sitter node type(s) that wrap a decorated scope, if any.
+
+Python's grammar puts `@decorator' lines in a separate parent node
+around the `function_definition'/`class_definition' they apply to,
+rather than as part of it -- so `expose-context-scope-node', which
+stops climbing at the first function/class ancestor, never reaches
+that wrapper, and a decorator is silently absent from what gets sent
+as `:code'. That is close to the worst possible place for it to go
+missing: `@receiver(post_save, sender=Event)' is not incidental to
+what the function below it is, and a provider shown the function
+without it has no way to know the function is a signal receiver at
+all -- `expose-run-signal-flow-diagram' asked about exactly this shape
+of code sees a plain function with nothing connected to any signal,
+because that is genuinely all it was given to look at.
+
+Not gated to Python specifically, so a language whose grammar has no
+such wrapper (or names it something else) just gets nil back and
+`expose-context-widen-to-decorators' is a no-op for it, rather than
+this list growing into a per-language guess about a shape that may not
+even exist there."
+
+  (pcase major-mode
+    ((or 'python-mode
+         'python-ts-mode)
+     '("decorated_definition"))))
+
+(defun expose-context-widen-to-decorators (node)
+  "Return NODE widened to include a wrapping decorator node, if any.
+
+Checked by type against `expose-context-decorator-wrapper-types'
+rather than assumed present -- most scope nodes have no such parent at
+all, and this must return NODE unchanged for every one of them."
+
+  (or
+   (when-let* ((parent (expose-context-parent node))
+               (types (expose-context-decorator-wrapper-types))
+               ((member (expose-context-node-type parent) types)))
+     parent)
+   node))
+
 (defun expose-context-scope-code ()
-  "Return the source for the current semantic scope."
+  "Return the source for the current semantic scope.
+
+Widened to include a wrapping decorator when the scope has one (see
+`expose-context-widen-to-decorators') -- unlike `expose-context-scope-
+node' itself, which stays at the inner function/class node so
+`expose-context-scope-name''s `identifier' lookup keeps working; only
+the *text* sent as `:code' needs the decorator, not the node identity."
 
   (when-let ((scope (expose-context-scope-node)))
-    (expose-context-node-text scope)))
+    (expose-context-node-text
+     (expose-context-widen-to-decorators scope))))
 
 (defun expose-context-scope ()
   "Return the current semantic scope."
@@ -204,10 +252,15 @@
     (expose-context-node-text identifier)))
 
 (defun expose-context-parent-scope-code ()
-  "Return the source for the parent semantic scope."
+  "Return the source for the parent semantic scope.
+
+Same widening as `expose-context-scope-code', for the same reason -- a
+decorated enclosing class (`@dataclass', say) loses its decorator the
+same way a decorated function does."
 
   (when-let ((scope (expose-context-parent-scope-node)))
-    (expose-context-node-text scope)))
+    (expose-context-node-text
+     (expose-context-widen-to-decorators scope))))
 
 (defun expose-context-parent-scope ()
   "Return the parent semantic scope."

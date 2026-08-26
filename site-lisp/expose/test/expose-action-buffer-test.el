@@ -324,29 +324,13 @@ or a caller's own quick error message -- is shown but not recorded."
         (should (invisible-p (1- (point-max))))))))
 
 ;;; ---------------------------------------------------------------------------
-;;; Copy commands. Evil-specific parts (that `y'/`c'/`q' are actually
-;;; bound to these, in the right states) are not exercised here, the
-;;; same as this package's other Evil integrations -- see the
+;;; Copy commands. Evil-specific parts (that `c'/`q' are actually bound
+;;; to these, in the right states) are not exercised here, the same as
+;;; this package's other Evil integrations -- see the
 ;;; `with-eval-after-load 'evil' block in `expose-action-buffer.el' --
 ;;; none of which load Evil in this test suite either. Verified once,
 ;;; live, against real Evil, when this was built.
 ;;; ---------------------------------------------------------------------------
-
-(ert-deftest expose-action-buffer-test-copy-copies-whole-buffer ()
-  (with-temp-buffer
-    (insert "one\ntwo\nthree")
-    (expose-action-buffer-copy)
-    (should (equal "one\ntwo\nthree" (current-kill 0)))))
-
-(ert-deftest expose-action-buffer-test-copy-strips-text-properties ()
-  "Copied text must be plain -- pasted into a real code buffer, a
-lingering `face' or `invisible' property from the rendered markdown
-would be actively wrong there, not just cosmetic."
-
-  (with-temp-buffer
-    (insert (propertize "styled" 'face 'bold 'invisible 'markdown-markup))
-    (expose-action-buffer-copy)
-    (should-not (text-properties-at 0 (current-kill 0)))))
 
 (ert-deftest expose-action-buffer-test-code-blocks-finds-one ()
   (with-temp-buffer

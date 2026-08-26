@@ -288,14 +288,6 @@ does not need it either."
            when (and (>= pos (car bounds)) (<= pos (cdr bounds)))
            return bounds))
 
-(defun expose-action-buffer-copy ()
-  "Copy the whole action buffer to the kill ring."
-
-  (interactive)
-
-  (kill-new (buffer-substring-no-properties (point-min) (point-max)))
-  (message "Expose action buffer copied"))
-
 (defun expose-action-buffer-copy-code-at-point ()
   "Copy the fenced code block at point to the kill ring.
 
@@ -331,23 +323,22 @@ rather than guessing which one you meant."
 ;;; ---------------------------------------------------------------------------
 ;;
 ;; This buffer should still feel like a normal Evil-readable buffer:
-;; motion, search, and visual-selection yank all work exactly as they
-;; do anywhere else. Only two keys are added, and only in Normal state
-;; (Visual state's own `y' -- yanking a selection you made yourself --
-;; is untouched): `y' and `c' as pending operators have nothing to act
-;; on in a read-only buffer without a following edit, so repurposing
-;; them here costs nothing real. `y' for the common case (copy
-;; everything), `c' for the one this feature was actually asked for
-;; (copy just the code).
+;; motion, search, and yank (`yy', `y$', `yiw', a Visual-state `y' over
+;; a selection you made yourself, ...) all work exactly as they do
+;; anywhere else -- deliberately, so copying just part of the buffer is
+;; ordinary Evil, not a separate feature. `y' on its own used to be
+;; rebound here to copy the whole buffer, which meant it silently ate
+;; every one of those partial-yank motions instead of waiting for
+;; one; removed for exactly that reason. `c' stays: unlike `y', a bare
+;; "change" has nothing to act on in a read-only buffer without a
+;; following edit, so repurposing it here costs nothing real.
 
 (with-eval-after-load 'evil
   (evil-define-key* 'normal expose-action-buffer-mode-map
-    (kbd "y") #'expose-action-buffer-copy
     (kbd "c") #'expose-action-buffer-copy-code-at-point
     (kbd "q") #'quit-window)
 
   (evil-define-key* 'motion expose-action-buffer-mode-map
-    (kbd "y") #'expose-action-buffer-copy
     (kbd "c") #'expose-action-buffer-copy-code-at-point
     (kbd "q") #'quit-window)
 

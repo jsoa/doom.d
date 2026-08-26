@@ -664,7 +664,17 @@ inferred, so there is far less for the provider to invent than in
 The record-label escaping rule below matters more than it looks:
 Graphviz's record shapes give `{', `}', `|', `<' and `>' structural
 meaning, so an unescaped one in a field type silently reshapes the
-entire node."
+entire node.
+
+CONTEXT's `:reverse-relations' -- when present -- is not part of the
+code at point at all: it is real models found *elsewhere in the
+project* by grepping for a relationship field naming the model at
+point as its target (see `expose-relations-find-referencing-models'),
+included precisely because a model's own file only ever shows what it
+points OUTWARD to. Without it, a model watched by another app's model
+through a `ForeignKey' would have no visible connection at all --
+every model that references it lives in a different file this
+diagram was never shown."
 
   (expose-request-create
    'er-diagram
@@ -680,7 +690,8 @@ entire node."
      "- Models defined here: `shape=Mrecord', with a record label of the form"
      "  \"{ModelName|field: Type\\lfield: Type\\l}\" -- note the trailing \\l on each field line."
      "- Include the primary key, every foreign/relational key, and the few fields that identify the record. Omit routine bookkeeping fields; a readable node beats a complete one."
-     "- Models from outside this code (framework or third-party, e.g. Django's auth user): `shape=component' with just the dotted name as the label, no field list."
+     "- If `<reverse-relations>' entries are provided separately from the main code, they are REAL models found elsewhere in the project whose own fields point at a model here -- draw each one exactly as `shape=Mrecord' WITH its own full field list, the same as a model actually defined in the provided code, not as a name-only placeholder just because its source arrived separately."
+     "- Models from outside this code with no full body shown at all (framework or third-party, e.g. Django's auth user, or anything not covered by the rule above): `shape=component' with just the dotted name as the label, no field list."
      "- Abstract or base models: add `style=dashed'."
      "- One edge per relationship, from the model that DECLARES the field to the model it points at, labelled with the field name:"
      "  ForeignKey / many-to-one: `arrowhead=crow';"
@@ -698,7 +709,8 @@ entire node."
     :language
     :file
     :imports
-    :code)
+    :code
+    :reverse-relations)
 
    'raw))
 

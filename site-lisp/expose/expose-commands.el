@@ -39,6 +39,10 @@
 (declare-function expose-middleware-build-dot "expose-middleware" ())
 (declare-function expose-urls-build-dot "expose-urls" (&optional root-file))
 
+;; Loaded on demand by `expose-run-er-diagram', same reason as the
+;; rest of this group.
+(declare-function expose-relations-find-referencing-models "expose-relations" (model-name &optional exclude-file))
+
 ;; Loaded on demand by `expose-find-tests', same reason as above.
 (declare-function expose-find-tests-open "expose-find-tests" (source-window))
 
@@ -1727,6 +1731,25 @@ export and the source view all work identically."
       (expose-diagram-display-failure dot (cdr result) "Reverse Call Graph")
       (message "Expose reverse call graph: dot failed"))))
 
+(defun expose-run-er-diagram-context (model-name)
+  "Return an ER-diagram context, folding in real reverse-referencing
+models for MODEL-NAME.
+
+Built on top of the ordinary `(expose-context-build)' rather than
+replacing it -- `:reverse-relations' is additional fact the model's
+own file cannot show (what points AT it from elsewhere in the
+project), not a substitute for what's actually in the buffer. Nil
+MODEL-NAME or no reverse-referencing models found both leave the base
+context untouched. `buffer-file-name' is excluded from the search:
+whatever it contains is already part of `:code', which already covers
+the common case of several related models sharing one `models.py'."
+
+  (let ((base (expose-context-build)))
+    (if-let* ((model-name)
+              (models (expose-relations-find-referencing-models model-name buffer-file-name)))
+        (plist-put base :reverse-relations models)
+      base)))
+
 ;;;###autoload
 (defun expose-run-er-diagram ()
   "Render an entity-relationship diagram of the models in this buffer.
@@ -1741,7 +1764,13 @@ The most trustworthy of the diagram commands: relationships are
 declared in the source rather than inferred, so there is much less room
 for invention than in `expose-run-call-flow-diagram'. Models from
 outside the file are drawn as external, abstract bases dashed, and each
-relationship colored by kind (foreign key, many-to-many, one-to-one).
+relationship colored by kind (foreign key, many-to-many, one-to-one) --
+except a model that points AT the one at point from a completely
+different file, which nothing local can see at all:
+`expose-relations-find-referencing-models' greps the whole project for
+a relationship field naming the model at point as its target, and
+folds each real match's full body into what gets sent, so it's drawn
+with its own fields instead of not being drawn at all.
 
 The model point was inside when this ran is emphasized, so a schema of
 thirty models still tells you where you came from. That name is
@@ -1750,29 +1779,34 @@ the buffer, not a judgement call."
 
   (interactive)
 
-  (let ((focus
-         (or (expose-context-scope-name)
-             (expose-context-parent-scope-name))))
+  (require 'expose-relations)
 
-    (if (use-region-p)
-        (expose-run-diagram 'er-diagram "ER" #'expose-run-er-diagram focus)
+  (let* ((focus
+          (or (expose-context-scope-name)
+              (expose-context-parent-scope-name)))
 
-    ;; Context is built synchronously inside `expose-run-diagram', before
-    ;; anything is sent, so a region marked for the duration of that call
-    ;; is enough -- and it's undone immediately either way.
-    ;;
-    ;; `transient-mark-mode' is bound rather than assumed: Expose detects
-    ;; a selection with `use-region-p', which returns nil when that mode
-    ;; is off no matter what `push-mark' did -- the widening would then
-    ;; silently do nothing and the diagram would cover only the code at
-    ;; point.
-      (save-mark-and-excursion
-        (let ((transient-mark-mode t))
-          (push-mark (point-min) t t)
-          (goto-char (point-max))
-          (unwind-protect
-              (expose-run-diagram 'er-diagram "ER" #'expose-run-er-diagram focus)
-            (deactivate-mark)))))))
+         (context
+          (if (use-region-p)
+              (expose-run-er-diagram-context focus)
+
+            ;; Context is built synchronously here, before anything is
+            ;; sent, so a region marked for the duration of this block
+            ;; is enough -- and it's undone immediately either way.
+            ;;
+            ;; `transient-mark-mode' is bound rather than assumed: Expose
+            ;; detects a selection with `use-region-p', which returns nil
+            ;; when that mode is off no matter what `push-mark' did -- the
+            ;; widening would then silently do nothing and the diagram
+            ;; would cover only the code at point.
+            (save-mark-and-excursion
+              (let ((transient-mark-mode t))
+                (push-mark (point-min) t t)
+                (goto-char (point-max))
+                (unwind-protect
+                    (expose-run-er-diagram-context focus)
+                  (deactivate-mark)))))))
+
+    (expose-run-diagram 'er-diagram "ER" #'expose-run-er-diagram focus nil context)))
 
 ;;;###autoload
 (defun expose-find-tests ()

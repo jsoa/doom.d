@@ -14,6 +14,13 @@
 ;;; genuinely a relationship field declaration and not a coincidental
 ;;; mention, and hand the provider the real declaring model's full
 ;;; body rather than asking it to draw a connection it was never shown.
+;;;
+;;; This file also resolves the OTHER direction a model's own file
+;;; doesn't show in full: its base classes. A mixin (`TimestampedModel',
+;;; `SoftDeleteModel') is named right there in the `class Event(...):'
+;;; header, but routinely defined in a different, shared file -- the
+;;; whole point of a mixin -- so its own fields are invisible here too
+;;; without the same real-project resolution.
 
 (require 'cl-lib)
 (require 'subr-x)
@@ -46,6 +53,23 @@ one diagram; trimmed to the first this many found, in file order."
 (defcustom expose-relations-max-model-length 4000
   "Maximum characters of one reverse-referencing model's body to include."
   :type 'integer
+  :group 'expose-relations)
+
+(defcustom expose-relations-max-base-classes 4
+  "Maximum base classes of the focused model to resolve for an ER diagram."
+  :type 'integer
+  :group 'expose-relations)
+
+(defcustom expose-relations-ignored-base-names '("Model" "object")
+  "Base-class names never worth resolving for an ER diagram.
+
+Django's own `Model' and Python's own `object' are the bases of every
+model there is; even when a class named one of these genuinely exists
+somewhere in the project (an unrelated `object' subclass with a
+generic name, say), it carries nothing worth drawing. Skipped before
+searching, rather than filtered out after, so a name this common never
+costs a whole-project grep for a result that would be thrown away."
+  :type '(repeat string)
   :group 'expose-relations)
 
 ;;; ---------------------------------------------------------------------------
@@ -202,6 +226,110 @@ twice. Capped to `expose-relations-max-models'."
                       (push (list :file file :line class-line :code code) models)))))))))
 
       (nreverse models))))
+
+;;; ---------------------------------------------------------------------------
+;;; Base classes
+;;; ---------------------------------------------------------------------------
+
+(defun expose-relations-class-declaration (model-name)
+  "Return the parenthesized base-class list from MODEL-NAME's own
+`class MODEL-NAME(...):' header in the current buffer, or nil.
+
+Operates on the current buffer rather than searching the project --
+called at the point the diagram command was invoked from, the same
+place `expose-context-scope-name' resolves MODEL-NAME itself, so the
+declaration is right there to read rather than needing to be found.
+`[^)]' rather than `.' spans a base list wrapped onto several lines,
+same as a multi-line `ForeignKey(' call elsewhere in this file."
+
+  (save-excursion
+    (goto-char (point-min))
+    (when (re-search-forward
+           (concat "^class[ \t]+" (regexp-quote model-name)
+                   "[ \t]*(\\([^)]*\\))[ \t]*:")
+           nil t)
+      (match-string 1))))
+
+(defun expose-relations-parse-base-names (bases-text)
+  "Return the base-class names declared in BASES-TEXT, the parenthesized
+argument list of a `class NAME(...):' header.
+
+A keyword argument (`metaclass=ABCMeta') names a class-construction
+option, not a base class, and is dropped. A dotted name
+(`models.Model') is reduced to its final component -- the name the
+class is actually declared under; the module qualifier in front of it
+says nothing about where to look."
+
+  (let (names)
+    (dolist (part (split-string bases-text "," t "[ \t\n]+"))
+      (unless (string-match-p "=" part)
+        (push (car (last (split-string part "\\."))) names)))
+    (nreverse names)))
+
+(defun expose-relations-grep-class-definition (class-name project-root)
+  "Return (FILE . LINE) for CLASS-NAME's own `class CLASS-NAME(' or
+`class CLASS-NAME:' definition somewhere under PROJECT-ROOT.
+
+Nil when there is no such definition, or more than one -- a name
+shared by two classes is ambiguous, and skipping it is better than
+guessing which definition is the real base."
+
+  (when project-root
+    (with-temp-buffer
+      (let ((status
+             (ignore-errors
+               (call-process
+                "grep" nil t nil
+                "-rnE" "--include=*.py" "--"
+                (format "^class[ \t]+%s[ \t]*[(:]" (regexp-quote class-name))
+                project-root))))
+
+        (when (memq status '(0 1))
+          (goto-char (point-min))
+          (let (matches)
+            (while (re-search-forward "^\\(.+?\\):\\([0-9]+\\):" nil t)
+              (push (cons (match-string 1) (string-to-number (match-string 2))) matches))
+            (when (= (length matches) 1)
+              (car matches))))))))
+
+(defun expose-relations-find-base-classes (model-name)
+  "Return plists for the real, project-defined base classes of MODEL-NAME.
+
+MODEL-NAME's own base-class list is read from its `class ...:' header
+in the CURRENT buffer; each name found there -- other than one listed
+in `expose-relations-ignored-base-names' -- is searched for under
+`expose-relations-project-root' and, when its definition is found
+exactly once, its full body is read off disk. A name that resolves to
+no definition (Django's own `Model' reached under a different alias,
+some other framework or third-party class) or to more than one simply
+drops out; nothing here is invented.
+
+Each result is `(:name :file :line :code)'. A base defined in the same
+file as MODEL-NAME is included like any other -- its body is already
+part of the ordinary `:code' context, but repeating one small class a
+second time costs nothing next to the alternative of leaving the
+diagram's provider to guess whether it was actually resolved.
+
+Capped to `expose-relations-max-base-classes'."
+
+  (when-let* ((bases-text (expose-relations-class-declaration model-name))
+              (names (expose-relations-parse-base-names bases-text))
+              (project-root (expose-relations-project-root)))
+
+    (let (result)
+      (catch 'done
+        (dolist (name names)
+          (when (>= (length result) expose-relations-max-base-classes)
+            (throw 'done nil))
+
+          (unless (member name expose-relations-ignored-base-names)
+            (when-let* ((found (expose-relations-grep-class-definition name project-root))
+                        (file (car found))
+                        (line (cdr found))
+                        (code (expose-relations-class-body file line)))
+              (push (list :name name :file file :line line :code code) result)))))
+
+      (nreverse result))))
 
 (provide 'expose-relations)
 

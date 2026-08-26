@@ -42,6 +42,7 @@
 ;; Loaded on demand by `expose-run-er-diagram', same reason as the
 ;; rest of this group.
 (declare-function expose-relations-find-referencing-models "expose-relations" (model-name &optional exclude-file))
+(declare-function expose-relations-find-base-classes "expose-relations" (model-name))
 
 ;; Loaded on demand by `expose-find-tests', same reason as above.
 (declare-function expose-find-tests-open "expose-find-tests" (source-window))
@@ -1572,7 +1573,7 @@ placeholder with the generated result (or an error message)."
         "Expose commit message failed: %s"
         (error-message-string error-data))))))
 
-(defun expose-run-diagram (type title command &optional focus direction context)
+(defun expose-run-diagram (type title command &optional focus direction context base-classes)
   "Request a TYPE diagram, render it, and display it under TITLE.
 
 COMMAND is the interactive command that produced this, recorded so the
@@ -1584,6 +1585,10 @@ CONTEXT, when given, is used as-is instead of a freshly built
 `expose-run-signal-flow-diagram' currently passes one, to fold in real
 receiver bodies found elsewhere in the project; every other diagram
 command omits it and gets the ordinary point-based context.
+
+BASE-CLASSES, when given, names nodes to render in the ER diagram's
+distinct base-class color -- see `expose-diagram-base-class-node-p'.
+Only `expose-run-er-diagram' passes one.
 
 Shared by every diagram command: the only thing that differs between
 them is the request type and what the result is called -- extraction,
@@ -1642,7 +1647,7 @@ rendering, display, and both failure paths are identical."
                   (message "Expose %s diagram: no DOT in response" (downcase title)))
 
               (let ((result
-                     (expose-diagram-render-svg dot focus direction)))
+                     (expose-diagram-render-svg dot focus direction base-classes)))
 
                 (if (car result)
                     (progn
@@ -1733,22 +1738,27 @@ export and the source view all work identically."
 
 (defun expose-run-er-diagram-context (model-name)
   "Return an ER-diagram context, folding in real reverse-referencing
-models for MODEL-NAME.
+models and base classes for MODEL-NAME.
 
 Built on top of the ordinary `(expose-context-build)' rather than
-replacing it -- `:reverse-relations' is additional fact the model's
-own file cannot show (what points AT it from elsewhere in the
-project), not a substitute for what's actually in the buffer. Nil
-MODEL-NAME or no reverse-referencing models found both leave the base
-context untouched. `buffer-file-name' is excluded from the search:
+replacing it -- `:reverse-relations'/`:base-classes' are additional
+fact the model's own file cannot show (what points AT it from
+elsewhere in the project; what its own bases actually contain), not a
+substitute for what's actually in the buffer. Nil MODEL-NAME, or
+nothing found for a given one, leaves that key out entirely.
+`buffer-file-name' is excluded from the reverse-relations search:
 whatever it contains is already part of `:code', which already covers
-the common case of several related models sharing one `models.py'."
+the common case of several related models sharing one `models.py'. No
+such exclusion for base classes -- see `expose-relations-find-base-classes'."
 
   (let ((base (expose-context-build)))
-    (if-let* ((model-name)
-              (models (expose-relations-find-referencing-models model-name buffer-file-name)))
-        (plist-put base :reverse-relations models)
-      base)))
+    (when-let* ((model-name)
+                (models (expose-relations-find-referencing-models model-name buffer-file-name)))
+      (setq base (plist-put base :reverse-relations models)))
+    (when-let* ((model-name)
+                (bases (expose-relations-find-base-classes model-name)))
+      (setq base (plist-put base :base-classes bases)))
+    base))
 
 ;;;###autoload
 (defun expose-run-er-diagram ()
@@ -1775,7 +1785,13 @@ with its own fields instead of not being drawn at all.
 The model point was inside when this ran is emphasized, so a schema of
 thirty models still tells you where you came from. That name is
 resolved here rather than asked of the provider -- it's a fact about
-the buffer, not a judgement call."
+the buffer, not a judgement call.
+
+Its base classes -- a mixin like `TimestampedModel', routinely defined
+in a different, shared file -- are drawn with their own full fields
+too, and given a distinct color, but only for the model point was
+inside: a schema-wide diagram doesn't recolor every other model's
+ancestry, just the one this was invoked from."
 
   (interactive)
 
@@ -1804,9 +1820,18 @@ the buffer, not a judgement call."
                 (goto-char (point-max))
                 (unwind-protect
                     (expose-run-er-diagram-context focus)
-                  (deactivate-mark)))))))
+                  (deactivate-mark))))))
 
-    (expose-run-diagram 'er-diagram "ER" #'expose-run-er-diagram focus nil context)))
+         ;; Not re-derived from CONTEXT by `expose-run-diagram' itself --
+         ;; `:base-classes' is a fact about this one model, computed here
+         ;; the same as FOCUS, and only ever meaningful for an ER diagram.
+         (base-classes
+          (mapcar
+           (lambda (base) (plist-get base :name))
+           (plist-get context :base-classes))))
+
+    (expose-run-diagram
+     'er-diagram "ER" #'expose-run-er-diagram focus nil context base-classes)))
 
 ;;;###autoload
 (defun expose-find-tests ()

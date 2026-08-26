@@ -674,7 +674,14 @@ included precisely because a model's own file only ever shows what it
 points OUTWARD to. Without it, a model watched by another app's model
 through a `ForeignKey' would have no visible connection at all --
 every model that references it lives in a different file this
-diagram was never shown."
+diagram was never shown.
+
+CONTEXT's `:base-classes', when present, is the same idea in the other
+direction: the real base classes of the model at point, named in its
+own `class ...(...):' header but routinely *defined* elsewhere -- a
+mixin like `TimestampedModel' living in a shared file (see
+`expose-relations-find-base-classes'). Colored distinctly by the tool
+itself once rendered, not by anything asked of the provider here."
 
   (expose-request-create
    'er-diagram
@@ -691,8 +698,9 @@ diagram was never shown."
      "  \"{ModelName|field: Type\\lfield: Type\\l}\" -- note the trailing \\l on each field line."
      "- Include the primary key, every foreign/relational key, and the few fields that identify the record. Omit routine bookkeeping fields; a readable node beats a complete one."
      "- If `<reverse-relations>' entries are provided separately from the main code, they are REAL models found elsewhere in the project whose own fields point at a model here -- draw each one exactly as `shape=Mrecord' WITH its own full field list, the same as a model actually defined in the provided code, not as a name-only placeholder just because its source arrived separately."
-     "- Models from outside this code with no full body shown at all (framework or third-party, e.g. Django's auth user, or anything not covered by the rule above): `shape=component' with just the dotted name as the label, no field list."
-     "- Abstract or base models: add `style=dashed'."
+     "- If `<base-classes>' entries are provided, they are the REAL base classes of the model at point (its `<name>', already resolved) -- draw each one exactly as `shape=Mrecord' WITH its own full field list, and connect it to the model at point with ONE inheritance edge: from the model at point to the base, `arrowhead=empty, style=dashed', no label. Do not set `fillcolor' on a base-class node yourself -- the tool colors it distinctly once rendered; an explicit fill here would just be overwritten."
+     "- Models from outside this code with no full body shown at all (framework or third-party, e.g. Django's auth user, or anything not covered by one of the two rules above): `shape=component' with just the dotted name as the label, no field list."
+     "- Abstract or base models drawn for any OTHER reason than the `<base-classes>' rule above (visible directly in the provided code, say): add `style=dashed'."
      "- One edge per relationship, from the model that DECLARES the field to the model it points at, labelled with the field name:"
      "  ForeignKey / many-to-one: `arrowhead=crow';"
      "  ManyToMany: `dir=both, arrowhead=crow, arrowtail=crow';"
@@ -710,7 +718,8 @@ diagram was never shown."
     :file
     :imports
     :code
-    :reverse-relations)
+    :reverse-relations
+    :base-classes)
 
    'raw))
 

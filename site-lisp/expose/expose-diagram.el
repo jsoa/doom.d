@@ -16,6 +16,7 @@
 
 (require 'cl-lib)
 (require 'color)
+(require 'seq)
 (require 'subr-x)
 (require 'expose-log)
 
@@ -84,6 +85,11 @@ Graphviz's stock Times-on-white."
     ;; they're where the surprises live.
     (external    . ("#f4eefb" "#8b6fc4" "#3d2a63"))
     (io          . ("#e6f4f6" "#4a99a4" "#11434a"))
+
+    ;; ER diagram only: a base class of the model the command was
+    ;; invoked from -- a warm, otherwise-unused hue so it reads as its
+    ;; own category next to the cooler entry/external/io tones above.
+    (base-class  . ("#faece0" "#c17a4a" "#5c3315"))
 
     (normal      . ("#f4f6f8" "#c2cad4" "#1f2933")))
   "Colors used when restyling diagrams.
@@ -379,11 +385,27 @@ inconsistently -- sometimes the model, sometimes a snake_case variant."
        ;; Plain label, or the first line of a multi-line one.
        (string-equal-ignore-case first-line focus)))))
 
-(defun expose-diagram-style-statement (arrow name attrs &optional focus)
+(defun expose-diagram-base-class-node-p (name attrs base-classes)
+  "Return non-nil if the node NAME/ATTRS names one of BASE-CLASSES.
+
+BASE-CLASSES is a list of model names, ordinarily the real base
+classes of the ER diagram's focused model (see
+`expose-relations-find-base-classes'). Reuses
+`expose-diagram-focus-node-p''s own label matching against each
+candidate in turn -- the same node-naming inconsistency across
+providers it exists to absorb applies here too."
+
+  (seq-some
+   (lambda (candidate) (expose-diagram-focus-node-p name attrs candidate))
+   base-classes))
+
+(defun expose-diagram-style-statement (arrow name attrs &optional focus base-classes)
   "Return a restyled `NAME [ATTRS]' statement, or nil to leave it alone.
 
 ARROW is non-nil when this is an edge target (`a -> b [...]') rather
-than a node declaration."
+than a node declaration. BASE-CLASSES, when given, names nodes to give
+the ER diagram's distinct base-class color regardless of what
+`expose-diagram-classify' would otherwise pick for them."
 
   (cond
    ;; `node [...]' / `edge [...]' / `graph [...]' set defaults; they
@@ -424,7 +446,12 @@ than a node declaration."
 
    ;; Node declaration.
    (t
-    (let* ((colors (expose-diagram-color (expose-diagram-classify attrs)))
+    (let* ((based
+            (expose-diagram-base-class-node-p name attrs base-classes))
+
+           (colors
+            (expose-diagram-color
+             (if based 'base-class (expose-diagram-classify attrs))))
 
            (focused
             (expose-diagram-focus-node-p name attrs focus))
@@ -483,7 +510,7 @@ set on a specific cluster still wins."
                 border label)))
      dot t t)))
 
-(defun expose-diagram-color-statements (dot &optional focus)
+(defun expose-diagram-color-statements (dot &optional focus base-classes)
   "Return DOT with per-node and error-edge colors applied.
 
 Done in a temp buffer rather than with `replace-regexp-in-string' and a
@@ -515,7 +542,7 @@ and `replace-match' agree on positions."
 
              (replacement
               (save-match-data
-                (expose-diagram-style-statement arrow name attrs focus))))
+                (expose-diagram-style-statement arrow name attrs focus base-classes))))
 
         (when replacement
           ;; LITERAL: labels carry escaped quotes, which would otherwise
@@ -553,7 +580,7 @@ whichever the provider chose, this is the one that applies."
 
         stripped))))
 
-(defun expose-diagram-style-dot (dot &optional focus direction)
+(defun expose-diagram-style-dot (dot &optional focus direction base-classes)
   "Return DOT restyled: graph-wide defaults plus per-node semantic colors.
 
 Two passes. First the defaults (font, spacing, canvas) go in right after
@@ -597,7 +624,7 @@ the graph header can't be located."
            ;; `node ['/`edge [' lines.
            (colored
             (expose-diagram-style-clusters
-             (expose-diagram-color-statements stripped focus)))
+             (expose-diagram-color-statements stripped focus base-classes)))
 
            (defaults
             (mapconcat
@@ -635,7 +662,7 @@ the graph header can't be located."
 
         colored))))
 
-(defun expose-diagram-render (dot format &optional focus direction)
+(defun expose-diagram-render (dot format &optional focus direction base-classes)
   "Render DOT source using Graphviz output FORMAT (a `dot -T' name).
 
 Returns (t . DATA-STRING) on success, or (nil . STDERR-STRING) when
@@ -656,7 +683,7 @@ read as raw bytes (which is what `create-image' wants anyway)."
           (let* ((coding-system-for-read 'binary)
                  (status
                   (call-process-region
-                   (expose-diagram-style-dot dot focus direction) nil
+                   (expose-diagram-style-dot dot focus direction base-classes) nil
                    expose-diagram-dot-executable
                    nil
                    (list t stderr-file)
@@ -675,10 +702,10 @@ read as raw bytes (which is what `create-image' wants anyway)."
 
       (delete-file stderr-file))))
 
-(defun expose-diagram-render-svg (dot &optional focus direction)
+(defun expose-diagram-render-svg (dot &optional focus direction base-classes)
   "Render DOT source to SVG. See `expose-diagram-render'."
 
-  (expose-diagram-render dot "svg" focus direction))
+  (expose-diagram-render dot "svg" focus direction base-classes))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Display

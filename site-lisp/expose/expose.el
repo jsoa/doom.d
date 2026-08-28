@@ -23,6 +23,7 @@
 (require 'expose-review-source)
 (require 'expose-orm)
 (require 'expose-usages)
+(require 'expose-trace)
 
 ;;; ---------------------------------------------------------------------------
 ;;; Keybindings
@@ -157,6 +158,15 @@
                 :desc "Open/start review" "r" #'expose-review-open-or-start
                 :desc "View diff (like GitHub PR)" "d" #'expose-review-open-pr-diff
                 :desc "Review archives"   "a" #'expose-review-archive-open-full)
+
+               ;; "T" is already `expose-run-explain-traceback', directly
+               ;; under SPC c h above -- "x" here, not that, to avoid
+               ;; shadowing it.
+               (:prefix-map ("x" . "Trace")
+                :desc "Mark stop"          "m" #'expose-trace-mark
+                :desc "Show trace"         "s" #'expose-trace-show
+                :desc "Show as Markdown"   "g" #'expose-trace-show-markdown
+                :desc "Clear trace"        "c" #'expose-trace-clear)
 
                (:prefix-map ("M" . "Region Review")
                 :desc "Review region"     "m" #'expose-review-region

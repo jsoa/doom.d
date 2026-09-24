@@ -1,7 +1,7 @@
 ;;; +fci.el -*- lexical-binding: t; -*-
 
 
-(setq-default fill-column 80)
+(setq-default fill-column 88)
 
 (defun jsoa/maybe-enable-fci ()
   "Turn on the fill-column indicator, except in large/minified buffers.

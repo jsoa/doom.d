@@ -15,6 +15,22 @@
         lsp-pyright-python-executable-cmd "python"
         lsp-pyright-disable-tagged-hints t
 
+        ;; `lsp-pyright-multi-root' defaults to t, which folds every
+        ;; project ever visited in the session into ONE shared pyright
+        ;; server -- genesis, greyhound, and whatever else happens to
+        ;; still be open, each getting its own "service instance" but
+        ;; all sharing one process's startup queue and one pythonPath
+        ;; (genesis's own venv leaks into every other project's config
+        ;; response, confirmed via `lsp-log-io'). With enough projects
+        ;; open at once -- two of them tens of thousands of files -- a
+        ;; freshly-opened file can get analysed before its own
+        ;; project's config has finished loading and fall through to a
+        ;; bogus, sourceless "<default>" environment instead, which is
+        ;; exactly what produced spurious `reportMissingImports' on a
+        ;; real, correctly-configured import. Disabling this gives each
+        ;; project its own independent pyright process again.
+        lsp-pyright-multi-root nil
+
         ;; Angular
         lsp-angular-language-server-command
         '("ngserver" "--stdio"

@@ -641,20 +641,58 @@ Otherwise use the current line."
     (point)))
 
 
+(defun expose-docstring-body-start (target-position)
+  "Return where TARGET-POSITION's enclosing def/class body starts, via
+Tree-sitter, or nil when that can't be determined.
+
+A wrapped parameter list, a long inheritance list, or a return-type
+annotation all mean the signature itself can span several lines --
+`(forward-line 1)' from TARGET-POSITION then lands back inside the
+header, not on the body's first real line. The scope node's own
+`body' field (present on every node type
+`expose-context-scope-node-types' lists for Python and JS/TS: a
+`function_definition'/`class_definition' or
+`function_declaration'/`method_definition'/`class_declaration') marks
+where the header actually ends, however many lines it took."
+
+  (save-excursion
+    (goto-char target-position)
+    (when-let* ((scope (expose-context-scope-node))
+                (body (treesit-node-child-by-field-name scope "body")))
+      ;; `treesit-node-start' lands past the body's own leading
+      ;; whitespace, not at column 0 -- inserting there directly (as
+      ;; `expose-docstring-insert-at-marker' does, at point, no
+      ;; column normalization of its own) would double that
+      ;; indentation onto the docstring's own line and strip it from
+      ;; the body's real first line, which would've inherited it from
+      ;; being pushed onto a fresh line instead. Normalizing to
+      ;; `line-beginning-position' keeps that line-beginning
+      ;; convention this always returns, same as the fallback below.
+      (goto-char (treesit-node-start body))
+      (line-beginning-position))))
+
 (defun expose-docstring-insert-position (target-position)
   "Return position where the generated docstring should be inserted.
 
-If point is on a blank line, insert at point's line. If point is on code,
-insert under TARGET-POSITION."
+If point is on a blank line, insert at point's line. If point is on
+code and TARGET-POSITION's def/class body start can be found (see
+`expose-docstring-body-start'), insert there -- correct even when the
+signature spans multiple lines. Otherwise fall back to the line right
+after TARGET-POSITION, the previous (single-line-signature-only)
+behavior, for languages/modes that fall outside what Tree-sitter can
+answer here (Emacs Lisp's `list'-shaped scopes among them)."
 
   (if (expose-commands-line-blank-p)
 
       (line-beginning-position)
 
-    (save-excursion
-      (goto-char target-position)
-      (forward-line 1)
-      (line-beginning-position))))
+    (or
+     (expose-docstring-body-start target-position)
+
+     (save-excursion
+       (goto-char target-position)
+       (forward-line 1)
+       (line-beginning-position)))))
 
 (defun expose-docstring-request (target-position project-root)
   "Build AI request for a docstring at TARGET-POSITION in PROJECT-ROOT."

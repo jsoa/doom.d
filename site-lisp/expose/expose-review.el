@@ -111,7 +111,7 @@
        original-session))))
 
 
-(defcustom expose-review-max-request-bytes 180000
+(defcustom expose-review-max-request-bytes 500000
   "Maximum provider request size for a full Expose review."
   :type 'integer
   :group 'expose-review)
